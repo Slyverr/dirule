@@ -1,0 +1,6 @@
+[package]
+name = "dirule-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

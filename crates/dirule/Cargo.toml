@@ -1,0 +1,8 @@
+[package]
+name = "dirule"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dirule-core = { version = "0.1.0", path = "../dirule-core" }
+dirule-fs = { version = "0.1.0", path = "../dirule-fs" }
