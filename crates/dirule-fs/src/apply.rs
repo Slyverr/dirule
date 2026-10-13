@@ -2,7 +2,10 @@ use crate::ScanResult;
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
 use std::path::Component;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
+
+static NEXT_TEMPORARY_RENAME: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ApplyReport {
@@ -256,23 +259,16 @@ fn apply_entry(
         return Err(ApplyError::ChangedSource(source));
     }
 
-    if destination_exists(&destination)? {
+    let destination_exists = destination_exists(&destination)?;
+    let destination_is_source = destination_exists && same_existing_path(&source, &destination);
+    if destination_exists && !destination_is_source {
         return Err(ApplyError::ExistingDestination(destination));
     }
-    if let Some(parent) = destination.parent() {
+    if !destination_is_source && let Some(parent) = destination.parent() {
         create_parent_directories(target, parent, created_directories)?;
     }
 
-    renamore::rename_exclusive(&source, &destination).map_err(|source_error| {
-        if source_error.kind() == std::io::ErrorKind::AlreadyExists {
-            ApplyError::ExistingDestination(destination.clone())
-        } else {
-            ApplyError::Io {
-                path: source.clone(),
-                source: source_error,
-            }
-        }
-    })?;
+    rename_path_exclusive(&source, &destination, destination_is_source)?;
     if entry.kind == EntryKind::Directory {
         moved_directories.push((entry.source.clone(), entry.destination.clone()));
     }
@@ -335,7 +331,9 @@ fn rollback_after_failure(
     for (source, destination) in moved.iter().rev() {
         let current = target.join(destination);
         let original = target.join(source);
-        if let Err(error) = renamore::rename_exclusive(&current, &original) {
+        if let Err(error) =
+            rename_path_exclusive(&current, &original, same_existing_path(&current, &original))
+        {
             failures.push(format!(
                 "{} -> {}: {error}",
                 destination.display(),
@@ -515,6 +513,79 @@ fn will_be_vacated(target: &Path, path: &Path, plan: &Plan) -> bool {
     plan.entries.iter().any(|entry| {
         entry.source != entry.destination
             && (entry.source == relative
-                || (entry.kind == EntryKind::Directory && relative.starts_with(&entry.source)))
+                || (entry.kind == EntryKind::Directory && relative.starts_with(&entry.source))
+                || same_existing_path(&target.join(&entry.source), path))
     })
+}
+
+fn same_existing_path(left: &Path, right: &Path) -> bool {
+    let Ok(left_metadata) = std::fs::symlink_metadata(left) else {
+        return false;
+    };
+    let Ok(right_metadata) = std::fs::symlink_metadata(right) else {
+        return false;
+    };
+    if left_metadata.file_type().is_symlink() || right_metadata.file_type().is_symlink() {
+        return false;
+    }
+
+    matches!(
+        (std::fs::canonicalize(left), std::fs::canonicalize(right)),
+        (Ok(left), Ok(right)) if left == right
+    )
+}
+
+fn rename_path_exclusive(
+    source: &Path,
+    destination: &Path,
+    same_path: bool,
+) -> Result<(), ApplyError> {
+    if !same_path {
+        return renamore::rename_exclusive(source, destination)
+            .map_err(|error| rename_error(source, destination, error));
+    }
+
+    let temporary = temporary_sibling(source)?;
+    renamore::rename_exclusive(source, &temporary)
+        .map_err(|error| rename_error(source, &temporary, error))?;
+    match renamore::rename_exclusive(&temporary, destination) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let operation = rename_error(source, destination, error);
+            match renamore::rename_exclusive(&temporary, source) {
+                Ok(()) => Err(operation),
+                Err(error) => Err(ApplyError::RollbackFailed {
+                    operation: Box::new(operation),
+                    failures: format!("{} -> {}: {error}", temporary.display(), source.display()),
+                }),
+            }
+        }
+    }
+}
+
+fn rename_error(source: &Path, destination: &Path, error: std::io::Error) -> ApplyError {
+    if error.kind() == std::io::ErrorKind::AlreadyExists {
+        ApplyError::ExistingDestination(destination.to_path_buf())
+    } else {
+        ApplyError::Io {
+            path: source.to_path_buf(),
+            source: error,
+        }
+    }
+}
+
+fn temporary_sibling(source: &Path) -> Result<PathBuf, ApplyError> {
+    let parent = source.parent().unwrap_or_else(|| Path::new("."));
+    loop {
+        let id = NEXT_TEMPORARY_RENAME.fetch_add(1, Ordering::Relaxed);
+        let name = format!(".dirule-tmp-{}-{id}", std::process::id());
+        let path = parent.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(path),
+            Ok(_) => continue,
+            Err(source) => {
+                return Err(ApplyError::Io { path, source });
+            }
+        }
+    }
 }

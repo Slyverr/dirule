@@ -389,6 +389,96 @@ fn apply_rejects_a_source_changed_after_planning() {
     assert!(!temp.0.join("renamed").exists());
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[test]
+fn apply_supports_case_only_renames_on_case_insensitive_filesystems() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join("README"), "project notes").expect("write source file");
+    if !temp.0.join("readme").exists() {
+        return;
+    }
+
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let mut plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("README"),
+            destination: PathBuf::from("readme"),
+            kind: EntryKind::File,
+            rule: None,
+        }],
+        conflicts: Vec::new(),
+        findings: Vec::new(),
+    };
+    validate_destinations(&temp.0, &mut plan).expect("validate case-only rename");
+    assert!(plan.is_conflict_free());
+
+    let report = apply(&temp.0, &plan, &snapshot).expect("apply case-only rename");
+
+    assert_eq!(report.moved.len(), 1);
+    assert_eq!(
+        std::fs::read_dir(&temp.0)
+            .expect("read target directory")
+            .map(|entry| entry.expect("read target entry").file_name())
+            .collect::<Vec<_>>(),
+        vec![std::ffi::OsString::from("readme")]
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("readme")).expect("read renamed file"),
+        "project notes"
+    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[test]
+fn apply_supports_case_only_directory_renames_with_changed_children() {
+    let temp = TempDir::new();
+    std::fs::create_dir(temp.0.join("HTTPServer")).expect("create source directory");
+    std::fs::write(temp.0.join("HTTPServer/README"), "project notes").expect("write source file");
+    if !temp.0.join("httpserver/readme").exists() {
+        return;
+    }
+
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let mut plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("HTTPServer"),
+                destination: PathBuf::from("httpserver"),
+                kind: EntryKind::Directory,
+                rule: None,
+            },
+            PlannedEntry {
+                source: PathBuf::from("HTTPServer/README"),
+                destination: PathBuf::from("httpserver/readme"),
+                kind: EntryKind::File,
+                rule: None,
+            },
+        ],
+        conflicts: Vec::new(),
+        findings: Vec::new(),
+    };
+    validate_destinations(&temp.0, &mut plan).expect("validate case-only directory rename");
+    assert!(plan.is_conflict_free());
+
+    let report = apply(&temp.0, &plan, &snapshot).expect("apply case-only directory rename");
+
+    assert_eq!(report.moved.len(), 2);
+    assert_eq!(
+        std::fs::read_dir(&temp.0)
+            .expect("read target directory")
+            .map(|entry| entry.expect("read target entry").file_name())
+            .collect::<Vec<_>>(),
+        vec![std::ffi::OsString::from("httpserver")]
+    );
+    assert_eq!(
+        std::fs::read_dir(temp.0.join("httpserver"))
+            .expect("read renamed directory")
+            .map(|entry| entry.expect("read renamed entry").file_name())
+            .collect::<Vec<_>>(),
+        vec![std::ffi::OsString::from("readme")]
+    );
+}
+
 #[test]
 fn apply_checks_every_source_before_moving_anything() {
     let temp = TempDir::new();
