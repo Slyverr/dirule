@@ -45,6 +45,25 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
 
 #[test]
 fn scan_respects_configured_global_gitignore() {
+    run_global_gitignore_child("globally-ignored.txt\n", "scan_global_gitignore_child");
+}
+
+#[test]
+fn scan_global_gitignore_child() {
+    let Some(target) = std::env::var_os("DIRULE_GLOBAL_IGNORE_TARGET") else {
+        return;
+    };
+    let result = scan(Path::new(&target)).expect("scan using isolated global Git config");
+
+    assert!(result.entries.is_empty());
+}
+
+#[test]
+fn scan_fails_when_configured_global_gitignore_is_malformed() {
+    run_global_gitignore_child("broken\\\n", "scan_malformed_global_gitignore_child");
+}
+
+fn run_global_gitignore_child(ignore_rules: &str, test_name: &str) {
     let temp = TempDir::new();
     let target = temp.0.join("target");
     std::fs::create_dir(&target).expect("create scan target");
@@ -52,7 +71,7 @@ fn scan_respects_configured_global_gitignore() {
         .expect("write globally ignored file");
 
     let global_ignore = temp.0.join("global-ignore");
-    std::fs::write(&global_ignore, "globally-ignored.txt\n").expect("write global ignore rules");
+    std::fs::write(&global_ignore, ignore_rules).expect("write global ignore rules");
     let git_config = temp.0.join("gitconfig");
     let global_ignore = global_ignore.to_string_lossy().replace('\\', "/");
     std::fs::write(
@@ -62,7 +81,7 @@ fn scan_respects_configured_global_gitignore() {
     .expect("write isolated Git config");
 
     let output = Command::new(std::env::current_exe().expect("test executable path"))
-        .args(["--exact", "scan_global_gitignore_child", "--nocapture"])
+        .args(["--exact", test_name, "--nocapture"])
         .env("GIT_CONFIG_GLOBAL", git_config)
         .env("DIRULE_GLOBAL_IGNORE_TARGET", target)
         .output()
@@ -77,13 +96,13 @@ fn scan_respects_configured_global_gitignore() {
 }
 
 #[test]
-fn scan_global_gitignore_child() {
+fn scan_malformed_global_gitignore_child() {
     let Some(target) = std::env::var_os("DIRULE_GLOBAL_IGNORE_TARGET") else {
         return;
     };
-    let result = scan(Path::new(&target)).expect("scan using isolated global Git config");
+    let error = scan(Path::new(&target)).expect_err("malformed global ignore rules must fail");
 
-    assert!(result.entries.is_empty());
+    assert!(error.to_string().contains("global-ignore"));
 }
 
 #[test]
