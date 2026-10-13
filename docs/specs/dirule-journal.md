@@ -24,7 +24,7 @@ Journal readers migrate older formats through registered one-step migrations bef
 
 ## Recording apply
 
-Before the first mutation, create and sync the run header. Before each filesystem mutation, append and sync an intent containing the operation, relative paths, entry kind, and expected object identity. After the mutation, append and sync its completion and observed postcondition.
+Before the first mutation, write and sync the complete run header in a private temporary file, publish it as the run journal, and sync the state directory. A crash while initializing the header must not expose a partial `.jsonl` run. Before each filesystem mutation, append and sync an intent containing the operation, relative paths, entry kind, and expected object identity. After the mutation, append and sync its completion and observed postcondition.
 
 Record each actual no-replace rename separately, including both legs of case-only renames through a temporary sibling. Record directories created for destination parents. A recovery reader may reconcile an intent without a completion only when the source/destination state and stored identity prove whether the operation happened. Ambiguous states are reported and left untouched.
 

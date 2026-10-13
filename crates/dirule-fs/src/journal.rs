@@ -407,34 +407,45 @@ impl JournalStore {
         loop {
             let id = next_run_id();
             let path = self.directory.join(format!("{id}.jsonl"));
+            let temporary_path = self.directory.join(format!("{id}.tmp"));
             let lock = match RunLock::acquire(&path, &id, LockMode::Exclusive) {
                 Ok(lock) => lock,
                 Err(JournalError::RunBusy(_)) => continue,
                 Err(error) => return Err(error),
             };
-            match create_private_file(&path) {
+            let started_at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let header = JournalRecord::Header {
+                version: CURRENT_JOURNAL_VERSION.to_owned(),
+                id: id.clone(),
+                target: EncodedPath::from_path(&target)?,
+                target_display: target.to_string_lossy().into_owned(),
+                target_identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory),
+                started_at,
+                plan_fingerprint: fingerprint(plan),
+            };
+            match create_private_file(&temporary_path) {
                 Ok(mut file) => {
-                    let started_at = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    write_record(
-                        &mut file,
-                        &JournalRecord::Header {
-                            version: CURRENT_JOURNAL_VERSION.to_owned(),
-                            id: id.clone(),
-                            target: EncodedPath::from_path(&target)?,
-                            target_display: target.to_string_lossy().into_owned(),
-                            target_identity: ObjectIdentity::from_metadata(
-                                &metadata,
-                                EntryKind::Directory,
-                            ),
-                            started_at,
-                            plan_fingerprint: fingerprint(plan),
-                        },
-                        &path,
-                    )?;
+                    if let Err(error) = write_record(&mut file, &header, &temporary_path) {
+                        drop(file);
+                        let _ = fs::remove_file(&temporary_path);
+                        return Err(error);
+                    }
+                    drop(file);
+                    if let Err(source) = renamore::rename_exclusive(&temporary_path, &path) {
+                        let _ = fs::remove_file(&temporary_path);
+                        if source.kind() == std::io::ErrorKind::AlreadyExists {
+                            continue;
+                        }
+                        return Err(JournalError::io(&path, source));
+                    }
                     sync_directory(&self.directory)?;
+                    let file = OpenOptions::new()
+                        .append(true)
+                        .open(&path)
+                        .map_err(|source| JournalError::io(&path, source))?;
                     return Ok(JournalWriter {
                         id,
                         target,
@@ -445,7 +456,7 @@ impl JournalStore {
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(source) => return Err(JournalError::io(path, source)),
+                Err(source) => return Err(JournalError::io(temporary_path, source)),
             }
         }
     }

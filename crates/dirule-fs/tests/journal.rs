@@ -234,6 +234,17 @@ fn missing_run_reads_do_not_create_lock_files() {
 }
 
 #[test]
+fn incomplete_temporary_headers_do_not_block_run_listing() {
+    let temp = TempDir::new();
+    let directory = temp.0.join("state/runs");
+    std::fs::create_dir_all(&directory).expect("create journal directory");
+    std::fs::write(directory.join("interrupted.tmp"), "partial header")
+        .expect("write interrupted temporary header");
+
+    assert!(store(&temp).list().unwrap().is_empty());
+}
+
+#[test]
 fn journaled_case_only_rename_can_be_undone() {
     let temp = TempDir::new();
     let target = temp.0.join("project");
