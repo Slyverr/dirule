@@ -2,7 +2,10 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_TEMP_PROJECT_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TempProject(PathBuf);
 
@@ -12,7 +15,9 @@ impl TempProject {
             .duration_since(UNIX_EPOCH)
             .expect("clock is after Unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("dirule-cli-{}-{stamp}", std::process::id()));
+        let id = NEXT_TEMP_PROJECT_ID.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("dirule-cli-{}-{stamp}-{id}", std::process::id()));
         fs::create_dir_all(&path).expect("create temp project");
         Self(path)
     }
@@ -110,6 +115,10 @@ fn configure_home(command: &mut Command, home: &Path) {
 #[test]
 fn cli_initializes_checks_plans_applies_and_emits_json() {
     let project = TempProject::new();
+    let canonical_target = project
+        .0
+        .canonicalize()
+        .expect("canonicalize project target");
     let directory = project.0.join("HTTPServer");
     fs::create_dir_all(&directory).expect("create fixture directory");
     fs::write(project.0.join("MyXMLParser.rs"), "parser").expect("write root file");
@@ -131,7 +140,7 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let plain = project.run(&["plan", "--color", "never"]);
     assert!(plain.status.success());
     let plain_output = String::from_utf8_lossy(&plain.stdout);
-    assert!(plain_output.contains(&format!("Target: {}", project.0.display())));
+    assert!(plain_output.contains(&format!("Target: {}", canonical_target.display())));
     assert!(!plain_output.contains('\u{1b}'));
 
     let check = project.run(&["check"]);
@@ -143,7 +152,7 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let json = project.run(&["plan", "--format", "json"]);
     assert!(json.status.success());
     let value: serde_json::Value = serde_json::from_slice(&json.stdout).expect("valid JSON plan");
-    assert_eq!(value["target"], project.0.to_string_lossy().as_ref());
+    assert_eq!(value["target"], canonical_target.to_string_lossy().as_ref());
     let entries = value["entries"].as_array().expect("plan entries");
     let changes = entries
         .iter()
@@ -303,6 +312,10 @@ fn completions_generate_commands_and_global_options() {
 #[test]
 fn apply_and_undo_emit_single_json_documents() {
     let project = TempProject::new();
+    let canonical_target = project
+        .0
+        .canonicalize()
+        .expect("canonicalize project target");
     assert!(project.run(&["init"]).status.success());
     fs::write(project.0.join("NeedsWork.txt"), "contents").expect("write fixture file");
 
@@ -318,7 +331,7 @@ fn apply_and_undo_emit_single_json_documents() {
     assert_eq!(apply["execution"]["status"], "applied");
     assert_eq!(
         apply["plan"]["target"],
-        project.0.to_string_lossy().as_ref()
+        canonical_target.to_string_lossy().as_ref()
     );
     assert_eq!(apply["execution"]["moved"], 1);
     let run_id = apply["execution"]["run_id"]
@@ -900,6 +913,10 @@ fn explicit_target_overrides_the_configured_target() {
     )
     .expect("write configuration");
 
+    let canonical_override_target = override_target
+        .canonicalize()
+        .expect("canonicalize explicit target");
+
     let plan = Command::new(env!("CARGO_BIN_EXE_dirule"))
         .args(["plan", "--target", "override"])
         .current_dir(&project.0)
@@ -908,7 +925,7 @@ fn explicit_target_overrides_the_configured_target() {
 
     assert!(plan.status.success());
     let output = String::from_utf8_lossy(&plan.stdout);
-    assert!(output.contains(&format!("Target: {}", override_target.display())));
+    assert!(output.contains(&format!("Target: {}", canonical_override_target.display())));
     assert!(output.contains("MyXMLParser.txt -> my-xml-parser.txt"));
     assert!(!output.contains("OtherFile.txt"));
 }
@@ -1194,6 +1211,8 @@ fn cli_checks_a_real_project_config_without_mutating_it() {
     let project = TempProject::new();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/invoice-project");
     copy_tree(&fixture, &project.0);
+    let source_path = project.0.join("Invoices/2026-Acme-Quarter 1.pdf");
+    let original_contents = fs::read(&source_path).expect("read source fixture");
 
     let check = project.run(&["check"]);
     assert_eq!(check.status.code(), Some(1));
@@ -1204,8 +1223,8 @@ fn cli_checks_a_real_project_config_without_mutating_it() {
     );
     assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
     assert_eq!(
-        text(&project.0.join("Invoices/2026-Acme-Quarter 1.pdf")),
-        "invoice contents\n"
+        fs::read(&source_path).expect("read source fixture after check"),
+        original_contents
     );
     assert!(!project.0.join("Archive/2026/acme/quarter-1.pdf").exists());
 }
