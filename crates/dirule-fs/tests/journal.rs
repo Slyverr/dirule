@@ -571,7 +571,11 @@ fn duplicate_journal_completions_are_rejected() {
         .find(|line| line.contains("\"record\":\"move_completed\""))
         .expect("move completion")
         .clone();
-    records.push(completion);
+    let final_status = records
+        .iter()
+        .rposition(|line| line.contains("\"record\":\"status\""))
+        .expect("final status record");
+    records.insert(final_status, completion);
     std::fs::write(&journal, format!("{}\n", records.join("\n")))
         .expect("duplicate move completion");
 
@@ -628,6 +632,40 @@ fn mismatched_journal_object_identities_are_rejected() {
     let error = store.list().expect_err("completion identity must match");
 
     assert!(error.to_string().contains("mismatched move completion"));
+}
+
+#[test]
+fn invalid_journal_status_transitions_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let mut records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    records.push(r#"{"record":"status","status":"undone"}"#.into());
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("append invalid status transition");
+
+    let error = store.list().expect_err("invalid status transition");
+
+    assert!(error.to_string().contains("invalid status transition"));
+}
+
+#[test]
+fn duplicate_journal_headers_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let mut records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    records.insert(1, records[0].clone());
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("duplicate journal header");
+
+    let error = store.list().expect_err("journal must have one header");
+
+    assert!(error.to_string().contains("unexpected header record"));
 }
 
 #[test]

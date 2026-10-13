@@ -1,5 +1,8 @@
 use super::identity::ObjectIdentity;
-use super::{CURRENT_JOURNAL_VERSION, DirectoryAction, JournalError, JournalRecord, JournalStatus};
+use super::{
+    CURRENT_JOURNAL_VERSION, DirectoryAction, JournalError, JournalRecord, JournalStatus,
+    JournalStatusRecord,
+};
 use dirule_core::EntryKind;
 use std::collections::BTreeMap;
 use std::fs;
@@ -337,9 +340,28 @@ impl JournalHistory {
 fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), JournalError> {
     let mut intents = BTreeMap::new();
     let mut last_sequence = None;
+    let mut status = None;
+    let mut mutations_allowed = true;
 
     for record in records {
         match record {
+            JournalRecord::Status { status: next } => {
+                validate_status_transition(path, status, *next)?;
+                status = Some(*next);
+                mutations_allowed = matches!(
+                    next,
+                    JournalStatusRecord::Applying | JournalStatusRecord::Undoing
+                );
+            }
+            JournalRecord::Header { .. } => {
+                return Err(invalid_events(path, "unexpected header record".into()));
+            }
+            _ if !mutations_allowed => {
+                return Err(invalid_events(
+                    path,
+                    format!("mutation follows terminal status record {status:?}"),
+                ));
+            }
             JournalRecord::MoveIntent {
                 sequence, identity, ..
             } => {
@@ -432,8 +454,45 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
                     }
                 }
             }
-            JournalRecord::Header { .. } | JournalRecord::Status { .. } => {}
         }
+    }
+
+    Ok(())
+}
+
+fn validate_status_transition(
+    path: &Path,
+    previous: Option<JournalStatusRecord>,
+    next: JournalStatusRecord,
+) -> Result<(), JournalError> {
+    let valid = match previous {
+        None => next != JournalStatusRecord::Undone,
+        Some(JournalStatusRecord::Applying) => matches!(
+            next,
+            JournalStatusRecord::Applying
+                | JournalStatusRecord::Applied
+                | JournalStatusRecord::FailedRolledBack
+                | JournalStatusRecord::Incomplete
+                | JournalStatusRecord::PartiallyRecovered
+                | JournalStatusRecord::Undoing
+        ),
+        Some(
+            JournalStatusRecord::Applied
+            | JournalStatusRecord::Incomplete
+            | JournalStatusRecord::PartiallyRecovered,
+        ) => next == JournalStatusRecord::Undoing,
+        Some(JournalStatusRecord::Undoing) => matches!(
+            next,
+            JournalStatusRecord::Undoing | JournalStatusRecord::Undone
+        ),
+        Some(JournalStatusRecord::FailedRolledBack | JournalStatusRecord::Undone) => false,
+    };
+
+    if !valid {
+        return Err(invalid_events(
+            path,
+            format!("invalid status transition {previous:?} -> {next:?}"),
+        ));
     }
 
     Ok(())

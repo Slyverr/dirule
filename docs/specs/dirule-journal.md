@@ -34,6 +34,8 @@ The existing immediate rollback after an apply error remains. Rollback steps are
 
 `dirule runs list` lists run identifiers, targets, timestamps, and status. Status is derived from the valid journal events and includes applying, applied, interrupted, partially recovered, and undone. A truncated final JSONL record may be ignored and reconciled from its preceding intent; malformed complete records or an unsupported format version are errors. Listing never changes the target or journal.
 
+Status records must follow the run state: applying may finish as applied, failed rolled back, partially recovered, or incomplete; applying or interrupted runs may enter undoing; applied or partially recovered runs may also enter undoing; undoing may be repeated after another interruption and then end as undone. Failed-rollback and undone states are terminal. Reject impossible status transitions and mutation events after a terminal state.
+
 ## Undo
 
 `dirule undo RUN_ID` restores completed renames in reverse execution order. It requires interactive confirmation; `--yes` allows a non-interactive run without relaxing any safety checks.
