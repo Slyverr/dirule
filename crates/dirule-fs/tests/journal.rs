@@ -554,6 +554,39 @@ fn undo_refuses_to_move_a_modified_destination() {
 }
 
 #[test]
+fn undo_preflights_every_move_before_mutating_any_file() {
+    let (_temp, target, store, run_id, journal) = journaled_run(&[
+        ("before-a.txt", "after-a.txt"),
+        ("before-b.txt", "after-b.txt"),
+    ]);
+    let journal_before_undo = std::fs::read(&journal).expect("read applied journal");
+    std::fs::write(target.join("after-a.txt"), "changed contents")
+        .expect("modify later undo destination");
+
+    let error = store
+        .undo(&run_id)
+        .expect_err("undo must reject a modified object before changing other files");
+
+    assert!(matches!(
+        error,
+        dirule_fs::JournalError::ChangedObject { path, .. }
+            if path == target.join("after-a.txt")
+    ));
+    assert_eq!(
+        std::fs::read(target.join("after-b.txt")).unwrap(),
+        b"contents"
+    );
+    assert!(!target.join("before-b.txt").exists());
+    assert_eq!(
+        std::fs::read(target.join("after-a.txt")).unwrap(),
+        b"changed contents"
+    );
+    assert!(!target.join("before-a.txt").exists());
+    assert_eq!(std::fs::read(&journal).unwrap(), journal_before_undo);
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Applied);
+}
+
+#[test]
 fn undo_refuses_to_overwrite_a_new_file_at_the_original_path() {
     let (_temp, target, store, run_id, journal) = journaled_file_run();
     let journal_before_undo = std::fs::read(&journal).expect("read applied journal");
