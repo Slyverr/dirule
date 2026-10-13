@@ -129,6 +129,35 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn acronym_matching_tries_shorter_prefixes_when_longer_entries_do_not_match() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[acronyms]
+entries = ["API", "APIs"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid acronym config");
+    let entries = [Entry {
+        path: PathBuf::from("APIResponse.txt"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("api-response.txt")
+    );
+}
+
+#[test]
 fn project_acronyms_do_not_match_inside_a_larger_token() {
     let config = parse_config(
         r#"

@@ -100,22 +100,24 @@ fn acronym_at<'a>(
         return None;
     }
 
-    acronyms.entries().find_map(|acronym| {
-        let mut end = index;
-        let mut length = 0;
-        for expected in acronym.chars() {
-            if chars.get(end).copied() != Some(expected) {
+    acronyms
+        .entries_starting_with(chars[index])
+        .find_map(|acronym| {
+            let mut end = index;
+            let mut length = 0;
+            for expected in acronym.chars() {
+                if chars.get(end).copied() != Some(expected) {
+                    return None;
+                }
+                end += 1;
+                length += 1;
+            }
+            let next = chars.get(end).copied();
+            if next.is_some_and(|ch| ch.is_alphabetic() && !ch.is_uppercase()) {
                 return None;
             }
-            end += 1;
-            length += 1;
-        }
-        let next = chars.get(end).copied();
-        if next.is_some_and(|ch| ch.is_alphabetic() && !ch.is_uppercase()) {
-            return None;
-        }
-        Some((acronym, length))
-    })
+            Some((acronym, length))
+        })
 }
 
 fn is_token_boundary(chars: &[char], index: usize) -> bool {
