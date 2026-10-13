@@ -30,6 +30,20 @@ impl TempProject {
             .output()
             .expect("run dirule")
     }
+
+    fn journal_directory(&self) -> PathBuf {
+        #[cfg(target_os = "windows")]
+        let base = self.0.with_extension("local-app-data");
+        #[cfg(target_os = "macos")]
+        let base = self
+            .0
+            .with_extension("home")
+            .join("Library/Application Support");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let base = self.0.with_extension("state");
+
+        base.join("dirule/runs")
+    }
 }
 
 impl Drop for TempProject {
@@ -121,6 +135,7 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     assert_eq!(check.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&check.stdout).contains("Check failed"));
     assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
+    assert!(!project.journal_directory().exists());
 
     let json = project.run(&["plan", "--format", "json"]);
     assert!(json.status.success());
@@ -757,6 +772,41 @@ fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     assert!(String::from_utf8_lossy(&apply.stderr).contains("use --yes"));
     assert!(project.0.join("MyFile.txt").is_file());
     assert!(!project.0.join("my-file.txt").exists());
+    assert!(!project.journal_directory().exists());
+}
+
+#[test]
+fn no_op_apply_does_not_create_journal_state() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("already-normal.txt"), "content").expect("write normalized file");
+
+    let apply = project.run(&["apply", "--yes"]);
+
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(String::from_utf8_lossy(&apply.stdout).contains("No changes needed"));
+    assert!(!project.journal_directory().exists());
+}
+
+#[test]
+fn rejected_conflicting_apply_does_not_create_journal_state() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("A__B.txt"), "first").expect("write first conflict source");
+    fs::write(project.0.join("A--B.txt"), "second").expect("write second conflict source");
+
+    let apply = project.run(&["apply", "--yes"]);
+
+    assert_eq!(apply.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&apply.stderr).contains("conflict"));
+    assert_eq!(text(&project.0.join("A__B.txt")), "first");
+    assert_eq!(text(&project.0.join("A--B.txt")), "second");
+    assert!(!project.journal_directory().exists());
 }
 
 #[test]
