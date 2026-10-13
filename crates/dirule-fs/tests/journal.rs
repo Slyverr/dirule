@@ -456,6 +456,57 @@ fn undo_refuses_to_move_a_modified_destination() {
 }
 
 #[test]
+fn undo_refuses_to_overwrite_a_new_file_at_the_original_path() {
+    let (_temp, target, store, run_id, journal) = journaled_file_run();
+    let journal_before_undo = std::fs::read(&journal).expect("read applied journal");
+    std::fs::write(target.join("before.txt"), "new file").expect("create new original path");
+
+    let error = store
+        .undo(&run_id)
+        .expect_err("undo must preserve the new file");
+
+    assert!(matches!(
+        error,
+        dirule_fs::JournalError::ExistingDestination(_)
+    ));
+    assert_eq!(
+        std::fs::read(target.join("before.txt")).unwrap(),
+        b"new file"
+    );
+    assert_eq!(
+        std::fs::read(target.join("after.txt")).unwrap(),
+        b"contents"
+    );
+    assert_eq!(std::fs::read(&journal).unwrap(), journal_before_undo);
+}
+
+#[test]
+fn undo_refuses_to_mutate_a_replaced_target_directory() {
+    let (_temp, target, store, run_id, journal) = journaled_file_run();
+    let journal_before_undo = std::fs::read(&journal).expect("read applied journal");
+    let original_target = target.with_file_name("original-project");
+    std::fs::rename(&target, &original_target).expect("move original target");
+    std::fs::create_dir(&target).expect("create replacement target");
+    std::fs::write(target.join("after.txt"), "replacement target")
+        .expect("write replacement destination");
+
+    let error = store
+        .undo(&run_id)
+        .expect_err("undo must reject a replaced target");
+
+    assert!(matches!(error, dirule_fs::JournalError::ChangedTarget(id) if id == run_id));
+    assert_eq!(
+        std::fs::read(target.join("after.txt")).unwrap(),
+        b"replacement target"
+    );
+    assert_eq!(
+        std::fs::read(original_target.join("after.txt")).unwrap(),
+        b"contents"
+    );
+    assert_eq!(std::fs::read(&journal).unwrap(), journal_before_undo);
+}
+
+#[test]
 fn undo_removes_only_parent_directories_created_by_the_apply() {
     let temp = TempDir::new();
     let target = temp.0.join("project");
