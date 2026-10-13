@@ -1,6 +1,7 @@
 use super::args::{ColorChoice, OutputFormat};
 use dirule_core::Plan;
 use dirule_fs::{JournalDetails, JournalRun, JournalStatus};
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -417,13 +418,71 @@ fn paint(text: &str, ansi_code: &str, choice: ColorChoice) -> String {
 }
 
 fn color_enabled(choice: ColorChoice, is_terminal: bool) -> bool {
+    let no_color = std::env::var_os("NO_COLOR");
+    let terminal = std::env::var_os("TERM");
+
+    color_enabled_for(
+        choice,
+        is_terminal,
+        no_color.as_deref(),
+        terminal.as_deref(),
+    )
+}
+
+fn color_enabled_for(
+    choice: ColorChoice,
+    is_terminal: bool,
+    no_color: Option<&OsStr>,
+    terminal: Option<&OsStr>,
+) -> bool {
     match choice {
         ColorChoice::Always => true,
         ColorChoice::Never => false,
         ColorChoice::Auto => {
             is_terminal
-                && std::env::var_os("NO_COLOR").is_none()
-                && !matches!(std::env::var("TERM").as_deref(), Ok("dumb"))
+                && no_color.is_none_or(OsStr::is_empty)
+                && terminal != Some(OsStr::new("dumb"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ColorChoice, color_enabled_for};
+    use std::ffi::OsStr;
+
+    #[test]
+    fn auto_color_requires_a_terminal_and_color_support() {
+        assert!(color_enabled_for(ColorChoice::Auto, true, None, None));
+        assert!(!color_enabled_for(ColorChoice::Auto, false, None, None));
+        assert!(!color_enabled_for(
+            ColorChoice::Auto,
+            true,
+            Some(OsStr::new("1")),
+            None
+        ));
+        assert!(!color_enabled_for(
+            ColorChoice::Auto,
+            true,
+            None,
+            Some(OsStr::new("dumb"))
+        ));
+        assert!(color_enabled_for(
+            ColorChoice::Auto,
+            true,
+            Some(OsStr::new("")),
+            None
+        ));
+    }
+
+    #[test]
+    fn explicit_color_choices_override_environment_hints() {
+        assert!(color_enabled_for(
+            ColorChoice::Always,
+            false,
+            Some(OsStr::new("1")),
+            Some(OsStr::new("dumb"))
+        ));
+        assert!(!color_enabled_for(ColorChoice::Never, true, None, None));
     }
 }
