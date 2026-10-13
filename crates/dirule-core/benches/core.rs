@@ -141,6 +141,59 @@ fn benchmark_exclusion_scaling(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_acronym_scaling(criterion: &mut Criterion) {
+    let entries = [Entry {
+        path: PathBuf::from("AThingFile.pdf"),
+        kind: EntryKind::File,
+    }];
+    let mut group = criterion.benchmark_group("planning/acronym_lexicon");
+
+    for count in [0, 16, 256, 4_096] {
+        let config = Config {
+            name: Some("Acronym benchmark".into()),
+            target: Some(PathBuf::from(".")),
+            acronyms: AcronymOptions {
+                entries: synthetic_acronyms(count),
+            },
+            rules: vec![Rule {
+                name: "Normalize files".into(),
+                pattern: "**/*".into(),
+                kind: RuleKind::File,
+                exclude: Vec::new(),
+                to: "builtin:kebab-case".into(),
+            }],
+        };
+        let compiled = config.compile().unwrap();
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &compiled,
+            |bencher, compiled| {
+                bencher.iter(|| plan_compiled(black_box(compiled), black_box(&entries)).unwrap())
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn synthetic_acronyms(count: usize) -> Vec<String> {
+    (0..count)
+        .map(|index| {
+            let mut acronym = String::from("A");
+            let mut suffix = index;
+            loop {
+                acronym.push(char::from(b'a' + (suffix % 26) as u8));
+                suffix /= 26;
+                if suffix == 0 {
+                    break;
+                }
+            }
+            acronym
+        })
+        .collect()
+}
+
 fn exclusion_config(count: usize) -> Config {
     Config {
         name: Some("Exclusion benchmark".into()),
@@ -187,6 +240,6 @@ criterion_group! {
         .measurement_time(Duration::from_secs(3))
         .sample_size(20);
     targets = benchmark_matching, benchmark_transform, benchmark_config, benchmark_planning,
-        benchmark_exclusion_scaling
+        benchmark_exclusion_scaling, benchmark_acronym_scaling
 }
 criterion_main!(benches);
