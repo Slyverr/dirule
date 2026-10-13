@@ -82,7 +82,9 @@ fn compile_named_captures(pattern: &str) -> Result<(String, Vec<(String, usize)>
             if captures.iter().any(|(existing, _)| existing == &name) {
                 return Err(Error::Pattern(format!("duplicate capture `{name}`")));
             }
-            if (cursor > 0 && matches!(chars[cursor - 1], '*' | '?' | '>'))
+            if (cursor > 0
+                && matches!(chars[cursor - 1], '*' | '?' | '>')
+                && !is_escaped(&chars, cursor - 1))
                 || chars
                     .get(close + 1)
                     .is_some_and(|ch| matches!(ch, '*' | '?' | '<'))
@@ -229,4 +231,14 @@ fn valid_identifier(name: &str) -> bool {
         .next()
         .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_escaped(chars: &[char], index: usize) -> bool {
+    chars[..index]
+        .iter()
+        .rev()
+        .take_while(|ch| **ch == '\\')
+        .count()
+        % 2
+        == 1
 }

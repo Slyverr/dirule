@@ -51,8 +51,28 @@ fn supports_character_classes_question_marks_and_alternatives() {
 
 #[test]
 fn rejects_ambiguous_capture_boundaries() {
-    for pattern in ["<first><last>.txt", "*<name>.txt", "<name>?.txt"] {
+    for pattern in [
+        "<first><last>.txt",
+        "*<name>.txt",
+        "<name>?.txt",
+        r"\\*<name>.txt",
+    ] {
         assert!(Matcher::new(pattern).is_err(), "accepted {pattern:?}");
+    }
+}
+
+#[test]
+fn escaped_wildcards_are_literal_before_named_captures() {
+    for (pattern, path) in [
+        (r"\*<name>.txt", "*report.txt"),
+        (r"\?<name>.txt", "?report.txt"),
+    ] {
+        let matcher = Matcher::new(pattern).expect("escaped wildcard has a clear boundary");
+        let captures = matcher
+            .captures(path)
+            .expect("escaped wildcard and capture match");
+
+        assert_eq!(captures.get("name"), Some("report"));
     }
 }
 
