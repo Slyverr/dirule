@@ -299,6 +299,32 @@ fn interrupted_undo_after_reverse_rename_can_be_retried() {
 }
 
 #[test]
+fn interrupted_undo_after_directory_removal_can_be_retried() {
+    let (_temp, target, store, run_id, journal) =
+        journaled_run(&[("before.txt", "nested/after.txt")]);
+    store.undo(&run_id).expect("undo journaled apply");
+
+    let records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .filter(|line| {
+            !line.contains("\"record\":\"directory_changed\"")
+                || !line.contains("\"action\":\"remove\"")
+        })
+        .filter(|line| !line.contains("\"status\":\"undone\""))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("simulate a crash after directory removal");
+
+    store.undo(&run_id).expect("retry interrupted undo");
+
+    assert!(target.join("before.txt").is_file());
+    assert!(!target.join("nested").exists());
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
 fn undo_refuses_to_move_a_modified_destination() {
     let temp = TempDir::new();
     let target = temp.0.join("project");
