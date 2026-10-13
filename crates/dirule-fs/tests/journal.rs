@@ -1188,12 +1188,14 @@ fn undo_truncates_an_incomplete_final_journal_record_before_appending() {
     let run_id = applied.run_id.expect("mutation creates a journal run");
     let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
     use std::io::Write as _;
-    std::fs::OpenOptions::new()
+    let mut journal_file = std::fs::OpenOptions::new()
         .append(true)
         .open(&journal)
-        .expect("open journal")
+        .expect("open journal");
+    journal_file
         .write_all(b"{\"record\":\"partial")
         .expect("append incomplete journal tail");
+    drop(journal_file);
 
     store.undo(&run_id).expect("truncate tail and undo");
 
