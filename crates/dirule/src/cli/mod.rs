@@ -442,11 +442,18 @@ fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, Box<dyn Error>>
     let home = home_directory()
         .filter(|path| path.is_absolute())
         .ok_or("cannot expand target: user home directory is unavailable")?;
-    Ok(home.join(
-        home_relative
-            .trim_start_matches('/')
-            .trim_start_matches('\\'),
-    ))
+    let home_relative = home_relative.trim_start_matches(|separator| {
+        #[cfg(windows)]
+        {
+            matches!(separator, '/' | '\\')
+        }
+        #[cfg(not(windows))]
+        {
+            separator == '/'
+        }
+    });
+
+    Ok(home.join(home_relative))
 }
 
 fn home_directory() -> Option<PathBuf> {

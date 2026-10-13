@@ -701,6 +701,50 @@ fn target_expands_home_for_configured_defaults_and_cli_overrides() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn target_preserves_backslashes_in_unix_home_relative_paths() {
+    let project = TempProject::new();
+    let home = project.0.join("home");
+    let target_name = format!("{}Archive", '\\');
+    let target = home.join(&target_name);
+    fs::create_dir_all(&target).expect("create target with a leading backslash");
+    fs::write(target.join("MyFile.txt"), "content").expect("write target file");
+    fs::write(
+        project.0.join("rules.toml"),
+        "version = \"1.0\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write rules");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_home(&mut command, &home);
+    let output = command
+        .args([
+            "plan",
+            "--target",
+            "~/\\Archive",
+            "--config",
+            "rules.toml",
+            "--format",
+            "json",
+        ])
+        .current_dir(&project.0)
+        .output()
+        .expect("plan target containing a backslash");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan");
+    assert_eq!(
+        plan["target"],
+        target.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
+}
+
 #[test]
 fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     let project = TempProject::new();
