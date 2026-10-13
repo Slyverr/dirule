@@ -120,6 +120,44 @@ fn benchmark_planning(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_exclusion_scaling(criterion: &mut Criterion) {
+    let entries = entries(100_000);
+    let mut group = criterion.benchmark_group("planning/exclusion_patterns");
+    group.throughput(Throughput::Elements(entries.len() as u64));
+
+    for count in [0, 1, 4, 16] {
+        let config = exclusion_config(count);
+        let compiled = config.compile().unwrap();
+
+        group.bench_with_input(
+            BenchmarkId::new("compiled", count),
+            &compiled,
+            |bencher, compiled| {
+                bencher.iter(|| plan_compiled(black_box(compiled), black_box(&entries)).unwrap())
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn exclusion_config(count: usize) -> Config {
+    Config {
+        name: Some("Exclusion benchmark".into()),
+        target: Some(PathBuf::from(".")),
+        acronyms: AcronymOptions::default(),
+        rules: vec![Rule {
+            name: "Normalize files".into(),
+            pattern: "**/*".into(),
+            kind: RuleKind::File,
+            exclude: (0..count)
+                .map(|index| format!("**/*.excluded-{index}"))
+                .collect(),
+            to: "builtin:kebab-case".into(),
+        }],
+    }
+}
+
 fn entries(count: usize) -> Vec<Entry> {
     (0..count)
         .map(|index| match index % 20 {
@@ -148,6 +186,7 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
         .sample_size(20);
-    targets = benchmark_matching, benchmark_transform, benchmark_config, benchmark_planning
+    targets = benchmark_matching, benchmark_transform, benchmark_config, benchmark_planning,
+        benchmark_exclusion_scaling
 }
 criterion_main!(benches);
