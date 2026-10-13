@@ -18,6 +18,25 @@ fn extracts_named_capture_values() {
 }
 
 #[test]
+fn matching_without_capture_values_preserves_named_capture_rules() {
+    for (pattern, path) in [
+        ("**/*.pdf", "invoice.pdf"),
+        ("Invoices/<year>-<vendor>.pdf", "Invoices/2026-Acme.pdf"),
+        ("Invoices/<year>-<vendor>.pdf", "Invoices/-Acme.pdf"),
+        ("Invoices/<year>-<vendor>.pdf", "Invoices/2026-.pdf"),
+        ("Invoices/<year>-<vendor>.pdf", "Invoices/2026-Acme.txt"),
+    ] {
+        let matcher = Matcher::new(pattern).expect("valid matcher");
+
+        assert_eq!(
+            matcher.is_match(path),
+            matcher.captures(path).is_some(),
+            "match behavior differs for {pattern:?} and {path:?}"
+        );
+    }
+}
+
+#[test]
 fn captures_after_globs_keep_their_named_values() {
     let matcher = Matcher::new("*/<id>.txt").expect("valid matcher");
     let captures = matcher.captures("archive/42.txt").expect("path matches");

@@ -52,6 +52,19 @@ impl Matcher {
         Some(Captures(captures))
     }
 
+    pub fn is_match(&self, path: &str) -> bool {
+        if self.capture_indexes.is_empty() {
+            return self.glob.is_match(path);
+        }
+
+        let candidate = CandidatePath::from(path);
+        self.glob.matched(&candidate).is_some_and(|matched| {
+            self.capture_indexes
+                .iter()
+                .all(|(_, index)| matched.get(*index).is_some_and(|value| !value.is_empty()))
+        })
+    }
+
     pub fn capture_names(&self) -> impl Iterator<Item = &str> {
         self.capture_indexes.iter().map(|(name, _)| name.as_str())
     }

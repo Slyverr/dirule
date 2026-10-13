@@ -2,6 +2,32 @@ use dirule_core::{AcronymOptions, Config, Entry, EntryKind, Rule, parse_config, 
 use std::path::PathBuf;
 
 #[test]
+fn built_in_transform_rules_can_use_named_match_captures() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize invoice names"
+match = "Invoices/<name>.pdf"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid config");
+    let entries = [Entry {
+        path: PathBuf::from("Invoices/HTTPServer.pdf"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("Invoices/http-server.pdf")
+    );
+}
+
+#[test]
 fn project_acronyms_drive_builtin_and_template_transformations() {
     let config = parse_config(
         r#"

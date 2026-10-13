@@ -97,39 +97,55 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
         let mut destination = source.clone();
         let mut owner = None;
         for rule in &config.rules {
-            if let Some(captures) = rule.matcher.captures(&source_text) {
-                let basename = source
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| {
-                        Error::Config(format!("path is not valid Unicode: {source_text}"))
-                    })?;
-                let (stem, extension) = split_extension(basename);
-                destination = match &rule.destination {
-                    CompiledDestination::Builtin(operation) => {
-                        let transformed = if entry.kind == EntryKind::Directory {
-                            transform(basename, *operation, &config.acronyms)
-                        } else {
-                            transform_filename(basename, *operation, &config.acronyms)
-                        };
-                        planned_parent.join(transformed)
+            let captures = match &rule.destination {
+                CompiledDestination::Builtin(_) => {
+                    if !rule.matcher.is_match(&source_text) {
+                        continue;
                     }
-                    CompiledDestination::Template(template) => {
-                        let parent = display_path(&planned_parent);
-                        let values = DestinationValues {
-                            path: &source_text,
-                            parent: &parent,
-                            name: basename,
-                            stem,
-                            extension,
-                            captures: &captures,
-                        };
-                        template.expand(&values, &config.acronyms)?
-                    }
-                };
-                owner = Some(rule.name.clone());
-                break;
-            }
+
+                    None
+                }
+                CompiledDestination::Template(_) => {
+                    let Some(captures) = rule.matcher.captures(&source_text) else {
+                        continue;
+                    };
+
+                    Some(captures)
+                }
+            };
+            let basename = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    Error::Config(format!("path is not valid Unicode: {source_text}"))
+                })?;
+            let (stem, extension) = split_extension(basename);
+            destination = match &rule.destination {
+                CompiledDestination::Builtin(operation) => {
+                    let transformed = if entry.kind == EntryKind::Directory {
+                        transform(basename, *operation, &config.acronyms)
+                    } else {
+                        transform_filename(basename, *operation, &config.acronyms)
+                    };
+                    planned_parent.join(transformed)
+                }
+                CompiledDestination::Template(template) => {
+                    let parent = display_path(&planned_parent);
+                    let values = DestinationValues {
+                        path: &source_text,
+                        parent: &parent,
+                        name: basename,
+                        stem,
+                        extension,
+                        captures: captures
+                            .as_ref()
+                            .expect("template rules collect their named captures"),
+                    };
+                    template.expand(&values, &config.acronyms)?
+                }
+            };
+            owner = Some(rule.name.clone());
+            break;
         }
         if owner.is_none() {
             let basename = source.file_name().unwrap_or_default();
