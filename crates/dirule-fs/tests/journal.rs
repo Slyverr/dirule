@@ -758,11 +758,15 @@ fn undo_preflights_every_move_before_mutating_any_file() {
     let error = store
         .undo(&run_id)
         .expect_err("undo must reject a modified object before changing other files");
+    let expected_path = target
+        .join("after-a.txt")
+        .canonicalize()
+        .expect("canonicalize changed destination");
 
     assert!(matches!(
         error,
         dirule_fs::JournalError::ChangedObject { path, .. }
-            if path == target.join("after-a.txt")
+            if path == expected_path
     ));
     assert_eq!(
         std::fs::read(target.join("after-b.txt")).unwrap(),

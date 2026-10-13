@@ -716,7 +716,10 @@ pub(super) fn preflight_undo(
                     });
                 }
                 let destination_path = checked_target_path(target, source)?;
-                if path_exists(&destination_path)? && !was_released(&released, source) {
+                if path_exists(&destination_path)?
+                    && !was_released(&released, source)
+                    && !same_existing_path(&source_path, &destination_path)
+                {
                     return Err(JournalError::ExistingDestination(destination_path));
                 }
                 current_locations.insert(*object, (source.clone(), identity.clone()));
@@ -752,7 +755,7 @@ fn was_released(released: &std::collections::HashSet<PathBuf>, path: &Path) -> b
         .any(|released| same_existing_path(released, path))
 }
 
-fn same_existing_path(left: &Path, right: &Path) -> bool {
+pub(super) fn same_existing_path(left: &Path, right: &Path) -> bool {
     left == right
         || matches!(
             (fs::canonicalize(left), fs::canonicalize(right)),

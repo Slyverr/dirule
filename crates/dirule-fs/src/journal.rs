@@ -24,6 +24,7 @@ use writer::{JournalWriter, LockMode, RunLock};
 pub const CURRENT_JOURNAL_VERSION: &str = "1.0";
 
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_UNDO_RENAME: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum JournalError {
@@ -334,15 +335,31 @@ impl JournalStore {
                             path: source_path,
                         });
                     }
-                    let sequence = writer.move_intent(
-                        object,
-                        &source_path,
-                        &destination_path,
-                        identity.kind,
-                    )?;
-                    renamore::rename_exclusive(&source_path, &destination_path)
-                        .map_err(|error| JournalError::io(&source_path, error))?;
-                    writer.move_completed(sequence, &destination_path, identity.kind)?;
+                    if history::same_existing_path(&source_path, &destination_path) {
+                        let temporary = temporary_sibling(&source_path)?;
+                        record_undo_move(
+                            &mut writer,
+                            object,
+                            identity.kind,
+                            &source_path,
+                            &temporary,
+                        )?;
+                        record_undo_move(
+                            &mut writer,
+                            object,
+                            identity.kind,
+                            &temporary,
+                            &destination_path,
+                        )?;
+                    } else {
+                        record_undo_move(
+                            &mut writer,
+                            object,
+                            identity.kind,
+                            &source_path,
+                            &destination_path,
+                        )?;
+                    }
                 }
                 UndoMutation::Directory {
                     path,
@@ -472,6 +489,32 @@ impl JournalStore {
             return Err(JournalError::InvalidRunId(run_id.to_owned()));
         }
         Ok(self.directory.join(format!("{run_id}.jsonl")))
+    }
+}
+
+fn record_undo_move(
+    writer: &mut JournalWriter,
+    object: u64,
+    kind: EntryKind,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), JournalError> {
+    let sequence = writer.move_intent(object, source, destination, kind)?;
+    renamore::rename_exclusive(source, destination)
+        .map_err(|error| JournalError::io(source, error))?;
+    writer.move_completed(sequence, destination, kind)
+}
+
+fn temporary_sibling(source: &Path) -> Result<PathBuf, JournalError> {
+    let parent = source.parent().unwrap_or_else(|| Path::new("."));
+    loop {
+        let id = NEXT_UNDO_RENAME.fetch_add(1, Ordering::Relaxed);
+        let path = parent.join(format!(".dirule-undo-{}-{id}", std::process::id()));
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(path),
+            Ok(_) => continue,
+            Err(source) => return Err(JournalError::io(path, source)),
+        }
     }
 }
 
