@@ -2,6 +2,7 @@ use crate::apply::{ApplyError, MutationRecorder};
 use dirule_core::{EntryKind, Plan};
 use fs4::{FileExt, TryLockError};
 use std::fs::{self, File, OpenOptions};
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use super::{
@@ -211,9 +212,9 @@ impl JournalWriter {
             })
             .max()
             .map_or(0, |sequence| sequence + 1);
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .read(true)
-            .append(true)
+            .write(true)
             .open(path)
             .map_err(|source| JournalError::io(path, source))?;
         let file_length = file
@@ -231,6 +232,8 @@ impl JournalWriter {
                 .and_then(|()| file.sync_all())
                 .map_err(|source| JournalError::io(path, source))?;
         }
+        file.seek(SeekFrom::End(0))
+            .map_err(|source| JournalError::io(path, source))?;
         Ok(Self {
             id: id.to_owned(),
             target: target.to_path_buf(),
