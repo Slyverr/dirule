@@ -1,6 +1,8 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dirule_core::{EntryKind, Plan, PlannedEntry};
-use dirule_fs::{apply, scan, validate_destinations};
+use dirule_fs::{
+    ConflictPolicy, JournalStore, apply, apply_journaled, scan, validate_destinations,
+};
 use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -66,6 +68,50 @@ fn benchmark_file_rename_cycles(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_journaled_file_rename_cycles(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("apply_journaled_file_rename_cycle");
+
+    for count in [100, 500, 1_000] {
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_function(
+            BenchmarkId::new("existing_destinations", count),
+            |bencher| {
+                bencher.iter_batched(
+                    || {
+                        let state = tempfile::tempdir().unwrap();
+                        let target = state.path().join("target");
+                        fs::create_dir(&target).unwrap();
+                        for index in 0..count {
+                            fs::write(target.join(format!("file-{index}")), b"").unwrap();
+                        }
+                        let snapshot = scan(&target).unwrap();
+                        let plan = rename_cycle(count);
+                        let store = JournalStore::new(state.path().join("state/runs"));
+
+                        (state, target, snapshot, plan, store)
+                    },
+                    |(state, target, snapshot, plan, store)| {
+                        black_box(
+                            apply_journaled(
+                                &target,
+                                &plan,
+                                &snapshot,
+                                ConflictPolicy::Abort,
+                                &store,
+                            )
+                            .unwrap(),
+                        );
+                        state
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
 fn cycle_fixture(count: usize) -> TempDir {
     let target = tempfile::tempdir().unwrap();
 
@@ -98,6 +144,8 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
         .sample_size(20);
-    targets = benchmark_destination_validation, benchmark_file_rename_cycles
+    targets = benchmark_destination_validation,
+        benchmark_file_rename_cycles,
+        benchmark_journaled_file_rename_cycles
 }
 criterion_main!(benches);

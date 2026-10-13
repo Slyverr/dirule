@@ -40,7 +40,7 @@ cargo bench -p dirule-fs --bench scan
 cargo bench -p dirule-fs --bench apply
 ```
 
-The core benchmarks cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. The filesystem benchmarks measure repeat scans of nested trees with ignored paths, destination validation, and full application of file rename cycles at several input sizes. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
+The core benchmarks cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. The filesystem benchmarks measure repeat scans of nested trees with ignored paths, destination validation, and full application of file rename cycles with and without journaling at several input sizes. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
 
 ## Commits
 
