@@ -354,6 +354,34 @@ fn preset_listing_uses_the_platform_config_directory() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("downloads"));
 }
 
+#[test]
+fn preset_listing_emits_versioned_json() {
+    let project = TempProject::new();
+    let presets = preset_config_base(&project).join("dirule/presets");
+    fs::create_dir_all(&presets).expect("create user preset directory");
+    fs::write(presets.join("zeta.toml"), "preset").expect("write later preset");
+    fs::write(presets.join("downloads.toml"), "preset").expect("write earlier preset");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let output = command
+        .args(["presets", "list", "--format", "json"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run dirule");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid preset listing JSON");
+    assert_eq!(value["schema_version"], "1.0");
+    assert_eq!(value["presets"], serde_json::json!(["downloads", "zeta"]));
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn preset_storage_ignores_a_relative_xdg_config_home() {

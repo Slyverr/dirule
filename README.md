@@ -72,9 +72,10 @@ Save a project's validated rules as a reusable user preset, then select it for a
 dirule presets save downloads
 dirule presets remove downloads
 dirule plan --preset downloads
+dirule presets list --format json
 ```
 
-By default, `presets save` reads `dirule.toml` from the current directory. Pass `--config FILE` to save another configuration. Presets are stored in Dirule's platform-specific user configuration directory, and an existing preset is never overwritten. Removing a preset asks for confirmation; pass `--yes` for a non-interactive run.
+By default, `presets save` reads `dirule.toml` from the current directory. Pass `--config FILE` to save another configuration. Presets are stored in Dirule's platform-specific user configuration directory, and an existing preset is never overwritten. Preset listings can be emitted as versioned JSON. Removing a preset asks for confirmation; pass `--yes` for a non-interactive run.
 
 ## Shell completions
 

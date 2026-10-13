@@ -35,6 +35,29 @@ pub(super) fn preset_name(name: &str, color: ColorChoice) -> String {
     paint(name, "36", color)
 }
 
+pub(super) fn presets(names: &[String], format: OutputFormat, color: ColorChoice) {
+    if format == OutputFormat::Json {
+        let value = serde_json::json!({
+            "schema_version": CURRENT_OUTPUT_VERSION,
+            "presets": names,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).expect("preset listing is serializable")
+        );
+        return;
+    }
+
+    println!("Presets");
+    if names.is_empty() {
+        println!("  No user presets found.");
+    } else {
+        for name in names {
+            println!("  {}", preset_name(name, color));
+        }
+    }
+}
+
 pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) {
     println!(
         "{} Saved preset {} to {}",

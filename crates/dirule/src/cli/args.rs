@@ -98,7 +98,11 @@ pub(super) struct PresetsArgs {
 #[derive(Debug, Subcommand)]
 pub(super) enum PresetsCommand {
     /// List available presets.
-    List,
+    List {
+        /// Output as human-readable text or JSON.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
     /// Save a project config as a global preset.
     Save(PresetSaveArgs),
     /// Remove a user preset.

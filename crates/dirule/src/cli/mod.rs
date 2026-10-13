@@ -140,7 +140,7 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
             Ok(())
         }
         CliCommand::Presets(args) => match args.command {
-            PresetsCommand::List => list_presets(color),
+            PresetsCommand::List { format } => list_presets(format, color),
             PresetsCommand::Save(options) => save_preset(options, color),
             PresetsCommand::Remove(options) => remove_preset(options, color),
         },
@@ -244,7 +244,7 @@ fn evaluate(
     Ok((target, plan, scan))
 }
 
-fn list_presets(color: ColorChoice) -> Result<(), Box<dyn Error>> {
+fn list_presets(format: args::OutputFormat, color: ColorChoice) -> Result<(), Box<dyn Error>> {
     let directory = preset_directory()?;
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => Some(entries),
@@ -268,14 +268,7 @@ fn list_presets(color: ColorChoice) -> Result<(), Box<dyn Error>> {
     }
 
     presets.sort();
-    println!("Presets");
-    if presets.is_empty() {
-        println!("  No user presets found.");
-    } else {
-        for preset in presets {
-            println!("  {}", output::preset_name(&preset, color));
-        }
-    }
+    output::presets(&presets, format, color);
     Ok(())
 }
 
