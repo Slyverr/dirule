@@ -212,6 +212,8 @@ dependencies = [
  "dirule-core",
  "ignore",
  "renamore",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
