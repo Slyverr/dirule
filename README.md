@@ -8,6 +8,14 @@ Dirule is under active development. Its configuration format and command behavio
 
 ## Install
 
+From the repository root, install the current checkout with Cargo:
+
+```sh
+cargo install --path crates/dirule --locked
+```
+
+Make sure Cargo's binary directory is on `PATH` to run `dirule` from any project.
+
 After a release is published, install the latest version with the shell installer on Linux or macOS:
 
 ```sh
