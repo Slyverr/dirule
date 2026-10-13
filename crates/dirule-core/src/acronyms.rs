@@ -69,6 +69,10 @@ impl AcronymOptions {
 }
 
 impl AcronymLexicon {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     pub(crate) fn entries_starting_with(&self, initial: char) -> impl Iterator<Item = &str> {
         let range = self
             .groups

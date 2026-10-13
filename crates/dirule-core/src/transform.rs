@@ -78,6 +78,10 @@ fn split_extension(value: &str) -> (&str, Option<&str>) {
 
 fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<String> {
     let graphemes: Vec<(usize, &str)> = value.grapheme_indices(true).collect();
+    if acronyms.is_empty() {
+        return tokenize_generic(&graphemes);
+    }
+
     let mut result = Vec::new();
     let mut start = 0;
     let mut index = 0;
