@@ -85,6 +85,139 @@ impl MutationRecorder for FailSecondStaging {
     }
 }
 
+#[cfg(unix)]
+struct ReplaceSourceParent<'a> {
+    recorder: JournalRecorder<'a>,
+    target: PathBuf,
+    outside: PathBuf,
+    replaced: bool,
+}
+
+#[cfg(unix)]
+impl MutationRecorder for ReplaceSourceParent<'_> {
+    fn move_intent(
+        &mut self,
+        object: u64,
+        source: &std::path::Path,
+        destination: &std::path::Path,
+        kind: EntryKind,
+    ) -> Result<Option<u64>, ApplyError> {
+        let sequence = self
+            .recorder
+            .move_intent(object, source, destination, kind)?;
+        if !self.replaced {
+            std::fs::rename(self.target.join("nested"), self.target.join("nested.saved"))
+                .expect("move the original source parent");
+            std::os::unix::fs::symlink(&self.outside, self.target.join("nested"))
+                .expect("replace the source parent with a symlink");
+            self.replaced = true;
+        }
+
+        Ok(sequence)
+    }
+
+    fn move_completed(
+        &mut self,
+        sequence: Option<u64>,
+        destination: &std::path::Path,
+        kind: EntryKind,
+    ) -> Result<(), ApplyError> {
+        self.recorder.move_completed(sequence, destination, kind)
+    }
+
+    fn directory_intent(&mut self, directory: &std::path::Path) -> Result<Option<u64>, ApplyError> {
+        self.recorder.directory_intent(directory)
+    }
+
+    fn directory_created(
+        &mut self,
+        sequence: Option<u64>,
+        directory: &std::path::Path,
+    ) -> Result<(), ApplyError> {
+        self.recorder.directory_created(sequence, directory)
+    }
+
+    fn directory_remove_intent(
+        &mut self,
+        directory: &std::path::Path,
+    ) -> Result<Option<u64>, ApplyError> {
+        self.recorder.directory_remove_intent(directory)
+    }
+
+    fn directory_removed(&mut self, sequence: Option<u64>) -> Result<(), ApplyError> {
+        self.recorder.directory_removed(sequence)
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_rejects_a_symlinked_parent_installed_during_journal_intent() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    let outside = temp.0.join("outside");
+    std::fs::create_dir_all(target.join("nested")).expect("create source parent");
+    std::fs::create_dir(&outside).expect("create outside directory");
+    std::fs::write(target.join("nested/file.txt"), "inside").expect("write source");
+    std::fs::write(outside.join("file.txt"), "outside").expect("write outside file");
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("nested/file.txt"),
+            destination: PathBuf::from("renamed.txt"),
+            kind: EntryKind::File,
+            rule: Some("test".into()),
+        }],
+        ..Plan::default()
+    };
+    let snapshot = crate::scan(&target).expect("scan project");
+    let store = JournalStore::new(temp.0.join("state/runs"));
+    let mut recorder = ReplaceSourceParent {
+        recorder: JournalRecorder::new(&store, &target, &plan),
+        target: target.clone(),
+        outside: outside.clone(),
+        replaced: false,
+    };
+
+    let error = super::apply_recorded(
+        &target,
+        &plan,
+        &snapshot,
+        ConflictPolicy::Abort,
+        &mut recorder,
+    )
+    .expect_err("apply must reject the replaced source parent");
+
+    assert!(matches!(
+        &error,
+        ApplyError::UnresolvedOperation(operation)
+            if matches!(operation.as_ref(), ApplyError::UnsafePath(_))
+    ));
+
+    let run_id = recorder
+        .recorder
+        .id()
+        .expect("move intent starts a journal run")
+        .to_owned();
+    let error = finish_failed_apply(&mut recorder.recorder, run_id.clone(), error);
+    drop(recorder);
+
+    let runs = store.list().expect("list partially recovered run");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, JournalStatus::PartiallyRecovered);
+    let details = store.get(&run_id).expect("read unresolved run details");
+    assert_eq!(details.operations.len(), 1);
+    assert!(
+        store.undo(&run_id).is_err(),
+        "undo must reject the ambiguous source operation"
+    );
+    assert!(matches!(&error, ApplyError::RunFailed { .. }));
+    assert_eq!(std::fs::read(outside.join("file.txt")).unwrap(), b"outside");
+    assert_eq!(
+        std::fs::read(target.join("nested.saved/file.txt")).unwrap(),
+        b"inside"
+    );
+    assert!(!target.join("renamed.txt").exists());
+}
+
 #[test]
 fn partial_cycle_staging_rolls_back_before_apply_returns() {
     let temp = TempDir::new();
@@ -147,8 +280,13 @@ fn rollback_failure_preserves_the_operation_error_and_occupied_paths() {
         path: PathBuf::from("later.txt"),
         source: std::io::Error::other("simulated later operation failure"),
     };
+    let snapshot = crate::scan(&temp.0).expect("scan rollback target");
+    let target_guard = super::path::TargetGuard::new(
+        &temp.0,
+        snapshot.target_identity.as_ref().expect("target identity"),
+    );
 
-    let error = rollback_after_failure(operation, &temp.0, &moved, &[], &mut NoopRecorder);
+    let error = rollback_after_failure(operation, &target_guard, &moved, &[], &mut NoopRecorder);
 
     match error {
         ApplyError::RollbackFailed {

@@ -71,11 +71,12 @@ fn dependency_keys(target: &Path, path: &Path) -> Vec<PathBuf> {
 }
 
 pub(super) fn stage_sources(
-    target: &Path,
+    target_guard: &path::TargetGuard<'_>,
     entries: &[&PlannedEntry],
     moved_operations: &mut Vec<MovedOperation>,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<StagedSources, ApplyError> {
+    let target = target_guard.root();
     let mut reserved_paths = entries
         .iter()
         .flat_map(|entry| [entry.source.clone(), entry.destination.clone()])
@@ -195,6 +196,7 @@ pub(super) fn stage_sources(
         };
         path::ensure_relative(&temporary_relative)?;
         rename_path_exclusive(
+            target_guard,
             &source,
             &temporary,
             false,

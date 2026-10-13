@@ -1,7 +1,41 @@
 use super::ApplyError;
+use crate::scan::SourceIdentity;
 use dirule_core::{EntryKind, PlannedEntry};
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
+
+#[derive(Clone, Copy)]
+pub(super) struct TargetGuard<'a> {
+    root: &'a Path,
+    identity: &'a SourceIdentity,
+}
+
+impl<'a> TargetGuard<'a> {
+    pub(super) fn new(root: &'a Path, identity: &'a SourceIdentity) -> Self {
+        Self { root, identity }
+    }
+
+    pub(super) fn root(self) -> &'a Path {
+        self.root
+    }
+
+    pub(super) fn ensure_safe(self, path: &Path) -> Result<(), ApplyError> {
+        let metadata = std::fs::symlink_metadata(self.root).map_err(|source| ApplyError::Io {
+            path: self.root.to_path_buf(),
+            source,
+        })?;
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || !self
+                .identity
+                .matches_object(&metadata, EntryKind::Directory, self.root)
+        {
+            return Err(ApplyError::ChangedTarget(self.root.to_path_buf()));
+        }
+
+        ensure_parent_safe(self.root, path)
+    }
+}
 
 pub(super) struct VacatedPaths<'plan> {
     sources: HashSet<&'plan Path>,
