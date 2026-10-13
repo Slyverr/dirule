@@ -575,7 +575,7 @@ fn apply_rolls_back_prior_moves_when_a_later_move_fails() {
         entries: vec![
             PlannedEntry {
                 source: PathBuf::from("first"),
-                destination: PathBuf::from("first-renamed"),
+                destination: PathBuf::from("created/first-renamed"),
                 kind: EntryKind::File,
                 rule: None,
             },
@@ -604,7 +604,7 @@ fn apply_rolls_back_prior_moves_when_a_later_move_fails() {
     .expect("restore destination parent permissions");
     assert!(result.is_err(), "later move should fail");
     assert!(temp.0.join("first").is_file());
-    assert!(!temp.0.join("first-renamed").exists());
+    assert!(!temp.0.join("created").exists());
     assert!(temp.0.join("second").is_file());
     assert!(!temp.0.join("blocked/second-renamed").exists());
 }
