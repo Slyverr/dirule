@@ -6,6 +6,29 @@ Dirule is a local-first CLI for applying reusable rules to file and directory na
 
 Dirule is under active development. Its configuration format and command behavior may change.
 
+## Install
+
+After a release is published, install the latest version with the shell installer on Linux or macOS:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Slyverr/dirule/releases/latest/download/dirule-installer.sh | sh
+```
+
+On Windows, run the PowerShell installer:
+
+```powershell
+powershell -c "irm https://github.com/Slyverr/dirule/releases/latest/download/dirule-installer.ps1 | iex"
+```
+
+Nix users can run or install Dirule directly from the flake:
+
+```sh
+nix run github:Slyverr/dirule -- --help
+nix profile install github:Slyverr/dirule
+```
+
+The shell installer does not support NixOS; use the flake there. Releases also include archives for manual installation.
+
 ## Quick start
 
 From a project checkout, create the starter configuration and preview it:
