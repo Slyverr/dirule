@@ -335,7 +335,11 @@ impl JournalStore {
                             path: source_path,
                         });
                     }
-                    if history::same_existing_path(&source_path, &destination_path) {
+                    if history::same_existing_object_alias(
+                        &source_path,
+                        &destination_path,
+                        &identity,
+                    )? {
                         let temporary = temporary_sibling(&source_path)?;
                         record_undo_move(
                             &mut writer,

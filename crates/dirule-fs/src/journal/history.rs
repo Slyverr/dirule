@@ -718,7 +718,7 @@ pub(super) fn preflight_undo(
                 let destination_path = checked_target_path(target, source)?;
                 if path_exists(&destination_path)?
                     && !was_released(&released, source)
-                    && !same_existing_path(&source_path, &destination_path)
+                    && !same_existing_object_alias(&source_path, &destination_path, identity)?
                 {
                     return Err(JournalError::ExistingDestination(destination_path));
                 }
@@ -758,9 +758,41 @@ fn was_released(released: &std::collections::HashSet<PathBuf>, path: &Path) -> b
 pub(super) fn same_existing_path(left: &Path, right: &Path) -> bool {
     left == right
         || matches!(
-            (fs::canonicalize(left), fs::canonicalize(right)),
-            (Ok(left), Ok(right)) if left == right
+                (fs::canonicalize(left), fs::canonicalize(right)),
+                (Ok(left), Ok(right)) if left == right
         )
+}
+
+pub(super) fn same_existing_object_alias(
+    source: &Path,
+    destination: &Path,
+    identity: &ObjectIdentity,
+) -> Result<bool, JournalError> {
+    if same_existing_path(source, destination) {
+        return Ok(true);
+    }
+
+    let source_components = source.components().collect::<Vec<_>>();
+    let destination_components = destination.components().collect::<Vec<_>>();
+    if source_components.len() != destination_components.len()
+        || !source_components
+            .iter()
+            .zip(&destination_components)
+            .all(|(source, destination)| {
+                source
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&destination.as_os_str().to_string_lossy())
+            })
+    {
+        return Ok(false);
+    }
+
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) => Ok(identity.matches(&metadata, identity.kind, destination)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(JournalError::io(destination, source)),
+    }
 }
 
 fn cancel_inverse_mutations(mutations: Vec<UndoMutation>) -> Vec<UndoMutation> {
