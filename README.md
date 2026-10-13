@@ -20,7 +20,7 @@ cargo install --path crates/dirule --locked
 
 Make sure Cargo's binary directory is on `PATH` to run `dirule` from any project.
 
-After the repository is public and a release is published, install the latest version with the shell installer on Linux or macOS:
+After a release is published, install the latest version with the shell installer on Linux or macOS:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Slyverr/dirule/releases/latest/download/dirule-installer.sh | sh
@@ -32,7 +32,7 @@ On Windows, run the PowerShell installer:
 powershell -c "irm https://github.com/Slyverr/dirule/releases/latest/download/dirule-installer.ps1 | iex"
 ```
 
-Once the repository is public or your Nix installation is configured to access it, run or install Dirule from GitHub:
+Run or install Dirule directly from GitHub:
 
 ```sh
 nix run github:Slyverr/dirule -- --help
@@ -137,7 +137,7 @@ Generate a completion script from the current CLI definition with `dirule comple
 
 ## Nix
 
-Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`. The GitHub flake commands in [Install](#install) require public repository access or configured GitHub authentication.
+Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`. The GitHub flake commands in [Install](#install) fetch the source from the public repository.
 
 The flake supports x86_64 and ARM64 Linux, plus ARM64 macOS. On Intel macOS, install from source with Cargo or use a release archive.
 
