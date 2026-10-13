@@ -686,7 +686,7 @@ pub(super) fn preflight_undo(
                 .or_insert_with(|| (destination.clone(), identity.clone()));
         }
     }
-    let mut released = std::collections::HashSet::new();
+    let mut released = Vec::new();
     let mut verified_objects = std::collections::HashSet::new();
     for mutation in mutations {
         match mutation {
@@ -717,13 +717,13 @@ pub(super) fn preflight_undo(
                 }
                 let destination_path = checked_target_path(target, source)?;
                 if path_exists(&destination_path)?
-                    && !was_released(&released, source)
+                    && !was_released(&released, source)?
                     && !same_existing_object_alias(&source_path, &destination_path, identity)?
                 {
                     return Err(JournalError::ExistingDestination(destination_path));
                 }
                 current_locations.insert(*object, (source.clone(), identity.clone()));
-                released.insert(destination.clone());
+                released.push((destination.clone(), identity.clone()));
             }
             UndoMutation::Directory {
                 path,
@@ -740,7 +740,7 @@ pub(super) fn preflight_undo(
                             path: absolute,
                         });
                     }
-                } else if path_exists(&absolute)? && !was_released(&released, path) {
+                } else if path_exists(&absolute)? && !was_released(&released, path)? {
                     return Err(JournalError::ExistingDestination(absolute));
                 }
             }
@@ -749,10 +749,14 @@ pub(super) fn preflight_undo(
     Ok(())
 }
 
-fn was_released(released: &std::collections::HashSet<PathBuf>, path: &Path) -> bool {
-    released
-        .iter()
-        .any(|released| same_existing_path(released, path))
+fn was_released(released: &[(PathBuf, ObjectIdentity)], path: &Path) -> Result<bool, JournalError> {
+    for (released_path, identity) in released {
+        if released_path == path || same_existing_object_alias(released_path, path, identity)? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 pub(super) fn same_existing_path(left: &Path, right: &Path) -> bool {
