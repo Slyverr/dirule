@@ -9,7 +9,7 @@ use tempfile::TempDir;
 fn benchmark_scan(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("scan");
 
-    for count in [100, 1_000, 10_000] {
+    for count in [100, 1_000, 10_000, 100_000] {
         let target = fixture(count);
         let fixture_scan = scan(target.path()).unwrap();
         let visible_files = fixture_scan
