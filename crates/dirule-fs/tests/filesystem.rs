@@ -103,7 +103,7 @@ fn scan_global_gitignore_child() {
 
 #[test]
 fn scan_fails_when_configured_global_gitignore_is_malformed() {
-    run_global_gitignore_child("broken\\\n", "scan_malformed_global_gitignore_child");
+    run_global_gitignore_child("[z-a]\n", "scan_malformed_global_gitignore_child");
 }
 
 fn run_global_gitignore_child(ignore_rules: &str, test_name: &str) {
@@ -113,19 +113,20 @@ fn run_global_gitignore_child(ignore_rules: &str, test_name: &str) {
     std::fs::write(target.join("globally-ignored.txt"), "ignored")
         .expect("write globally ignored file");
 
-    let global_ignore = temp.0.join("global-ignore");
-    std::fs::write(&global_ignore, ignore_rules).expect("write global ignore rules");
-    let git_config = temp.0.join("gitconfig");
-    let global_ignore = global_ignore.to_string_lossy().replace('\\', "/");
-    std::fs::write(
-        &git_config,
-        format!("[core]\n\texcludesFile = {global_ignore}\n"),
-    )
-    .expect("write isolated Git config");
+    let home = temp.0.join("home");
+    std::fs::create_dir(&home).expect("create isolated home directory");
+    let xdg_config = temp.0.join("xdg-config");
+    let git_config_dir = xdg_config.join("git");
+    std::fs::create_dir_all(&git_config_dir).expect("create isolated Git config directory");
+    std::fs::write(git_config_dir.join("ignore"), ignore_rules).expect("write global ignore rules");
 
     let output = Command::new(std::env::current_exe().expect("test executable path"))
         .args(["--exact", test_name, "--nocapture"])
-        .env("GIT_CONFIG_GLOBAL", git_config)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
+        .env("HOME", &home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", xdg_config)
         .env("DIRULE_GLOBAL_IGNORE_TARGET", target)
         .output()
         .expect("run isolated global-ignore test");
@@ -145,7 +146,7 @@ fn scan_malformed_global_gitignore_child() {
     };
     let error = scan(Path::new(&target)).expect_err("malformed global ignore rules must fail");
 
-    assert!(error.to_string().contains("global-ignore"));
+    assert!(matches!(error, ScanError::Walk { .. }));
 }
 
 #[test]
@@ -411,7 +412,7 @@ version = "1.0"
 [[rules]]
 name = "Rename parent"
 match = "Parent"
-to = "builtin:kebab-case"
+to = "template:renamed-parent"
 
 [[rules]]
 name = "Keep child at configured path"
@@ -427,12 +428,12 @@ to = "template:Parent/child.txt"
     let report = apply(&temp.0, &plan, &snapshot).expect("apply plan");
 
     assert_eq!(report.moved.len(), 2);
-    assert!(temp.0.join("parent").is_dir());
+    assert!(temp.0.join("renamed-parent").is_dir());
     assert_eq!(
         std::fs::read_to_string(temp.0.join("Parent/child.txt")).unwrap(),
         "content"
     );
-    assert!(!temp.0.join("parent/child.txt").exists());
+    assert!(!temp.0.join("renamed-parent/child.txt").exists());
 }
 
 #[test]
@@ -897,7 +898,9 @@ fn apply_rejects_a_replaced_source_with_same_size_and_timestamp() {
         .modified()
         .expect("read source timestamp");
     std::fs::write(&replacement, "Replaced").expect("write replacement");
-    std::fs::File::open(&replacement)
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&replacement)
         .expect("open replacement")
         .set_modified(modified)
         .expect("preserve source timestamp");
