@@ -3,10 +3,23 @@ use crate::{CURRENT_CONFIG_VERSION, ConfigVersion, Error, Result};
 struct Migration {
     from: ConfigVersion,
     to: ConfigVersion,
-    apply: fn(toml::Value) -> Result<toml::Value>,
+    apply: fn(toml::Value, ConfigVersion) -> Result<toml::Value>,
 }
 
-const MIGRATIONS: &[Migration] = &[];
+const MIGRATIONS: &[Migration] = &[Migration {
+    from: ConfigVersion::new(1, 0),
+    to: ConfigVersion::new(1, 1),
+    apply: migrate_1_0_to_1_1,
+}];
+
+fn migrate_1_0_to_1_1(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
+    let document_table = document
+        .as_table_mut()
+        .ok_or_else(|| Error::Config("configuration document must be a table".into()))?;
+    document_table.insert("version".into(), toml::Value::String(version.to_string()));
+
+    Ok(document)
+}
 
 pub(super) fn upgrade(document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
     upgrade_through(document, version, CURRENT_CONFIG_VERSION, MIGRATIONS)
@@ -50,7 +63,7 @@ fn upgrade_through(
                 migration.from, migration.to
             )));
         }
-        document = (migration.apply)(document)?;
+        document = (migration.apply)(document, migration.to)?;
         version = migration.to;
         let document_version = super::version::read(&document)?;
         if document_version != version {
@@ -68,18 +81,24 @@ mod tests {
     use super::{Migration, upgrade_through};
     use crate::ConfigVersion;
 
-    fn advance_version(mut document: toml::Value) -> crate::Result<toml::Value> {
-        document["version"] = toml::Value::String("1.1".into());
+    fn advance_version(
+        mut document: toml::Value,
+        version: ConfigVersion,
+    ) -> crate::Result<toml::Value> {
+        document["version"] = toml::Value::String(version.to_string());
         Ok(document)
     }
 
-    fn advance_major(mut document: toml::Value) -> crate::Result<toml::Value> {
-        document["version"] = toml::Value::String("2.0".into());
+    fn advance_major(
+        mut document: toml::Value,
+        version: ConfigVersion,
+    ) -> crate::Result<toml::Value> {
+        document["version"] = toml::Value::String(version.to_string());
         Ok(document)
     }
 
-    fn jump_minor(mut document: toml::Value) -> crate::Result<toml::Value> {
-        document["version"] = toml::Value::String("1.2".into());
+    fn jump_minor(mut document: toml::Value, version: ConfigVersion) -> crate::Result<toml::Value> {
+        document["version"] = toml::Value::String(version.to_string());
         Ok(document)
     }
 

@@ -1,6 +1,7 @@
 use crate::config::CompiledDestination;
 use crate::{
-    CompiledConfig, Config, DestinationValues, Error, Result, transform, transform_filename,
+    CompiledConfig, Config, DestinationValues, Error, Result, RuleKind, transform,
+    transform_filename,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -97,6 +98,10 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
         let mut destination = source.clone();
         let mut owner = None;
         for rule in &config.rules {
+            if !rule.kind.applies_to(entry.kind) {
+                continue;
+            }
+
             let captures = match &rule.destination {
                 CompiledDestination::Builtin(_) => {
                     if !rule.matcher.is_match(&source_text) {
@@ -164,6 +169,17 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
     }
     find_conflicts(&mut result, &original_paths);
     Ok(result)
+}
+
+impl RuleKind {
+    fn applies_to(self, entry_kind: EntryKind) -> bool {
+        matches!(
+            (self, entry_kind),
+            (Self::Any, EntryKind::File | EntryKind::Directory)
+                | (Self::File, EntryKind::File)
+                | (Self::Directory, EntryKind::Directory)
+        )
+    }
 }
 
 fn find_conflicts(plan: &mut Plan, original_paths: &HashSet<PathBuf>) {

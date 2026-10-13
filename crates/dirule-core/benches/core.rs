@@ -1,14 +1,14 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dirule_core::{
-    AcronymLexicon, AcronymOptions, Config, Entry, EntryKind, Matcher, Rule, parse_config, plan,
-    plan_compiled, transform_filename,
+    AcronymLexicon, AcronymOptions, Config, Entry, EntryKind, Matcher, Rule, RuleKind,
+    parse_config, plan, plan_compiled, transform_filename,
 };
 use std::hint::black_box;
 use std::path::PathBuf;
 use std::time::Duration;
 
 const CONFIG_SOURCE: &str = r#"
-version = "1.0"
+version = "1.1"
 target = "."
 
 [acronyms]
@@ -81,11 +81,13 @@ fn benchmark_planning(criterion: &mut Criterion) {
             Rule {
                 name: "Normalize invoices".into(),
                 pattern: "Invoices/<year>-<vendor>-<title>.pdf".into(),
+                kind: RuleKind::File,
                 to: "template:Archive/${year}/${vendor|kebab-case}/${title|kebab-case}.pdf".into(),
             },
             Rule {
                 name: "Normalize other names".into(),
                 pattern: "**/*".into(),
+                kind: RuleKind::Any,
                 to: "builtin:kebab-case".into(),
             },
         ],

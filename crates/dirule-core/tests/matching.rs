@@ -1,4 +1,4 @@
-use dirule_core::{Matcher, Rule, parse_config};
+use dirule_core::{Matcher, Rule, RuleKind, parse_config};
 
 #[test]
 fn extracts_named_capture_values() {
@@ -49,6 +49,7 @@ fn tree_globs_match_root_and_nested_paths_case_sensitively() {
     let rule = Rule {
         name: "PDF files".into(),
         pattern: "**/*.pdf".into(),
+        kind: RuleKind::Any,
         to: "builtin:kebab-case".into(),
     };
     let matcher = Matcher::new(&rule.pattern).expect("compiled matcher");

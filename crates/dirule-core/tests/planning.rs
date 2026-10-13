@@ -1,4 +1,4 @@
-use dirule_core::{AcronymOptions, Config, Entry, EntryKind, Rule, parse_config, plan};
+use dirule_core::{AcronymOptions, Config, Entry, EntryKind, Rule, RuleKind, parse_config, plan};
 use std::path::PathBuf;
 
 #[test]
@@ -25,6 +25,54 @@ to = "builtin:kebab-case"
         planned.entries[0].destination,
         PathBuf::from("Invoices/http-server.pdf")
     );
+}
+
+#[test]
+fn rule_kind_filters_entries_and_mismatches_continue_to_later_rules() {
+    let config = parse_config(
+        r#"
+version = "1.1"
+
+[[rules]]
+name = "Normalize directories"
+match = "**/*"
+kind = "directory"
+to = "template:folders/${name}"
+
+[[rules]]
+name = "Normalize files"
+match = "**/*"
+kind = "file"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid typed rules");
+    let entries = [
+        Entry {
+            path: PathBuf::from("HTTPServer"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("MyXMLParser.pdf"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("folders/HTTPServer")
+    );
+    assert_eq!(
+        planned.entries[0].rule.as_deref(),
+        Some("Normalize directories")
+    );
+    assert_eq!(
+        planned.entries[1].destination,
+        PathBuf::from("my-xml-parser.pdf")
+    );
+    assert_eq!(planned.entries[1].rule.as_deref(), Some("Normalize files"));
 }
 
 #[test]
@@ -258,11 +306,13 @@ fn planning_propagates_directory_names_and_keeps_first_match_on_original_paths()
             Rule {
                 name: "Normalize project folder".into(),
                 pattern: "*".into(),
+                kind: RuleKind::Any,
                 to: "builtin:kebab-case".into(),
             },
             Rule {
                 name: "Normalize remaining paths".into(),
                 pattern: "**/*".into(),
+                kind: RuleKind::Any,
                 to: "builtin:snake-case".into(),
             },
         ],

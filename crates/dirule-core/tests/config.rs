@@ -1,10 +1,10 @@
-use dirule_core::parse_config;
+use dirule_core::{RuleKind, parse_config};
 
 #[test]
 fn parses_and_validates_rule_configuration() {
     let config = parse_config(
         r#"
-version = "1.0"
+version = "1.1"
 target = "."
 
 [[rules]]
@@ -16,11 +16,47 @@ to = "template:Archive/${year}/${vendor|kebab-case}/${title}.pdf"
     .expect("valid configuration");
 
     assert_eq!(config.rules.len(), 1);
+    assert_eq!(config.rules[0].kind, RuleKind::Any);
     assert!(config.acronyms.entries.is_empty());
     assert_eq!(
         config.rules[0].pattern,
         "Invoices/<year>-<vendor>-<title>.pdf"
     );
+}
+
+#[test]
+fn version_1_0_migrates_to_the_default_rule_kind() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("legacy configuration migrates");
+
+    assert_eq!(config.rules[0].kind, RuleKind::Any);
+}
+
+#[test]
+fn rejects_unknown_rule_kinds() {
+    let error = parse_config(
+        r#"
+version = "1.1"
+
+[[rules]]
+name = "Normalize files"
+match = "**/*"
+kind = "symlink"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect_err("symlinks are not an eligible rule kind");
+
+    assert!(error.to_string().contains("unknown variant `symlink`"));
 }
 
 #[test]

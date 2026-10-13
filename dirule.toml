@@ -1,13 +1,15 @@
-version = "1.0"
+version = "1.1"
 name = "Dirule repository"
 target = "."
 
 [[rules]]
 name = "Use snake case for Rust source files"
 match = "crates/**/*.rs"
+kind = "file"
 to = "builtin:snake-case"
 
 [[rules]]
 name = "Use kebab case for specification files"
 match = "docs/**/*.md"
+kind = "file"
 to = "builtin:kebab-case"

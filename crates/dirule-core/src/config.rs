@@ -26,6 +26,7 @@ pub struct CompiledConfig {
 pub(crate) struct CompiledRule {
     pub(crate) name: String,
     pub(crate) matcher: Matcher,
+    pub(crate) kind: RuleKind,
     pub(crate) destination: CompiledDestination,
 }
 
@@ -35,6 +36,15 @@ pub(crate) enum CompiledDestination {
     Template(CompiledTemplate),
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleKind {
+    #[default]
+    Any,
+    File,
+    Directory,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
@@ -42,6 +52,10 @@ pub struct Rule {
 
     #[serde(rename = "match")]
     pub pattern: String,
+
+    #[serde(default)]
+    pub kind: RuleKind,
+
     pub to: String,
 }
 
@@ -127,6 +141,7 @@ impl Config {
             compiled_rules.push(CompiledRule {
                 name: rule.name.clone(),
                 matcher,
+                kind: rule.kind,
                 destination,
             });
         }

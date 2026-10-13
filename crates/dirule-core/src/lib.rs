@@ -7,7 +7,7 @@ mod template;
 mod transform;
 
 pub use acronyms::{AcronymLexicon, AcronymOptions};
-pub use config::{CURRENT_CONFIG_VERSION, CompiledConfig, Config, ConfigVersion, Rule};
+pub use config::{CURRENT_CONFIG_VERSION, CompiledConfig, Config, ConfigVersion, Rule, RuleKind};
 pub use error::{Error, Result};
 pub use matching::{Captures, Matcher};
 pub use plan::{Conflict, Entry, EntryKind, Plan, PlannedEntry, plan, plan_compiled};

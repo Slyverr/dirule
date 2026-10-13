@@ -66,21 +66,29 @@ JSON plans include the canonical target path; their source and destination paths
 `dirule init` creates a starter `dirule.toml`. Put project-specific rules before its general `**/*` rule: rules run in order, and the first match owns each original path.
 
 ```toml
-version = "1.0"
+version = "1.1"
 target = "."
 
 [[rules]]
 name = "Archive invoices"
 match = "Invoices/<year>-<vendor>-<title>.pdf"
+kind = "file"
 to = "template:Archive/${year}/${vendor|kebab-case}/${title|kebab-case}.pdf"
 
 [[rules]]
-name = "Normalize other names"
+name = "Normalize directory names"
 match = "**/*"
+kind = "directory"
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Normalize other file names"
+match = "**/*"
+kind = "file"
 to = "builtin:kebab-case"
 ```
 
-`<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `builtin:` applies a built-in case transformation to the entry name. Available transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
+`<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `kind` can select `file`, `directory`, or `any`; it defaults to `any`. A rule owns an entry only when its path pattern and kind both match. `builtin:` applies a built-in case transformation to the entry name. Available transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
 
 ## Conflict handling
 
