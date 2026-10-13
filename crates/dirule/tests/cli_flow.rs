@@ -156,6 +156,25 @@ fn init_preserves_an_existing_config() {
 }
 
 #[test]
+fn commands_do_not_search_parent_directories_for_a_config() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    let child = project.0.join("nested");
+    fs::create_dir(&child).expect("create nested working directory");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dirule"))
+        .args(["plan"])
+        .current_dir(&child)
+        .output()
+        .expect("run plan from nested directory");
+
+    assert_eq!(output.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains(&child.join("dirule.toml").display().to_string()));
+    assert!(error.contains("run `dirule init`"));
+}
+
+#[test]
 fn preset_listing_uses_the_platform_config_directory() {
     let project = TempProject::new();
     #[cfg(target_os = "windows")]
