@@ -576,10 +576,11 @@ fn parse_value(path: &Path, line: usize, bytes: &[u8]) -> Result<serde_json::Val
 }
 
 fn write_record(file: &mut File, record: &JournalRecord, path: &Path) -> Result<(), JournalError> {
-    serde_json::to_writer(&mut *file, record)
+    let mut bytes = serde_json::to_vec(record)
         .map_err(|source| JournalError::io(path, std::io::Error::other(source)))?;
-    file.write_all(b"\n")
-        .and_then(|()| file.flush())
+    bytes.push(b'\n');
+
+    file.write_all(&bytes)
         .and_then(|()| file.sync_all())
         .map_err(|source| JournalError::io(path, source))
 }
