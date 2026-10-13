@@ -2,8 +2,10 @@
 name = "dirule"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
-repository = "https://github.com/Slyverr/dirule"
+description = "A local-first CLI for applying reusable rules to file and directory names."
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
