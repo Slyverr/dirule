@@ -46,6 +46,60 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn built_in_transforms_match_equivalent_template_filters() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[acronyms]
+entries = ["XML", "iOS"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid configuration");
+    let entries = [
+        Entry {
+            path: PathBuf::from("MyXMLParser.tar.gz"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("iOSGuide.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    for (builtin, filter) in [
+        ("snake-case", "snake-case"),
+        ("kebab-case", "kebab-case"),
+        ("camel-case", "camel-case"),
+    ] {
+        let mut builtin_config = config.clone();
+        builtin_config.rules[0].to = format!("builtin:{builtin}");
+        let builtin_plan = plan(&builtin_config, &entries).expect("built-in plan");
+
+        let mut template_config = config.clone();
+        template_config.rules[0].to = format!("template:${{stem|{filter}}}.${{extension}}");
+        let template_plan = plan(&template_config, &entries).expect("template plan");
+
+        let builtin_destinations = builtin_plan
+            .entries
+            .iter()
+            .map(|entry| &entry.destination)
+            .collect::<Vec<_>>();
+        let template_destinations = template_plan
+            .entries
+            .iter()
+            .map(|entry| &entry.destination)
+            .collect::<Vec<_>>();
+        assert_eq!(builtin_destinations, template_destinations, "{builtin}");
+    }
+}
+
+#[test]
 fn longer_project_acronyms_take_precedence_at_token_boundaries() {
     let config = parse_config(
         r#"
