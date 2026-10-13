@@ -43,6 +43,44 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
     assert!(!paths.iter().any(|path| path.starts_with("ignored")));
 }
 
+#[cfg(unix)]
+#[test]
+fn scan_handles_git_repository_roots_with_newlines() {
+    let temp = TempDir::new();
+    let target = temp.0.join("repo\nwith-newline\r");
+    std::fs::create_dir(&target).expect("create repository root");
+    std::fs::write(target.join(".gitignore"), "tracked.txt\n").expect("write ignore rule");
+    std::fs::write(target.join("tracked.txt"), "content").expect("write tracked fixture");
+
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&target)
+        .status()
+        .expect("initialize Git fixture");
+    assert!(init.success(), "initialize Git fixture");
+    let add_ignore = Command::new("git")
+        .args(["add", ".gitignore"])
+        .current_dir(&target)
+        .status()
+        .expect("stage ignore rule");
+    assert!(add_ignore.success(), "stage ignore rule");
+    let add_tracked = Command::new("git")
+        .args(["add", "-f", "tracked.txt"])
+        .current_dir(&target)
+        .status()
+        .expect("stage ignored file");
+    assert!(add_tracked.success(), "stage ignored file");
+
+    let result = scan(&target).expect("scan repository root containing newline");
+
+    assert!(
+        result
+            .entries
+            .iter()
+            .any(|entry| entry.path == Path::new("tracked.txt"))
+    );
+}
+
 #[test]
 fn scan_respects_configured_global_gitignore() {
     run_global_gitignore_child("globally-ignored.txt\n", "scan_global_gitignore_child");

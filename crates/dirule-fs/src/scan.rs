@@ -408,16 +408,15 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
         return Ok((BTreeSet::new(), Vec::new()));
     }
 
-    let paths = std::str::from_utf8(&root.stdout)
-        .map_err(|error| ScanError::Git(format!("Git returned a non-Unicode path: {error}")))?;
-    let mut paths = paths.lines();
-    let root_path = paths
-        .next()
-        .ok_or_else(|| ScanError::Git("Git did not return a worktree path".into()))?;
-    let exclude = paths
-        .next()
-        .ok_or_else(|| ScanError::Git("Git did not return an exclude path".into()))?;
-    let exclude = PathBuf::from(exclude);
+    let (root, exclude) = git_paths_from_output(&root.stdout).map_or_else(
+        || {
+            Ok((
+                rev_parse_path(target, &["--show-toplevel"], "worktree")?,
+                rev_parse_path(target, &["--git-path", "info/exclude"], "exclude")?,
+            ))
+        },
+        Ok,
+    )?;
     let exclude = if exclude.is_absolute() {
         exclude
     } else {
@@ -425,12 +424,10 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
     };
     validate_ignore_file(&exclude)?;
 
-    let root = PathBuf::from(root_path)
-        .canonicalize()
-        .map_err(|source| ScanError::Metadata {
-            path: PathBuf::from(root_path),
-            source,
-        })?;
+    let root = root.canonicalize().map_err(|source| ScanError::Metadata {
+        path: root.clone(),
+        source,
+    })?;
     let target_from_root = target.strip_prefix(&root).map_err(|error| {
         ScanError::Git(format!(
             "target is outside its reported Git worktree: {error}"
@@ -471,6 +468,56 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
         }
     }
     Ok((paths, findings))
+}
+
+fn git_path_from_output(output: &[u8], kind: &str) -> Result<PathBuf, ScanError> {
+    let output = output.strip_suffix(b"\n").unwrap_or(output);
+    git_path_from_bytes(output, kind)
+}
+
+fn git_path_from_bytes(output: &[u8], kind: &str) -> Result<PathBuf, ScanError> {
+    #[cfg(windows)]
+    let output = output.strip_suffix(b"\r").unwrap_or(output);
+
+    let path = std::str::from_utf8(output).map_err(|error| {
+        ScanError::Git(format!("Git returned a non-Unicode {kind} path: {error}"))
+    })?;
+    if path.is_empty() {
+        return Err(ScanError::Git(format!("Git did not return a {kind} path")));
+    }
+
+    Ok(PathBuf::from(path))
+}
+
+fn git_paths_from_output(output: &[u8]) -> Option<(PathBuf, PathBuf)> {
+    let mut paths = output.split(|byte| *byte == b'\n');
+    let root = paths.next()?;
+    let exclude = paths.next()?;
+    if paths.next()? != b"" || paths.next().is_some() {
+        return None;
+    }
+
+    Some((
+        git_path_from_bytes(root, "worktree").ok()?,
+        git_path_from_bytes(exclude, "exclude").ok()?,
+    ))
+}
+
+fn rev_parse_path(target: &Path, arguments: &[&str], kind: &str) -> Result<PathBuf, ScanError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(target)
+        .arg("rev-parse")
+        .args(arguments)
+        .output()
+        .map_err(|error| ScanError::Git(format!("failed to find the Git {kind} path: {error}")))?;
+    if !output.status.success() {
+        return Err(ScanError::Git(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
+    }
+
+    git_path_from_output(&output.stdout, kind)
 }
 
 fn has_git_marker(target: &Path) -> bool {

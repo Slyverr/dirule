@@ -24,6 +24,8 @@
             version = cargoToml.workspace.package.version;
             src = pkgs.lib.cleanSource ./.;
 
+            nativeBuildInputs = [ pkgs.git ];
+
             cargoLock.lockFile = ./Cargo.lock;
             cargoBuildFlags = [
               "-p"
