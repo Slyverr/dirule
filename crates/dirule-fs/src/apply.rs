@@ -27,6 +27,8 @@ pub enum ApplyError {
     ExistingDestination(PathBuf),
     #[error("planned path is not a safe target-relative path: {0}")]
     UnsafePath(PathBuf),
+    #[error("filesystem does not support atomic no-replace renames at: {0}")]
+    AtomicRenameUnsupported(PathBuf),
     #[error("source type changed since planning: {0}")]
     ChangedSource(PathBuf),
     #[error("filesystem operation failed for {path}: {source}")]
@@ -145,6 +147,30 @@ pub fn apply_with_conflict_policy(
             .cmp(&depth(&right.source))
             .then_with(|| left.source.cmp(&right.source))
     });
+
+    for entry in &entries {
+        if entry.source == entry.destination {
+            continue;
+        }
+
+        let destination = target.join(&entry.destination);
+        let parent = nearest_existing_directory(&target, &destination)?;
+        match renamore::rename_exclusive_is_atomic(parent) {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(ApplyError::AtomicRenameUnsupported(
+                    entry.destination.clone(),
+                ));
+            }
+            Err(source) => {
+                return Err(ApplyError::Io {
+                    path: destination,
+                    source,
+                });
+            }
+        }
+    }
+
     validate_sources(&target, &entries, snapshot)?;
     let mut moved_directories = Vec::<(PathBuf, PathBuf)>::new();
     let mut report = ApplyReport {
@@ -205,9 +231,15 @@ pub fn apply_with_conflict_policy(
             })?;
         }
 
-        std::fs::rename(&source, &destination).map_err(|source_error| ApplyError::Io {
-            path: source.clone(),
-            source: source_error,
+        renamore::rename_exclusive(&source, &destination).map_err(|source_error| {
+            if source_error.kind() == std::io::ErrorKind::AlreadyExists {
+                ApplyError::ExistingDestination(destination.clone())
+            } else {
+                ApplyError::Io {
+                    path: source.clone(),
+                    source: source_error,
+                }
+            }
         })?;
         if entry.kind == EntryKind::Directory {
             moved_directories.push((entry.source.clone(), entry.destination.clone()));
@@ -339,6 +371,28 @@ fn destination_exists(path: &Path) -> Result<bool, ApplyError> {
             path: path.to_path_buf(),
             source,
         }),
+    }
+}
+
+fn nearest_existing_directory(root: &Path, destination: &Path) -> Result<PathBuf, ApplyError> {
+    let mut current = destination.parent().unwrap_or(root).to_path_buf();
+    loop {
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                return Ok(current);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(ApplyError::Io {
+                    path: current,
+                    source,
+                });
+            }
+        }
+        if current == root || !current.pop() {
+            return Err(ApplyError::UnsafePath(destination.to_path_buf()));
+        }
     }
 }
 
