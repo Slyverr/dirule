@@ -27,6 +27,8 @@ pub(crate) struct SourceIdentity {
     volume_serial_number: Option<u32>,
     #[cfg(windows)]
     file_index: Option<u64>,
+    #[cfg(windows)]
+    extended_file_id: Option<crate::windows_identity::ExtendedFileId>,
 }
 
 #[derive(Debug, Error)]
@@ -260,14 +262,14 @@ impl SourceIdentity {
         }
         #[cfg(windows)]
         {
-            let (volume_serial_number, file_index) = crate::windows_identity::get(path)
-                .map_or((None, None), |(volume, index)| (Some(volume), Some(index)));
+            let identity = crate::windows_identity::get(path);
             Self {
                 length: metadata.len(),
                 modified: metadata.modified().ok(),
                 kind,
-                volume_serial_number,
-                file_index,
+                volume_serial_number: identity.and_then(|value| value.volume_serial_number),
+                file_index: identity.and_then(|value| value.file_index),
+                extended_file_id: identity.and_then(|value| value.extended_file_id),
             }
         }
         #[cfg(not(any(unix, windows)))]
@@ -299,8 +301,12 @@ impl SourceIdentity {
         #[cfg(windows)]
         {
             common
-                && crate::windows_identity::get(path).is_some_and(|(volume, index)| {
-                    self.volume_serial_number == Some(volume) && self.file_index == Some(index)
+                && crate::windows_identity::get(path).is_some_and(|identity| {
+                    identity.matches(
+                        self.volume_serial_number,
+                        self.file_index,
+                        self.extended_file_id,
+                    )
                 })
         }
         #[cfg(not(any(unix, windows)))]
@@ -327,12 +333,14 @@ impl SourceIdentity {
         }
         #[cfg(windows)]
         {
-            match crate::windows_identity::get(path) {
-                Some((volume, index)) => {
-                    self.volume_serial_number == Some(volume) && self.file_index == Some(index)
-                }
-                None => self.matches(metadata, kind, path),
-            }
+            let _ = metadata;
+            crate::windows_identity::get(path).is_some_and(|identity| {
+                identity.matches(
+                    self.volume_serial_number,
+                    self.file_index,
+                    self.extended_file_id,
+                )
+            })
         }
         #[cfg(not(any(unix, windows)))]
         {

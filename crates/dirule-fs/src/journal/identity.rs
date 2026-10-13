@@ -70,6 +70,9 @@ pub(super) struct ObjectIdentity {
     volume_serial_number: Option<u32>,
     #[cfg(windows)]
     file_index: Option<u64>,
+    #[cfg(windows)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extended_file_id: Option<crate::windows_identity::ExtendedFileId>,
 }
 
 impl ObjectIdentity {
@@ -87,6 +90,8 @@ impl ObjectIdentity {
             volume_serial_number: None,
             #[cfg(windows)]
             file_index: None,
+            #[cfg(windows)]
+            extended_file_id: None,
         }
     }
 
@@ -110,15 +115,15 @@ impl ObjectIdentity {
         }
         #[cfg(windows)]
         {
-            let (volume_serial_number, file_index) = crate::windows_identity::get(path)
-                .map_or((None, None), |(volume, index)| (Some(volume), Some(index)));
+            let identity = crate::windows_identity::get(path);
             Self {
                 kind,
                 length: metadata.len(),
                 modified_seconds: modified.map(|time| time.as_secs()),
                 modified_nanos: modified.map(|time| time.subsec_nanos()),
-                volume_serial_number,
-                file_index,
+                volume_serial_number: identity.and_then(|value| value.volume_serial_number),
+                file_index: identity.and_then(|value| value.file_index),
+                extended_file_id: identity.and_then(|value| value.extended_file_id),
             }
         }
         #[cfg(not(any(unix, windows)))]
@@ -161,8 +166,12 @@ impl ObjectIdentity {
         #[cfg(windows)]
         {
             let _ = metadata;
-            crate::windows_identity::get(path).is_some_and(|(volume, index)| {
-                self.volume_serial_number == Some(volume) && self.file_index == Some(index)
+            crate::windows_identity::get(path).is_some_and(|identity| {
+                identity.matches(
+                    self.volume_serial_number,
+                    self.file_index,
+                    self.extended_file_id,
+                )
             })
         }
         #[cfg(not(any(unix, windows)))]
@@ -170,5 +179,27 @@ impl ObjectIdentity {
             let _ = (metadata, path);
             false
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::ObjectIdentity;
+
+    #[test]
+    fn reads_legacy_windows_identities_without_an_extended_file_id() {
+        let identity: ObjectIdentity = serde_json::from_value(serde_json::json!({
+            "kind": "file",
+            "length": 12,
+            "modified_seconds": 1,
+            "modified_nanos": 2,
+            "volume_serial_number": 7,
+            "file_index": 42
+        }))
+        .expect("deserialize a journal identity written before extended IDs");
+
+        assert_eq!(identity.volume_serial_number, Some(7));
+        assert_eq!(identity.file_index, Some(42));
+        assert_eq!(identity.extended_file_id, None);
     }
 }
