@@ -106,13 +106,26 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let json = project.run(&["plan", "--format", "json"]);
     assert!(json.status.success());
     let value: serde_json::Value = serde_json::from_slice(&json.stdout).expect("valid JSON plan");
-    let changes = value["entries"]
-        .as_array()
-        .expect("plan entries")
+    let entries = value["entries"].as_array().expect("plan entries");
+    let changes = entries
         .iter()
         .filter(|entry| entry["source"] != entry["destination"])
         .count();
     assert_eq!(changes, 3);
+    assert!(entries.iter().any(|entry| {
+        entry["source"] == "HTTPServer/OAuthToken.txt"
+            && entry["destination"] == "http-server/o-auth-token.txt"
+    }));
+    assert!(entries.iter().all(|entry| {
+        !entry["source"]
+            .as_str()
+            .expect("source path")
+            .contains('\\')
+            && !entry["destination"]
+                .as_str()
+                .expect("destination path")
+                .contains('\\')
+    }));
     assert!(!String::from_utf8_lossy(&json.stdout).contains('\u{1b}'));
 
     let apply = project.run(&["apply", "--yes", "--color", "always"]);

@@ -42,6 +42,8 @@ cargo run -p dirule -- apply
 
 `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output.
 
+JSON plan paths are target-relative and use `/` separators on every platform.
+
 ## Presets
 
 Save a project's validated rules as a reusable user preset, then select it for another project:

@@ -51,7 +51,20 @@ pub(super) fn plan(
     context: PlanContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
-        println!("{}", serde_json::to_string_pretty(plan)?);
+        let report = serde_json::json!({
+            "entries": plan.entries.iter().map(|entry| serde_json::json!({
+                "source": portable_path(&entry.source),
+                "destination": portable_path(&entry.destination),
+                "kind": entry.kind,
+                "rule": entry.rule,
+            })).collect::<Vec<_>>(),
+            "conflicts": plan.conflicts.iter().map(|conflict| serde_json::json!({
+                "path": portable_path(&conflict.path),
+                "reason": conflict.reason,
+            })).collect::<Vec<_>>(),
+            "findings": plan.findings,
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
 
@@ -113,6 +126,13 @@ pub(super) fn plan(
     }
 
     Ok(())
+}
+
+fn portable_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 pub(super) fn no_changes(color: ColorChoice) {
