@@ -60,7 +60,7 @@ Human apply output includes the run identifier and the command to undo it. `runs
 - A successful apply records the target, fingerprint, each rename, and the returned run identifier.
 - Undo restores files and directories, preserves file contents, and handles case-only renames and move chains or cycles.
 - Replaced or modified destinations, occupied original paths, and a changed target are rejected without mutation.
-- Interruption after a recorded intent but before completion can be reconciled safely; ambiguous state is refused.
+- Interruption after a recorded intent but before completion, or after a completed staging move in a cycle, can be reconciled safely; ambiguous state is refused.
 - Interruption during undo is recoverable by retrying the same run identifier.
 - A newly created parent is removed only when empty and known to belong to the run.
 - Apply-time rollback failures remain visible in the run list and do not discard recovery data.

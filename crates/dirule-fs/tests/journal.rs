@@ -196,6 +196,49 @@ fn remove_final_status_record(journal: &Path) {
         .expect("simulate a crash before final status");
 }
 
+fn retain_first_completed_move(journal: &Path) -> PathBuf {
+    let records = std::fs::read_to_string(journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut retained = Vec::with_capacity(3);
+    let mut sequence = None;
+    let mut destination = None;
+
+    for record in records {
+        let value: serde_json::Value = serde_json::from_str(&record).expect("parse journal record");
+        match value["record"].as_str() {
+            Some("header") => retained.push(record),
+            Some("move_intent") if sequence.is_none() => {
+                sequence = value["sequence"].as_u64();
+                destination = Some(
+                    serde_json::from_value(value["destination"].clone())
+                        .expect("decode first move destination"),
+                );
+                retained.push(record);
+            }
+            Some("move_completed") if value["sequence"].as_u64() == sequence => {
+                retained.push(record);
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    assert!(sequence.is_some(), "journal contains a move intent");
+    assert!(
+        retained
+            .last()
+            .is_some_and(|record| record.contains("\"record\":\"move_completed\"")),
+        "first move has a completion record"
+    );
+    std::fs::write(journal, format!("{}\n", retained.join("\n")))
+        .expect("simulate a crash after first completed move");
+
+    destination.expect("first move destination")
+}
+
 fn simulate_interrupted_undo(journal: &Path) {
     let mut records = std::fs::read_to_string(journal)
         .expect("read journal")
@@ -283,6 +326,53 @@ fn journaled_file_swap_can_be_undone() {
 
     remove_final_status_record(&temp.0.join(format!("state/runs/{run_id}.jsonl")));
     store.undo(&run_id).expect("undo journaled swap");
+
+    assert_eq!(std::fs::read(target.join("first")).unwrap(), b"first");
+    assert_eq!(std::fs::read(target.join("second")).unwrap(), b"second");
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn interrupted_cycle_staging_can_be_undone() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("first"), "first").expect("write first source");
+    std::fs::write(target.join("second"), "second").expect("write second source");
+    let snapshot = scan(&target).expect("scan project");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("first"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+        ],
+        ..Plan::default()
+    };
+    let store = store(&temp);
+
+    let applied = apply_journaled(&target, &plan, &snapshot, ConflictPolicy::Abort, &store)
+        .expect("apply journaled swap");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
+    let staged_path = target.join(retain_first_completed_move(&journal));
+
+    std::fs::rename(target.join("second"), &staged_path).expect("restore staged first source");
+    std::fs::rename(target.join("first"), target.join("second"))
+        .expect("restore second source path");
+
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Interrupted);
+    store
+        .undo(&run_id)
+        .expect("undo the completed staging move");
 
     assert_eq!(std::fs::read(target.join("first")).unwrap(), b"first");
     assert_eq!(std::fs::read(target.join("second")).unwrap(), b"second");
