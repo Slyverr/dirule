@@ -323,12 +323,14 @@ dependencies = [
 name = "dirule-fs"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "dirule-core",
  "fs4",
  "ignore",
  "renamore",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "windows-sys",
 ]
