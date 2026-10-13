@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct TempProject(PathBuf);
@@ -17,6 +18,10 @@ impl TempProject {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        self.command(args).output().expect("run dirule")
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
         #[cfg(target_os = "windows")]
         command.env("LOCALAPPDATA", self.0.with_extension("local-app-data"));
@@ -24,11 +29,9 @@ impl TempProject {
         command.env("HOME", self.0.with_extension("home"));
         #[cfg(all(unix, not(target_os = "macos")))]
         command.env("XDG_STATE_HOME", self.0.with_extension("state"));
+        command.args(args).current_dir(&self.0);
+
         command
-            .args(args)
-            .current_dir(&self.0)
-            .output()
-            .expect("run dirule")
     }
 
     fn journal_directory(&self) -> PathBuf {
@@ -211,6 +214,37 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     );
     assert!(project.0.join("MyXMLParser.rs").is_file());
     assert!(project.0.join("HTTPServer/OAuthToken.txt").is_file());
+}
+
+#[test]
+fn plan_exits_cleanly_when_a_piped_reader_closes_early() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    for index in 0..2_000 {
+        fs::write(project.0.join(format!("FileNumber{index:04}.txt")), "x")
+            .expect("write fixture file");
+    }
+
+    for args in [&["plan"][..], &["plan", "--format", "json"][..]] {
+        let mut child = project
+            .command(args)
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start dirule");
+        let mut stdout = child.stdout.take().expect("capture stdout");
+        let mut first_byte = [0];
+        stdout
+            .read_exact(&mut first_byte)
+            .expect("read initial output");
+        drop(stdout);
+
+        let output = child.wait_with_output().expect("wait for dirule");
+        assert!(
+            output.status.success(),
+            "dirule did not handle the closed pipe cleanly: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]

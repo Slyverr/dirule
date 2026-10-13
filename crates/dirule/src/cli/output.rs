@@ -5,10 +5,31 @@ use dirule_core::Plan;
 use dirule_fs::{JournalDetails, JournalRun, JournalStatus};
 use std::ffi::OsStr;
 use std::fmt;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+macro_rules! println {
+    ($($argument:tt)*) => {
+        writeln!(io::stdout().lock(), $($argument)*)?
+    };
+}
+
+macro_rules! eprintln {
+    ($($argument:tt)*) => {
+        writeln!(io::stderr().lock(), $($argument)*)?
+    };
+}
+
 const CURRENT_OUTPUT_VERSION: &str = "1.0";
+
+pub(super) fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<io::Error>()
+        .is_some_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+        || error
+            .downcast_ref::<serde_json::Error>()
+            .is_some_and(|error| error.io_error_kind() == Some(io::ErrorKind::BrokenPipe))
+}
 
 #[derive(Clone, Copy)]
 struct Colorizer {
@@ -82,17 +103,23 @@ pub(super) struct ApplySummary<'a> {
     pub(super) run_id: Option<&'a str>,
 }
 
-pub(super) fn created_config(path: &Path, color: ColorChoice) {
+pub(super) fn created_config(path: &Path, color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
 
     println!("{} {}", styles.style("Created", "32"), path.display());
+
+    Ok(())
 }
 
 fn preset_name(name: &str, styles: Colorizer) -> Styled<&str> {
     styles.style(name, "36")
 }
 
-pub(super) fn presets(names: &[String], format: OutputFormat, color: ColorChoice) {
+pub(super) fn presets(
+    names: &[String],
+    format: OutputFormat,
+    color: ColorChoice,
+) -> io::Result<()> {
     if format == OutputFormat::Json {
         let value = serde_json::json!({
             "schema_version": CURRENT_OUTPUT_VERSION,
@@ -102,7 +129,7 @@ pub(super) fn presets(names: &[String], format: OutputFormat, color: ColorChoice
             "{}",
             serde_json::to_string_pretty(&value).expect("preset listing is serializable")
         );
-        return;
+        return Ok(());
     }
 
     let styles = Colorizer::stdout(color);
@@ -115,9 +142,11 @@ pub(super) fn presets(names: &[String], format: OutputFormat, color: ColorChoice
             println!("  {}", preset_name(name, styles));
         }
     }
+
+    Ok(())
 }
 
-pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) {
+pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
 
     println!(
@@ -126,9 +155,11 @@ pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) {
         preset_name(name, styles),
         path.display()
     );
+
+    Ok(())
 }
 
-pub(super) fn removed_preset(name: &str, color: ColorChoice) {
+pub(super) fn removed_preset(name: &str, color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
 
     println!(
@@ -136,12 +167,16 @@ pub(super) fn removed_preset(name: &str, color: ColorChoice) {
         styles.style("Done.", "32"),
         preset_name(name, styles)
     );
+
+    Ok(())
 }
 
-pub(super) fn error(message: &str, color: ColorChoice) {
+pub(super) fn error(message: &str, color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stderr(color);
 
     eprintln!("{}: {message}", styles.style("dirule", "31"));
+
+    Ok(())
 }
 
 pub(super) fn plan(
@@ -271,8 +306,8 @@ pub(super) fn apply_result(
                 println!("Undo with: dirule undo {run_id}");
             }
         }
-        ApplyStatus::NoChanges => no_changes(color),
-        ApplyStatus::Cancelled => cancelled("Apply", color),
+        ApplyStatus::NoChanges => no_changes(color)?,
+        ApplyStatus::Cancelled => cancelled("Apply", color)?,
     }
     Ok(())
 }
@@ -287,7 +322,11 @@ impl ApplyStatus {
     }
 }
 
-pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice) {
+pub(super) fn runs(
+    runs: &[JournalRun],
+    format: OutputFormat,
+    color: ColorChoice,
+) -> io::Result<()> {
     if format == OutputFormat::Json {
         let value = serde_json::json!({
             "schema_version": CURRENT_OUTPUT_VERSION,
@@ -303,12 +342,12 @@ pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice
             "{}",
             serde_json::to_string_pretty(&value).expect("run listing is serializable")
         );
-        return;
+        return Ok(());
     }
 
     if runs.is_empty() {
         println!("No apply runs found.");
-        return;
+        return Ok(());
     }
 
     let styles = Colorizer::stdout(color);
@@ -324,6 +363,8 @@ pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice
             run.target.display()
         );
     }
+
+    Ok(())
 }
 
 pub(super) fn run_details(
@@ -416,7 +457,7 @@ pub(super) fn undo_result(
             );
         }
     } else {
-        cancelled("Undo", color);
+        cancelled("Undo", color)?;
     }
     Ok(())
 }
@@ -440,17 +481,21 @@ fn portable_path(path: &Path) -> String {
         .join("/")
 }
 
-pub(super) fn no_changes(color: ColorChoice) {
+pub(super) fn no_changes(color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
 
     println!("{}", styles.style("No changes to apply.", "32"));
+
+    Ok(())
 }
 
-pub(super) fn cancelled(action: &str, color: ColorChoice) {
+pub(super) fn cancelled(action: &str, color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
     let message = format!("{action} cancelled");
 
     println!("{}.", styles.style(message, "33"));
+
+    Ok(())
 }
 
 fn color_enabled(choice: ColorChoice, is_terminal: bool) -> bool {

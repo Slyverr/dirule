@@ -30,14 +30,18 @@ impl Error for CliError {
 }
 
 pub fn print_error(error: &CliError) {
-    output::error(&error.to_string(), error.color);
+    let _ = output::error(&error.to_string(), error.color);
 }
 
 pub fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
     let color = cli.color;
 
-    run_command(cli.command, color).map_err(|source| CliError { source, color })
+    match run_command(cli.command, color) {
+        Ok(()) => Ok(()),
+        Err(source) if output::is_broken_pipe(source.as_ref()) => Ok(()),
+        Err(source) => Err(CliError { source, color }),
+    }
 }
 
 fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Error>> {
@@ -165,7 +169,7 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         CliCommand::Runs(args) => match args.command {
             RunsCommand::List { format } => {
                 let runs = JournalStore::new(journal_directory()?).list()?;
-                output::runs(&runs, format, color);
+                output::runs(&runs, format, color)?;
                 Ok(())
             }
             RunsCommand::Show { run_id, format } => {
@@ -197,7 +201,9 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         CliCommand::Completions { shell } => {
             let mut command = Cli::command();
             let binary_name = command.get_name().to_owned();
-            clap_complete::generate(shell, &mut command, binary_name, &mut io::stdout());
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut command, binary_name, &mut script);
+            io::stdout().lock().write_all(&script)?;
             Ok(())
         }
     }
@@ -215,7 +221,7 @@ fn initialize(color: ColorChoice) -> Result<(), Box<dyn Error>> {
         .open(&path)
         .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
     file.write_all(content.as_bytes())?;
-    output::created_config(&path, color);
+    output::created_config(&path, color)?;
     Ok(())
 }
 
@@ -288,7 +294,7 @@ fn list_presets(format: args::OutputFormat, color: ColorChoice) -> Result<(), Bo
     }
 
     presets.sort();
-    output::presets(&presets, format, color);
+    output::presets(&presets, format, color)?;
     Ok(())
 }
 
@@ -331,7 +337,7 @@ fn save_preset(options: args::PresetSaveArgs, color: ColorChoice) -> Result<(), 
         return Err(format!("cannot write {}: {error}", destination.display()).into());
     }
 
-    output::saved_preset(&options.name, &destination, color);
+    output::saved_preset(&options.name, &destination, color)?;
     Ok(())
 }
 
@@ -348,12 +354,12 @@ fn remove_preset(
         "use --yes to remove a preset without an interactive terminal",
         options.yes,
     )? {
-        output::cancelled("Preset removal", color);
+        output::cancelled("Preset removal", color)?;
         return Ok(());
     }
 
     fs::remove_file(&path).map_err(|error| format!("cannot remove {}: {error}", path.display()))?;
-    output::removed_preset(&options.name, color);
+    output::removed_preset(&options.name, color)?;
     Ok(())
 }
 
