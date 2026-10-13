@@ -39,6 +39,19 @@ fn store(temp: &TempDir) -> JournalStore {
     JournalStore::new(temp.0.join("state/runs"))
 }
 
+fn simulate_interrupted_move(journal: &PathBuf) {
+    let retained = std::fs::read_to_string(journal)
+        .expect("read journal")
+        .lines()
+        .filter(|line| {
+            !line.contains("\"record\":\"move_completed\"")
+                && !line.contains("\"record\":\"status\"")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(journal, format!("{retained}\n")).expect("simulate a crash after move intent");
+}
+
 #[test]
 fn journaled_apply_can_be_listed_and_undone() {
     let temp = TempDir::new();
@@ -91,6 +104,110 @@ fn journaled_case_only_rename_can_be_undone() {
 
     assert_eq!(std::fs::read(target.join("Name.txt")).unwrap(), b"contents");
     assert_eq!(std::fs::read_dir(&target).unwrap().count(), 1);
+}
+
+#[test]
+fn interrupted_apply_after_rename_is_reconciled_and_undone() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
+    simulate_interrupted_move(&journal);
+
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Interrupted);
+    store
+        .undo(&run_id)
+        .expect("reconcile and undo the completed filesystem move");
+
+    assert_eq!(
+        std::fs::read(target.join("before.txt")).unwrap(),
+        b"contents"
+    );
+    assert!(!target.join("after.txt").exists());
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn interrupted_apply_before_rename_leaves_the_source_untouched() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
+    std::fs::rename(target.join("after.txt"), target.join("before.txt"))
+        .expect("restore source to simulate crash before rename");
+    simulate_interrupted_move(&journal);
+
+    store.undo(&run_id).expect("reconcile an unapplied move");
+
+    assert_eq!(
+        std::fs::read(target.join("before.txt")).unwrap(),
+        b"contents"
+    );
+    assert!(!target.join("after.txt").exists());
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn interrupted_apply_with_ambiguous_destination_is_left_untouched() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
+    std::fs::write(target.join("after.txt"), "changed contents")
+        .expect("replace destination contents");
+    simulate_interrupted_move(&journal);
+
+    let error = store
+        .undo(&run_id)
+        .expect_err("ambiguous identity must block recovery");
+
+    assert!(
+        error
+            .to_string()
+            .contains("unresolved filesystem operation")
+    );
+    assert_eq!(
+        std::fs::read(target.join("after.txt")).unwrap(),
+        b"changed contents"
+    );
+    assert!(!target.join("before.txt").exists());
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Interrupted);
 }
 
 #[test]
