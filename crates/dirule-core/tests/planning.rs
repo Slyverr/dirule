@@ -226,6 +226,92 @@ fn planning_propagates_directory_names_and_keeps_first_match_on_original_paths()
     );
 }
 
+#[test]
+fn first_matching_rule_owns_the_original_path() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Archive report PDFs"
+match = "Reports/*.pdf"
+to = "template:archive/${name}"
+
+[[rules]]
+name = "Rewrite archived paths"
+match = "archive/**"
+to = "template:changed/${path}"
+
+[[rules]]
+name = "Normalize remaining PDFs"
+match = "**/*.pdf"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid configuration");
+    let entries = [Entry {
+        path: PathBuf::from("Reports/MyReport.pdf"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].rule.as_deref(),
+        Some("Archive report PDFs")
+    );
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("archive/MyReport.pdf")
+    );
+}
+
+#[test]
+fn collisions_are_found_across_distinct_rule_owners() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Archive A reports"
+match = "A/<part>.txt"
+to = "template:archive/${part}.txt"
+
+[[rules]]
+name = "Archive B reports"
+match = "B/<part>.txt"
+to = "template:archive/${part}.txt"
+"#,
+    )
+    .expect("valid configuration");
+    let entries = [
+        Entry {
+            path: PathBuf::from("A/report.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("B/report.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan with a conflict");
+
+    assert_eq!(
+        planned
+            .entries
+            .iter()
+            .map(|entry| entry.rule.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("Archive A reports"), Some("Archive B reports")]
+    );
+    assert_eq!(planned.conflicts.len(), 1, "{planned:#?}");
+    assert_eq!(
+        planned.conflicts[0].path,
+        PathBuf::from("archive/report.txt")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn path_separator_matching_does_not_treat_a_backslash_as_a_directory() {
