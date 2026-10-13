@@ -63,6 +63,47 @@ fn run_details_include_target_relative_rename_operations() {
     assert_eq!(details.operations[0].kind, dirule_core::EntryKind::File);
 }
 
+#[cfg(unix)]
+#[test]
+fn journal_state_uses_owner_only_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (temp, _target, _store, _run_id, journal) = journaled_file_run();
+    let lock = journal.with_extension("lock");
+    let state_directory = temp.0.join("state");
+    let runs_directory = state_directory.join("runs");
+
+    assert_eq!(
+        std::fs::metadata(&state_directory)
+            .expect("read state directory permissions")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        std::fs::metadata(&runs_directory)
+            .expect("read runs directory permissions")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+
+    for path in [&journal, &lock] {
+        assert_eq!(
+            std::fs::metadata(path)
+                .expect("read journal state file permissions")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "{} should be accessible only by its owner",
+            path.display()
+        );
+    }
+}
+
 fn journaled_run(files: &[(&str, &str)]) -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
     let temp = TempDir::new();
     let target = temp.0.join("project");
