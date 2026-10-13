@@ -89,6 +89,8 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
         path: target.to_path_buf(),
         source,
     })?;
+    let vacated_paths = path::VacatedPaths::new(&target, &plan.entries);
+
     for entry in &plan.entries {
         path::ensure_relative(&entry.source)?;
         path::ensure_relative(&entry.destination)?;
@@ -99,7 +101,7 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
         match path::ensure_parent_safe(&target, destination.parent().unwrap_or(&target)) {
             Ok(()) => {}
             Err(ApplyError::ExistingDestination(path))
-                if path::will_be_vacated(&target, &path, plan) => {}
+                if vacated_paths.contains(&target, &path) => {}
             Err(error @ (ApplyError::ExistingDestination(_) | ApplyError::UnsafePath(_))) => {
                 if !plan
                     .conflicts
@@ -116,7 +118,7 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
             Err(error) => return Err(error),
         }
         if path::destination_exists(&destination)?
-            && !path::will_be_vacated(&target, &destination, plan)
+            && !vacated_paths.contains(&target, &destination)
             && !plan
                 .conflicts
                 .iter()

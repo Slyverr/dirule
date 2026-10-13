@@ -1,6 +1,70 @@
 use super::ApplyError;
-use dirule_core::{EntryKind, Plan};
+use dirule_core::{EntryKind, PlannedEntry};
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
+
+pub(super) struct VacatedPaths<'plan> {
+    sources: HashSet<&'plan Path>,
+    directories: HashSet<&'plan Path>,
+    canonical_sources: HashSet<PathBuf>,
+}
+
+impl<'plan> VacatedPaths<'plan> {
+    pub(super) fn new(target: &Path, entries: &'plan [PlannedEntry]) -> Self {
+        let mut sources = HashSet::with_capacity(entries.len());
+        let mut directories = HashSet::new();
+        let mut canonical_sources = HashSet::new();
+
+        for entry in entries {
+            if entry.source == entry.destination {
+                continue;
+            }
+
+            sources.insert(entry.source.as_path());
+            if entry.kind == EntryKind::Directory {
+                directories.insert(entry.source.as_path());
+            }
+
+            let source = target.join(&entry.source);
+            if std::fs::symlink_metadata(&source)
+                .is_ok_and(|metadata| !metadata.file_type().is_symlink())
+                && let Ok(canonical) = std::fs::canonicalize(source)
+            {
+                canonical_sources.insert(canonical);
+            }
+        }
+
+        Self {
+            sources,
+            directories,
+            canonical_sources,
+        }
+    }
+
+    pub(super) fn contains(&self, target: &Path, path: &Path) -> bool {
+        let Ok(relative) = path.strip_prefix(target) else {
+            return false;
+        };
+
+        if self.sources.contains(relative)
+            || relative
+                .ancestors()
+                .any(|ancestor| self.directories.contains(ancestor))
+        {
+            return true;
+        }
+
+        if !self.canonical_sources.is_empty()
+            && std::fs::symlink_metadata(path)
+                .is_ok_and(|metadata| !metadata.file_type().is_symlink())
+            && let Ok(canonical) = std::fs::canonicalize(path)
+        {
+            return self.canonical_sources.contains(&canonical);
+        }
+
+        false
+    }
+}
 
 pub(super) fn ensure_relative(path: &Path) -> Result<(), ApplyError> {
     if path.as_os_str().is_empty()
@@ -124,19 +188,6 @@ pub(super) fn nearest_existing_directory(
             return Err(ApplyError::UnsafePath(destination.to_path_buf()));
         }
     }
-}
-
-pub(super) fn will_be_vacated(target: &Path, path: &Path, plan: &Plan) -> bool {
-    let Ok(relative) = path.strip_prefix(target) else {
-        return false;
-    };
-
-    plan.entries.iter().any(|entry| {
-        entry.source != entry.destination
-            && (entry.source == relative
-                || (entry.kind == EntryKind::Directory && relative.starts_with(&entry.source))
-                || same_existing_path(&target.join(&entry.source), path))
-    })
 }
 
 pub(super) fn same_existing_path(left: &Path, right: &Path) -> bool {
