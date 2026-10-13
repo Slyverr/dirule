@@ -24,6 +24,8 @@ pub(super) enum CliCommand {
     Init,
     /// Check a target without changing files.
     Check(OperationArgs),
+    /// Validate a config without scanning its target.
+    Validate(ValidateArgs),
     /// Preview planned filesystem changes.
     Plan(OperationArgs),
     /// Review and apply a plan.
@@ -70,6 +72,16 @@ pub(super) struct RuleSourceArgs {
     /// Select a named preset.
     #[arg(long, value_name = "NAME")]
     pub(super) preset: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct ValidateArgs {
+    #[command(flatten)]
+    pub(super) rules: RuleSourceArgs,
+
+    /// Output as human-readable text or JSON.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    pub(super) format: OutputFormat,
 }
 
 #[derive(Debug, Args)]
@@ -189,7 +201,9 @@ pub(super) enum ColorChoice {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplyArgs, Cli, CliCommand, ConflictAction, OutputFormat, PresetsCommand};
+    use super::{
+        ApplyArgs, Cli, CliCommand, ConflictAction, OutputFormat, PresetsCommand, ValidateArgs,
+    };
     use clap::Parser;
 
     #[test]
@@ -262,6 +276,29 @@ mod tests {
             .expect_err("unknown output format");
 
         assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn validate_parses_config_source_and_output_format() {
+        let cli = Cli::try_parse_from([
+            "dirule",
+            "validate",
+            "--config",
+            "rules.toml",
+            "--format",
+            "json",
+        ])
+        .expect("valid validate options");
+
+        let CliCommand::Validate(ValidateArgs { rules, format }) = cli.command else {
+            panic!("expected validate command");
+        };
+
+        assert_eq!(
+            rules.config.as_deref(),
+            Some(std::path::Path::new("rules.toml"))
+        );
+        assert_eq!(format, OutputFormat::Json);
     }
 
     #[test]

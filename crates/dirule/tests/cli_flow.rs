@@ -294,6 +294,7 @@ fn completions_generate_commands_and_global_options() {
     );
     let script = String::from_utf8_lossy(&output.stdout);
     assert!(script.contains("completions"));
+    assert!(script.contains("validate"));
     assert!(script.contains("presets"));
     assert!(script.contains("--target"));
     assert!(script.contains("--format"));
@@ -478,6 +479,81 @@ fn preset_listing_uses_the_platform_config_directory() {
         stdout.contains("downloads"),
         "expected the preset listing to include downloads; stdout: {stdout}\nstderr: {stderr}"
     );
+}
+
+#[test]
+fn validate_checks_config_without_scanning_its_target() {
+    let project = TempProject::new();
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\ntarget = \"missing-target\"\n\n[[rules]]\nname = \"Normalize\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write config with missing target");
+
+    let output = project.run(&["validate", "--format", "json"]);
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid validation JSON");
+    assert_eq!(result["schema_version"], "1.0");
+    assert_eq!(result["valid"], true);
+    assert_eq!(result["source"]["kind"], "config");
+    assert_eq!(result["source"]["name"], "dirule.toml");
+    assert_eq!(result["rule_count"], 1);
+    assert!(!project.0.join("missing-target").exists());
+    assert!(!project.journal_directory().exists());
+}
+
+#[test]
+fn validate_loads_a_preset_without_a_project_config() {
+    let project = TempProject::new();
+    let presets = preset_config_base(&project).join("dirule/presets");
+    fs::create_dir_all(&presets).expect("create user preset directory");
+    fs::write(
+        presets.join("offline.toml"),
+        "version = \"1.0\"\ntarget = \"missing-target\"\n\n[[rules]]\nname = \"Normalize\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write user preset");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let output = command
+        .args(["validate", "--preset", "offline"])
+        .current_dir(&project.0)
+        .output()
+        .expect("validate user preset");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Preset is valid: offline (1 rule)"));
+    assert!(!project.0.join("missing-target").exists());
+}
+
+#[test]
+fn validate_reports_invalid_configuration_without_scanning() {
+    let project = TempProject::new();
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\ntarget = \"missing-target\"\n\n[[rules]]\nname = \"Invalid pattern\"\nmatch = \"<first><last>.txt\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write invalid config");
+
+    let output = project.run(&["validate"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("invalid configuration"));
+    assert!(error.contains("dirule.toml"));
+    assert!(!project.0.join("missing-target").exists());
 }
 
 #[test]

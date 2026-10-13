@@ -43,12 +43,13 @@ From a project checkout, create the starter configuration and preview it:
 
 ```sh
 cargo run -p dirule -- init
+cargo run -p dirule -- validate
 cargo run -p dirule -- plan
 cargo run -p dirule -- check
 cargo run -p dirule -- apply
 ```
 
-`apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output, or `--verbose` to show the rule responsible for each rename and identify paths inherited from a renamed directory.
+`validate` checks the selected config and compiles its rules without scanning the target. `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`; `validate` accepts the config or preset options without `--target`. Use `--format json` for structured output, or `--verbose` to show the rule responsible for each rename and identify paths inherited from a renamed directory.
 
 Use `--color auto|always|never` to control terminal colors. Automatic color follows terminal support and honors non-empty `NO_COLOR` and `TERM=dumb`; an explicit `--color` choice takes precedence.
 

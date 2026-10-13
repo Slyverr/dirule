@@ -29,6 +29,7 @@ pub(super) fn run(
 
             Ok(())
         }
+        args::CliCommand::Validate(options) => config::validate(options, color),
         args::CliCommand::Plan(options) => {
             let format = options.format;
             let verbose = options.verbose;

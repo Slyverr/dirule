@@ -22,33 +22,34 @@ pub(super) fn initialize(color: args::ColorChoice) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
+pub(super) fn validate(
+    options: args::ValidateArgs,
+    color: args::ColorChoice,
+) -> Result<(), Box<dyn Error>> {
+    let cwd = std::env::current_dir()?;
+    let source = config_source(&cwd, options.rules)?;
+    ensure_config_exists(&source)?;
+
+    let (config, _) = load_config(&source.path)?;
+    output::validated_config(
+        source.kind,
+        &source.name,
+        config.rules.len(),
+        options.format,
+        color,
+    )?;
+
+    Ok(())
+}
+
 pub(super) fn evaluate(
     options: args::OperationArgs,
 ) -> Result<(PathBuf, Plan, ScanResult), Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
-    let (config_path, config_hint) = if let Some(path) = options.rules.config {
-        (resolve(&cwd, path), "pass a valid `--config FILE`")
-    } else if let Some(name) = options.rules.preset {
-        (
-            super::presets::path(&name)?,
-            "check `dirule presets list` or create that preset",
-        )
-    } else {
-        (
-            cwd.join("dirule.toml"),
-            "run `dirule init` or pass `--config FILE`",
-        )
-    };
+    let source = config_source(&cwd, options.rules)?;
+    ensure_config_exists(&source)?;
 
-    if !config_path.is_file() {
-        return Err(format!(
-            "configuration not found at {}; {config_hint}",
-            config_path.display(),
-        )
-        .into());
-    }
-
-    let (config, _) = load_config(&config_path)?;
+    let (config, _) = load_config(&source.path)?;
     let target = options
         .target
         .map(|path| resolve_target(&cwd, path))
@@ -64,6 +65,55 @@ pub(super) fn evaluate(
     validate_destinations(&target, &mut plan)?;
     plan.findings.append(&mut scan.findings);
     Ok((target, plan, scan))
+}
+
+struct ConfigSource {
+    path: PathBuf,
+    kind: &'static str,
+    name: String,
+    missing_hint: &'static str,
+}
+
+fn config_source(cwd: &Path, rules: args::RuleSourceArgs) -> Result<ConfigSource, Box<dyn Error>> {
+    if let Some(path) = rules.config {
+        let name = path.display().to_string();
+
+        return Ok(ConfigSource {
+            path: resolve(cwd, path),
+            kind: "config",
+            name,
+            missing_hint: "pass a valid `--config FILE`",
+        });
+    }
+
+    if let Some(name) = rules.preset {
+        return Ok(ConfigSource {
+            path: super::presets::path(&name)?,
+            kind: "preset",
+            name,
+            missing_hint: "check `dirule presets list` or create that preset",
+        });
+    }
+
+    Ok(ConfigSource {
+        path: cwd.join("dirule.toml"),
+        kind: "config",
+        name: "dirule.toml".to_owned(),
+        missing_hint: "run `dirule init` or pass `--config FILE`",
+    })
+}
+
+fn ensure_config_exists(source: &ConfigSource) -> Result<(), Box<dyn Error>> {
+    if !source.path.is_file() {
+        return Err(format!(
+            "configuration not found at {}; {}",
+            source.path.display(),
+            source.missing_hint,
+        )
+        .into());
+    }
+
+    Ok(())
 }
 
 pub(super) fn load_config(path: &Path) -> Result<(Config, String), Box<dyn Error>> {
