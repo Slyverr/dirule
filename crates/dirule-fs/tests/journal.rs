@@ -157,6 +157,29 @@ fn journaled_apply_can_be_listed_and_undone() {
 }
 
 #[test]
+fn partially_recovered_run_is_listed_and_can_be_undone() {
+    let (_temp, target, store, run_id, journal) = journaled_file_run();
+    let contents = std::fs::read_to_string(&journal).expect("read applied journal");
+    let partially_recovered = contents.replace(
+        r#"{"record":"status","status":"applied"}"#,
+        r#"{"record":"status","status":"partially_recovered"}"#,
+    );
+    assert_ne!(contents, partially_recovered, "replace final run status");
+    std::fs::write(&journal, partially_recovered).expect("mark run partially recovered");
+
+    let runs = store.list().expect("list partially recovered run");
+    assert_eq!(runs[0].id, run_id);
+    assert_eq!(runs[0].status, JournalStatus::PartiallyRecovered);
+    store.undo(&run_id).expect("undo partially recovered run");
+
+    assert_eq!(
+        std::fs::read(target.join("before.txt")).expect("read restored file"),
+        b"contents"
+    );
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
 fn active_run_lock_blocks_reading_and_undo_without_mutation() {
     let (_temp, target, store, run_id, journal) = journaled_file_run();
     let lock_path = journal.with_extension("lock");

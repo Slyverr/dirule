@@ -874,3 +874,6 @@ fn temporary_sibling(source: &Path) -> Result<PathBuf, ApplyError> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
