@@ -4,7 +4,7 @@
 
 Applying a plan must leave enough local state to inspect the run and safely undo completed renames. Undo is best-effort recovery, not a content backup or a promise of whole-run atomicity. A changed destination must never be overwritten or silently moved back.
 
-This specification covers the CLI apply path. It does not add a TUI, MCP integration, file-content operations, deletion, copy, or cross-device moves.
+This specification covers CLI apply and undo behavior. File-content operations, deletion, copying, and cross-device moves are outside its scope.
 
 ## State location
 
