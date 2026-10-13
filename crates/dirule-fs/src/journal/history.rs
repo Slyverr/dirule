@@ -299,7 +299,7 @@ impl JournalHistory {
                         None,
                     ) => {
                         let absolute = checked_target_path(&self.target, &path)?;
-                        if fs::symlink_metadata(&absolute).is_ok() {
+                        if path_exists(&absolute)? {
                             return Err(JournalError::AmbiguousOperation {
                                 run_id: self.id.clone(),
                                 path,
@@ -545,4 +545,22 @@ fn cancel_inverse_mutations(mutations: Vec<UndoMutation>) -> Vec<UndoMutation> {
         }
     }
     pending
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_exists;
+    use crate::journal::JournalError;
+    use std::path::Path;
+
+    #[cfg(unix)]
+    #[test]
+    fn path_existence_propagates_metadata_errors() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let invalid_path = std::ffi::OsStr::from_bytes(b"invalid\0path");
+        let error = path_exists(Path::new(invalid_path)).expect_err("metadata path is invalid");
+
+        assert!(matches!(error, JournalError::Io { .. }));
+    }
 }
