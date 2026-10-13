@@ -43,6 +43,23 @@ fn journaled_file_run() -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
     journaled_run(&[("before.txt", "after.txt")])
 }
 
+#[test]
+fn run_details_include_target_relative_rename_operations() {
+    let (_temp, _target, store, run_id, _journal) = journaled_file_run();
+
+    let details = store.get(&run_id).expect("read run details");
+
+    assert_eq!(details.run.id, run_id);
+    assert_eq!(details.run.operations, 1);
+    assert_eq!(details.operations.len(), 1);
+    assert_eq!(details.operations[0].source, PathBuf::from("before.txt"));
+    assert_eq!(
+        details.operations[0].destination,
+        PathBuf::from("after.txt")
+    );
+    assert_eq!(details.operations[0].kind, dirule_core::EntryKind::File);
+}
+
 fn journaled_run(files: &[(&str, &str)]) -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
     let temp = TempDir::new();
     let target = temp.0.join("project");

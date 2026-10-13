@@ -83,6 +83,19 @@ pub struct JournalRun {
     pub operations: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalDetails {
+    pub run: JournalRun,
+    pub operations: Vec<JournalOperation>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalOperation {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub kind: EntryKind,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UndoReport {
     pub retained_directories: Vec<PathBuf>,
@@ -220,6 +233,44 @@ impl JournalStore {
         }
         runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
         Ok(runs)
+    }
+
+    pub fn get(&self, run_id: &str) -> Result<JournalDetails, JournalError> {
+        let path = self.run_path(run_id)?;
+        let records = read_records(&path)?;
+        let history = JournalHistory::from_records(&path, records)?;
+        if history.id != run_id {
+            return Err(JournalError::InvalidRunId(run_id.to_owned()));
+        }
+
+        let run = run_from_history(&history);
+        let operations = history
+            .records
+            .iter()
+            .take_while(|record| {
+                !matches!(
+                    record,
+                    JournalRecord::Status {
+                        status: JournalStatusRecord::Undoing
+                    }
+                )
+            })
+            .filter_map(|record| match record {
+                JournalRecord::MoveIntent {
+                    source,
+                    destination,
+                    identity,
+                    ..
+                } => Some(JournalOperation {
+                    source: source.clone(),
+                    destination: destination.clone(),
+                    kind: identity.kind,
+                }),
+                _ => None,
+            })
+            .collect();
+
+        Ok(JournalDetails { run, operations })
     }
 
     pub fn undo(&self, run_id: &str) -> Result<UndoReport, JournalError> {
@@ -736,6 +787,10 @@ impl JournalWriter {
 fn read_run(path: &Path) -> Result<JournalRun, JournalError> {
     let records = read_records(path)?;
     let history = JournalHistory::from_records(path, records)?;
+    Ok(run_from_history(&history))
+}
+
+fn run_from_history(history: &JournalHistory) -> JournalRun {
     let mut operations = 0;
     for record in &history.records {
         match record {
@@ -746,13 +801,13 @@ fn read_run(path: &Path) -> Result<JournalRun, JournalError> {
             _ => {}
         }
     }
-    Ok(JournalRun {
-        id: history.id,
-        target: history.target,
+    JournalRun {
+        id: history.id.clone(),
+        target: history.target.clone(),
         started_at: history.started_at,
         status: history.status,
         operations,
-    })
+    }
 }
 
 fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {

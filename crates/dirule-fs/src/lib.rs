@@ -7,6 +7,7 @@ pub use apply::{
     apply_with_conflict_policy, validate_destinations,
 };
 pub use journal::{
-    CURRENT_JOURNAL_VERSION, JournalError, JournalRun, JournalStatus, JournalStore, UndoReport,
+    CURRENT_JOURNAL_VERSION, JournalDetails, JournalError, JournalOperation, JournalRun,
+    JournalStatus, JournalStore, UndoReport,
 };
 pub use scan::{ScanError, ScanResult, scan};
