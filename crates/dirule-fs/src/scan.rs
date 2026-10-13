@@ -204,29 +204,41 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
 
 fn validate_ignore_files(directory: &Path) -> Result<(), ScanError> {
     for name in [".ignore", ".gitignore"] {
-        let path = directory.join(name);
-        let metadata = match std::fs::metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(source) => return Err(ScanError::IgnoreFile { path, source }),
-        };
-        if !metadata.is_file() {
+        validate_ignore_file(&directory.join(name))?;
+    }
+
+    Ok(())
+}
+
+fn validate_ignore_file(path: &Path) -> Result<(), ScanError> {
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
             return Err(ScanError::IgnoreFile {
-                path,
-                source: std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "ignore rules must be a regular file",
-                ),
+                path: path.to_path_buf(),
+                source,
             });
         }
-
-        let mut file = std::fs::File::open(&path).map_err(|source| ScanError::IgnoreFile {
-            path: path.clone(),
-            source,
-        })?;
-        std::io::copy(&mut file, &mut std::io::sink())
-            .map_err(|source| ScanError::IgnoreFile { path, source })?;
+    };
+    if !metadata.is_file() {
+        return Err(ScanError::IgnoreFile {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ignore rules must be a regular file",
+            ),
+        });
     }
+
+    let mut file = std::fs::File::open(path).map_err(|source| ScanError::IgnoreFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    std::io::copy(&mut file, &mut std::io::sink()).map_err(|source| ScanError::IgnoreFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
     Ok(())
 }
@@ -322,7 +334,7 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
     let root = match Command::new("git")
         .arg("-C")
         .arg(target)
-        .args(["rev-parse", "--show-toplevel"])
+        .args(["rev-parse", "--show-toplevel", "--git-path", "info/exclude"])
         .output()
     {
         Ok(output) => output,
@@ -344,15 +356,27 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
         return Ok((BTreeSet::new(), Vec::new()));
     }
 
-    let root = std::str::from_utf8(&root.stdout)
-        .map_err(|error| {
-            ScanError::Git(format!("Git returned a non-Unicode worktree path: {error}"))
-        })?
-        .trim();
-    let root = PathBuf::from(root)
+    let paths = std::str::from_utf8(&root.stdout)
+        .map_err(|error| ScanError::Git(format!("Git returned a non-Unicode path: {error}")))?;
+    let mut paths = paths.lines();
+    let root_path = paths
+        .next()
+        .ok_or_else(|| ScanError::Git("Git did not return a worktree path".into()))?;
+    let exclude = paths
+        .next()
+        .ok_or_else(|| ScanError::Git("Git did not return an exclude path".into()))?;
+    let exclude = PathBuf::from(exclude);
+    let exclude = if exclude.is_absolute() {
+        exclude
+    } else {
+        target.join(exclude)
+    };
+    validate_ignore_file(&exclude)?;
+
+    let root = PathBuf::from(root_path)
         .canonicalize()
         .map_err(|source| ScanError::Metadata {
-            path: PathBuf::from(root),
+            path: PathBuf::from(root_path),
             source,
         })?;
     let target_from_root = target.strip_prefix(&root).map_err(|error| {

@@ -128,6 +128,34 @@ fn scan_limits_tracked_git_paths_to_targets_with_literal_characters() {
     assert!(!paths.contains(&PathBuf::from("unrelated.txt")));
 }
 
+#[cfg(unix)]
+#[test]
+fn scan_fails_when_repository_excludes_are_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = TempDir::new();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&temp.0)
+        .output();
+    let Ok(init) = init else {
+        return;
+    };
+    assert!(init.status.success(), "initialize Git fixture");
+
+    let exclude = temp.0.join(".git/info/exclude");
+    std::fs::write(&exclude, "ignored/\n").expect("write repository excludes");
+    std::fs::set_permissions(&exclude, std::fs::Permissions::from_mode(0o000))
+        .expect("remove repository exclude read permissions");
+    if std::fs::read(&exclude).is_ok() {
+        return;
+    }
+
+    let error = scan(&temp.0).expect_err("unreadable repository excludes must fail scanning");
+
+    assert!(error.to_string().contains("exclude"));
+}
+
 #[test]
 fn scan_git_missing_child() {
     let Some(target) = std::env::var_os("DIRULE_GIT_MISSING_TARGET") else {
