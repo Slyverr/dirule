@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/*"]
-default-members = ["crates/dirule"]
 resolver = "3"
 
 [workspace.package]
