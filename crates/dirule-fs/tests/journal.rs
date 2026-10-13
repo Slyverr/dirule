@@ -1,7 +1,9 @@
 use dirule_core::{EntryKind, Plan, PlannedEntry};
 use dirule_fs::{ConflictPolicy, JournalStatus, JournalStore, apply_journaled, scan};
 use fs4::FileExt;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -158,22 +160,65 @@ fn journaled_apply_can_be_listed_and_undone() {
 fn active_run_lock_blocks_reading_and_undo_without_mutation() {
     let (_temp, target, store, run_id, journal) = journaled_file_run();
     let lock_path = journal.with_extension("lock");
+    let mut child = Command::new(std::env::current_exe().expect("test executable path"))
+        .args(["--exact", "journal_lock_helper_process", "--nocapture"])
+        .env("DIRULE_JOURNAL_LOCK_PATH", lock_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn lock holder process");
+    let mut output = BufReader::new(child.stdout.take().expect("capture helper output"));
+    let mut line = String::new();
+    let mut lock_acquired = false;
+    loop {
+        line.clear();
+        if output.read_line(&mut line).expect("read helper output") == 0 {
+            break;
+        }
+        if line.trim() == "LOCKED" {
+            lock_acquired = true;
+            break;
+        }
+    }
+
+    let list = store.list();
+    let details = store.get(&run_id);
+    let undo = store.undo(&run_id);
+    let _ = child
+        .stdin
+        .take()
+        .expect("open helper input")
+        .write_all(b"release\n");
+    let status = child.wait().expect("wait for lock holder process");
+
+    assert!(lock_acquired, "helper process did not acquire its lock");
+    assert!(status.success(), "lock holder process failed");
+    assert!(matches!(list, Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id));
+    assert!(matches!(details, Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id));
+    assert!(matches!(undo, Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id));
+    assert!(target.join("after.txt").exists());
+    assert!(!target.join("before.txt").exists());
+}
+
+#[test]
+fn journal_lock_helper_process() {
+    let Some(path) = std::env::var_os("DIRULE_JOURNAL_LOCK_PATH") else {
+        return;
+    };
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(lock_path)
+        .open(path)
         .expect("open run lock");
     FileExt::try_lock(&lock).expect("lock run exclusively");
+    writeln!(std::io::stdout().lock(), "LOCKED").expect("signal lock acquired");
+    std::io::stdout().flush().expect("flush lock signal");
 
-    assert!(matches!(store.list(), Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id));
-    assert!(
-        matches!(store.get(&run_id), Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id)
-    );
-    assert!(
-        matches!(store.undo(&run_id), Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id)
-    );
-    assert!(target.join("after.txt").exists());
-    assert!(!target.join("before.txt").exists());
+    let mut release = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut release)
+        .expect("wait for release signal");
 }
 
 #[test]
