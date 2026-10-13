@@ -621,7 +621,14 @@ fn scan_skips_special_files() {
 
     let temp = TempDir::new();
     let socket_path = temp.0.join("service.sock");
-    let _listener = UnixListener::bind(&socket_path).expect("bind Unix socket");
+    let _listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping Unix socket fixture: {error}");
+            return;
+        }
+        Err(error) => panic!("bind Unix socket: {error}"),
+    };
 
     let result = scan(&temp.0).expect("scan target");
 
