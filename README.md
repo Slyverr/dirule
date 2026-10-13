@@ -80,6 +80,16 @@ to = "builtin:kebab-case"
 
 `<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `builtin:` applies a built-in case transformation to the entry name. Available transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
 
+## Conflict handling
+
+Dirule never overwrites an existing path. `plan` reports conflicts, and `apply` aborts if any are present. To apply independent safe renames while skipping conflicts, use:
+
+```sh
+dirule apply --on-conflict skip
+```
+
+Skipped paths are reported. If a directory rename is skipped, its dependent descendant renames are skipped too. If multiple paths claim the same destination, all conflicting claims are skipped.
+
 ## Apply history
 
 Each successful apply records its filesystem moves in Dirule's user state directory and prints a run ID. List runs and undo a run with:
