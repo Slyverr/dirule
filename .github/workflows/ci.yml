@@ -81,8 +81,8 @@ jobs:
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
       - run: cargo run -p dirule -- check --color never
-      - name: Verify Cargo installation
-        if: runner.os == 'Linux'
+      - name: Verify Cargo installation (Unix)
+        if: runner.os != 'Windows'
         run: |
           install_root="$RUNNER_TEMP/dirule-install"
           project_root="$RUNNER_TEMP/dirule-project"
@@ -91,4 +91,26 @@ jobs:
           cd "$project_root"
           "$install_root/bin/dirule" init
           "$install_root/bin/dirule" validate --color never
+
+      - name: Verify Cargo installation (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP "dirule-install"
+          $projectRoot = Join-Path $env:RUNNER_TEMP "dirule-project"
+          $dirule = Join-Path $installRoot "bin/dirule.exe"
+
+          cargo install --path crates/dirule --locked --offline --root $installRoot
+          New-Item -ItemType Directory -Force -Path $projectRoot | Out-Null
+          Push-Location $projectRoot
+          try {
+            & $dirule init
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            & $dirule validate --color never
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          finally {
+            Pop-Location
+          }
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
