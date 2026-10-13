@@ -202,6 +202,7 @@ dependencies = [
  "clap_complete",
  "dirule-core",
  "dirule-fs",
+ "serde",
  "serde_json",
 ]
 
