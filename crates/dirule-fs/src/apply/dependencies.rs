@@ -7,6 +7,10 @@ pub(super) type StagedSources = HashMap<PathBuf, PathBuf>;
 pub(super) type MovedOperation = (u64, PathBuf, PathBuf, EntryKind);
 
 pub(super) fn add_dependent_move_conflicts(target: &Path, plan: &mut Plan) {
+    if plan.conflicts.is_empty() {
+        return;
+    }
+
     let (entries, conflicts) = (&plan.entries, &mut plan.conflicts);
     let mut by_destination = HashMap::<PathBuf, Vec<usize>>::new();
     for (index, entry) in entries.iter().enumerate() {
