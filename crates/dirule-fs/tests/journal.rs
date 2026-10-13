@@ -480,6 +480,21 @@ fn undo_removes_only_parent_directories_created_by_the_apply() {
 }
 
 #[test]
+fn undo_records_multiple_directory_removals() {
+    let (_temp, target, store, run_id, _) = journaled_run(&[
+        ("before-one.txt", "one/after-one.txt"),
+        ("before-two.txt", "two/after-two.txt"),
+    ]);
+
+    store.undo(&run_id).expect("undo journaled apply");
+
+    assert!(target.join("before-one.txt").is_file());
+    assert!(target.join("before-two.txt").is_file());
+    assert!(!target.join("one").exists());
+    assert!(!target.join("two").exists());
+}
+
+#[test]
 fn undo_keeps_and_reports_a_created_directory_that_contains_new_files() {
     let temp = TempDir::new();
     let target = temp.0.join("project");

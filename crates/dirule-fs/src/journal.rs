@@ -452,6 +452,7 @@ impl JournalStore {
                         path,
                         file,
                         next_sequence: 0,
+                        pending_directory_removal: None,
                         _run_lock: lock,
                     });
                 }
@@ -479,6 +480,7 @@ pub(crate) struct JournalWriter {
     path: PathBuf,
     file: File,
     next_sequence: u64,
+    pending_directory_removal: Option<(u64, ObjectIdentity)>,
     _run_lock: RunLock,
 }
 
@@ -673,6 +675,7 @@ impl JournalWriter {
             path: path.to_path_buf(),
             file,
             next_sequence,
+            pending_directory_removal: None,
             _run_lock: run_lock,
         })
     }
@@ -761,10 +764,13 @@ impl JournalWriter {
                 sequence,
                 path: relative.to_path_buf(),
                 action,
-                identity,
+                identity: identity.clone(),
             },
             &self.path,
         )?;
+        if let Some(identity) = identity {
+            self.pending_directory_removal = Some((sequence, identity));
+        }
         Ok(sequence)
     }
 
@@ -787,25 +793,29 @@ impl JournalWriter {
     }
 
     pub(crate) fn directory_removed(&mut self, sequence: u64) -> Result<(), JournalError> {
-        let Some(JournalRecord::DirectoryIntent {
-            identity: Some(identity),
-            ..
-        }) = self.record_for_sequence(sequence)?
-        else {
+        let Some((pending_sequence, identity)) = &self.pending_directory_removal else {
             return Err(JournalError::AmbiguousOperation {
                 run_id: self.id.clone(),
                 path: self.target.clone(),
             });
         };
+        if *pending_sequence != sequence {
+            return Err(JournalError::AmbiguousOperation {
+                run_id: self.id.clone(),
+                path: self.target.clone(),
+            });
+        }
         write_record(
             &mut self.file,
             &JournalRecord::DirectoryChanged {
                 sequence,
                 action: DirectoryAction::Remove,
-                identity,
+                identity: identity.clone(),
             },
             &self.path,
-        )
+        )?;
+        self.pending_directory_removal = None;
+        Ok(())
     }
 
     fn directory_retained(&mut self, sequence: u64, directory: &Path) -> Result<(), JournalError> {
@@ -822,30 +832,15 @@ impl JournalWriter {
                 identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory),
             },
             &self.path,
-        )
-    }
-
-    fn record_for_sequence(&self, sequence: u64) -> Result<Option<JournalRecord>, JournalError> {
-        let file = File::open(&self.path).map_err(|source| JournalError::io(&self.path, source))?;
-        let mut reader = BufReader::new(file);
-        let mut line = Vec::new();
-        let mut line_number = 0;
-        loop {
-            line.clear();
-            if reader
-                .read_until(b'\n', &mut line)
-                .map_err(|source| JournalError::io(&self.path, source))?
-                == 0
-            {
-                return Ok(None);
-            }
-            line_number += 1;
-            let record = parse_record(&self.path, line_number, &line)?;
-            if matches!(record, JournalRecord::DirectoryIntent { sequence: found, .. } if found == sequence)
-            {
-                return Ok(Some(record));
-            }
+        )?;
+        if self
+            .pending_directory_removal
+            .as_ref()
+            .is_some_and(|(pending_sequence, _)| *pending_sequence == sequence)
+        {
+            self.pending_directory_removal = None;
         }
+        Ok(())
     }
 
     pub(crate) fn status(&mut self, status: JournalStatus) -> Result<(), JournalError> {
@@ -940,16 +935,6 @@ fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {
             })
         })
         .collect()
-}
-
-fn parse_record(path: &Path, line: usize, bytes: &[u8]) -> Result<JournalRecord, JournalError> {
-    serde_json::from_value(parse_value(path, line, bytes)?).map_err(|source| {
-        JournalError::InvalidRecord {
-            path: path.to_path_buf(),
-            line,
-            source,
-        }
-    })
 }
 
 fn parse_value(path: &Path, line: usize, bytes: &[u8]) -> Result<serde_json::Value, JournalError> {
