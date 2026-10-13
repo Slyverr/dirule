@@ -6,10 +6,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 enum IntentKind<'a> {
-    Move,
+    Move {
+        identity: &'a ObjectIdentity,
+    },
     Directory {
         action: DirectoryAction,
         path: &'a Path,
+        identity: Option<&'a ObjectIdentity>,
     },
 }
 
@@ -337,20 +340,22 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
 
     for record in records {
         match record {
-            JournalRecord::MoveIntent { sequence, .. } => {
+            JournalRecord::MoveIntent {
+                sequence, identity, ..
+            } => {
                 insert_intent(
                     path,
                     &mut intents,
                     &mut last_sequence,
                     *sequence,
-                    IntentKind::Move,
+                    IntentKind::Move { identity },
                 )?;
             }
             JournalRecord::DirectoryIntent {
                 sequence,
                 path: directory,
                 action,
-                ..
+                identity,
             } => {
                 insert_intent(
                     path,
@@ -360,20 +365,39 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
                     IntentKind::Directory {
                         action: *action,
                         path: directory,
+                        identity: identity.as_ref(),
                     },
                 )?;
             }
-            JournalRecord::MoveCompleted { sequence, .. } => {
+            JournalRecord::MoveCompleted { sequence, identity } => {
+                match find_intent(path, &mut intents, *sequence)?.kind {
+                    IntentKind::Move { identity: expected } if expected == identity => {}
+                    _ => {
+                        return Err(invalid_events(
+                            path,
+                            format!("sequence {sequence} has a mismatched move completion"),
+                        ));
+                    }
+                }
                 complete_intent(path, &mut intents, *sequence, false)?;
             }
             JournalRecord::DirectoryChanged {
-                sequence, action, ..
+                sequence,
+                action,
+                identity,
             } => {
                 let intent = find_intent(path, &mut intents, *sequence)?;
                 match intent.kind {
                     IntentKind::Directory {
-                        action: expected, ..
-                    } if expected == *action => {}
+                        action: expected,
+                        identity: Some(expected_identity),
+                        ..
+                    } if expected == *action && expected_identity == identity => {}
+                    IntentKind::Directory {
+                        action: expected,
+                        identity: None,
+                        ..
+                    } if expected == *action && *action == DirectoryAction::Create => {}
                     _ => {
                         return Err(invalid_events(
                             path,
@@ -386,14 +410,18 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
             JournalRecord::DirectoryRetained {
                 sequence,
                 path: retained_path,
-                ..
+                identity,
             } => {
                 let intent = find_intent(path, &mut intents, *sequence)?;
                 match intent.kind {
                     IntentKind::Directory {
                         action: DirectoryAction::Remove,
                         path: intended_path,
-                    } if intended_path == retained_path && !intent.completed => {
+                        identity: Some(expected_identity),
+                    } if intended_path == retained_path
+                        && expected_identity == identity
+                        && !intent.completed =>
+                    {
                         intent.completed = true;
                     }
                     _ => {

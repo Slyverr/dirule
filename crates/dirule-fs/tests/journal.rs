@@ -608,6 +608,29 @@ fn mismatched_journal_completion_kinds_are_rejected() {
 }
 
 #[test]
+fn mismatched_journal_object_identities_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value =
+                serde_json::from_str(line).expect("valid journal record");
+            if record["record"] == "move_completed" {
+                record["identity"]["length"] = serde_json::Value::from(999_u64);
+            }
+            serde_json::to_string(&record).expect("serialize journal record")
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("change completion identity");
+
+    let error = store.list().expect_err("completion identity must match");
+
+    assert!(error.to_string().contains("mismatched move completion"));
+}
+
+#[test]
 fn undo_truncates_an_incomplete_final_journal_record_before_appending() {
     let temp = TempDir::new();
     let target = temp.0.join("project");
