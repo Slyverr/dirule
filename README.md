@@ -19,6 +19,10 @@ cargo run -p dirule -- apply
 
 `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output.
 
+## Nix
+
+Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`.
+
 ## Workspace
 
 - `crates/dirule`: CLI and application orchestration.
