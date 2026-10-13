@@ -28,6 +28,8 @@ Before the first mutation, write and sync the complete run header in a private t
 
 Record each actual no-replace rename separately, including both legs of case-only renames through a temporary sibling. Record directories created for destination parents. A recovery reader may reconcile an intent without a completion only when the source/destination state and stored identity prove whether the operation happened. Ambiguous states are reported and left untouched.
 
+After apply finishes, append and sync its final status. If this write fails, report the run ID and the journal error. Preserve the original operation error when apply also failed; if filesystem changes completed, state that explicitly. Keep the recorded events available for inspection and safe reconciliation. The write error alone does not establish the run's final on-disk status, so users can inspect it with `dirule runs list` and `dirule runs show RUN_ID` before recovery.
+
 The journal records metadata, not file contents. File identity uses the strongest portable metadata available, including file ID where the platform exposes one, plus type, size, and modification time. On Windows, use the 128-bit file ID when available; use the legacy 64-bit ID only when the extended API is unavailable. Store the extended ID as optional data so existing journals with legacy IDs remain readable. When an extended ID was recorded, inability to verify it later makes the operation ineligible for undo rather than falling back to a weaker ID. Directory identity uses type and file ID where available; directory timestamps can change when contents change. Unsupported or unverifiable identities reduce undo eligibility rather than weakening checks.
 
 The existing immediate rollback after an apply error remains. Rollback steps are journaled too. A process interruption can leave an incomplete run; it must remain inspectable and eligible for verified recovery when its operations can be reconciled.
@@ -62,5 +64,6 @@ Human apply output includes the run identifier and the command to undo it. `runs
 - Interruption during undo is recoverable by retrying the same run identifier.
 - A newly created parent is removed only when empty and known to belong to the run.
 - Apply-time rollback failures remain visible in the run list and do not discard recovery data.
+- Final-status write failures report the run ID and preserve the apply outcome; completed filesystem changes are not described as unapplied.
 - Human and JSON apply/run outputs expose enough information to locate and undo a run.
 - `runs show` exposes recorded rename paths in human and JSON output without mutating the run or target.
