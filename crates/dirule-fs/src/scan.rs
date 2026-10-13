@@ -21,6 +21,10 @@ pub(crate) struct SourceIdentity {
     device: u64,
     #[cfg(unix)]
     inode: u64,
+    #[cfg(windows)]
+    volume_serial_number: Option<u32>,
+    #[cfg(windows)]
+    file_index: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -175,7 +179,18 @@ impl SourceIdentity {
                 inode: metadata.ino(),
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            Self {
+                length: metadata.len(),
+                modified: metadata.modified().ok(),
+                kind,
+                volume_serial_number: metadata.volume_serial_number(),
+                file_index: metadata.file_index(),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Self {
                 length: metadata.len(),
@@ -194,7 +209,14 @@ impl SourceIdentity {
             use std::os::unix::fs::MetadataExt;
             common && self.device == metadata.dev() && self.inode == metadata.ino()
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            common
+                && self.volume_serial_number == metadata.volume_serial_number()
+                && self.file_index == metadata.file_index()
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             common
         }

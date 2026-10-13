@@ -1,5 +1,5 @@
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry, parse_config, plan};
-use dirule_fs::{ConflictPolicy, apply, apply_with_conflict_policy, scan};
+use dirule_fs::{ApplyError, ConflictPolicy, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -386,6 +386,55 @@ fn apply_rejects_a_source_changed_after_planning() {
 
     assert!(apply(&temp.0, &plan, &snapshot).is_err());
     assert!(temp.0.join("source").is_file());
+    assert!(!temp.0.join("renamed").exists());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn apply_rejects_a_replaced_source_with_same_size_and_timestamp() {
+    let temp = TempDir::new();
+    let source = temp.0.join("source");
+    let replacement = temp.0.join("replacement");
+    std::fs::write(&source, "Original").expect("write source");
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let modified = std::fs::metadata(&source)
+        .expect("inspect source")
+        .modified()
+        .expect("read source timestamp");
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        let metadata = std::fs::metadata(&source).expect("inspect Windows source identity");
+        if metadata.volume_serial_number().is_none() || metadata.file_index().is_none() {
+            return;
+        }
+    }
+
+    std::fs::write(&replacement, "Replaced").expect("write replacement");
+    std::fs::File::open(&replacement)
+        .expect("open replacement")
+        .set_modified(modified)
+        .expect("preserve source timestamp");
+    std::fs::remove_file(&source).expect("remove original file");
+    std::fs::rename(&replacement, &source).expect("install replacement at source path");
+
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("source"),
+            destination: PathBuf::from("renamed"),
+            kind: EntryKind::File,
+            rule: None,
+        }],
+        conflicts: Vec::new(),
+        findings: Vec::new(),
+    };
+    let error = apply(&temp.0, &plan, &snapshot).expect_err("reject replaced source");
+
+    assert!(matches!(error, ApplyError::ChangedSource(_)));
+    assert_eq!(
+        std::fs::read_to_string(&source).expect("read replacement"),
+        "Replaced"
+    );
     assert!(!temp.0.join("renamed").exists());
 }
 

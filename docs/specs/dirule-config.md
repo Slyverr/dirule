@@ -170,6 +170,7 @@ Tests should verify:
 - Directory rename propagation, explicit child destinations, missing destination-parent dependencies, and conflict abort/skip behavior.
 - Case-only file and directory renames on case-insensitive filesystems, including descendants under renamed directories.
 - Runtime failure after an earlier move restores completed moves and removes directories created by apply; incomplete rollback is reported with its failed paths.
+- Apply rejects a source replaced since planning even when the replacement has the same length and modification time.
 - Git ignore behavior for nested rules, tracked paths, global excludes, `.ignore` outside Git, and hidden files; unreadable or malformed ignore files must stop planning.
 - Explicit target override, configured target, current-directory default, exact config/preset selection, and no parent-directory config search.
 - `check` succeeds when paths satisfy the rules and fails for a proposed path change or conflict without changing the filesystem.
