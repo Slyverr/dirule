@@ -201,4 +201,31 @@ fn apply_journal_records_a_real_rollback_failure_as_partially_recovered() {
         std::fs::read_to_string(target.join("moved.txt")).expect("read moved file"),
         "first file"
     );
+
+    assert!(
+        store.undo(&run_id).is_err(),
+        "do not overwrite the external file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(target.join("a-source.txt")).expect("read external file"),
+        "external file"
+    );
+    let external = temp.0.join("external.txt");
+    std::fs::rename(target.join("a-source.txt"), &external)
+        .expect("move the conflicting file out of the way");
+
+    store
+        .undo(&run_id)
+        .expect("retry recovery after resolving the path conflict");
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("a-source.txt")).expect("read restored source"),
+        "first file"
+    );
+    assert!(!target.join("moved.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(external).expect("read preserved external file"),
+        "external file"
+    );
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
 }
