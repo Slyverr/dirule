@@ -312,6 +312,45 @@ to = "template:archive/${part}.txt"
     );
 }
 
+#[test]
+fn conflicts_detect_files_that_would_become_parent_paths() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Move report"
+match = "report.txt"
+to = "template:archive"
+
+[[rules]]
+name = "Move details"
+match = "details.txt"
+to = "template:archive/details.txt"
+"#,
+    )
+    .expect("valid configuration");
+    let entries = [
+        Entry {
+            path: PathBuf::from("report.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("details.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(planned.conflicts.len(), 1, "{planned:#?}");
+    assert_eq!(planned.conflicts[0].path, PathBuf::from("archive"));
+    assert_eq!(
+        planned.conflicts[0].reason,
+        "a file destination is also a parent of another destination"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn path_separator_matching_does_not_treat_a_backslash_as_a_directory() {

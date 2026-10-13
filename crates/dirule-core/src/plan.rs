@@ -174,17 +174,38 @@ fn find_conflicts(plan: &mut Plan, original_paths: &BTreeSet<PathBuf>) {
             });
         }
     }
-    for left in &plan.entries {
-        if left.kind != EntryKind::File || left.source == left.destination {
-            continue;
+    let mut file_destinations = BTreeMap::<PathBuf, Vec<usize>>::new();
+    for (index, entry) in plan.entries.iter().enumerate() {
+        if entry.kind == EntryKind::File && entry.source != entry.destination {
+            file_destinations
+                .entry(entry.destination.clone())
+                .or_default()
+                .push(index);
         }
-        if plan.entries.iter().any(|right| {
-            right.source != right.destination
-                && right.destination.starts_with(&left.destination)
-                && right.destination != left.destination
-        }) {
+    }
+
+    let mut file_parent_conflicts = vec![false; plan.entries.len()];
+    for entry in plan
+        .entries
+        .iter()
+        .filter(|entry| entry.source != entry.destination)
+    {
+        let mut parent = entry.destination.parent();
+        while let Some(path) = parent {
+            if let Some(file_indices) = file_destinations.get(path) {
+                for index in file_indices {
+                    file_parent_conflicts[*index] = true;
+                }
+            }
+
+            parent = path.parent();
+        }
+    }
+
+    for (index, entry) in plan.entries.iter().enumerate() {
+        if file_parent_conflicts[index] {
             plan.conflicts.push(Conflict {
-                path: left.destination.clone(),
+                path: entry.destination.clone(),
                 reason: "a file destination is also a parent of another destination".into(),
             });
         }
