@@ -14,6 +14,11 @@ pub struct ScanResult {
     pub(crate) identities: BTreeMap<PathBuf, SourceIdentity>,
 }
 
+struct ScannedEntry {
+    kind: EntryKind,
+    identity: Option<SourceIdentity>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SourceIdentity {
     length: u64,
@@ -96,7 +101,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .require_git(false)
         .follow_links(false);
 
-    let mut paths = BTreeMap::<PathBuf, EntryKind>::new();
+    let mut paths = BTreeMap::<PathBuf, ScannedEntry>::new();
     let mut findings = Vec::new();
     for item in builder.build() {
         let entry = item.map_err(|source| ScanError::Walk {
@@ -119,8 +124,22 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         }
 
         if let Some(relative) = relative_unicode(&target, entry.path()) {
-            if let Some(kind) = entry_kind(entry.file_type()) {
-                paths.insert(relative, kind);
+            let metadata = entry.metadata().map_err(|source| ScanError::Walk {
+                path: entry.path().to_path_buf(),
+                source,
+            })?;
+            if let Some(kind) = entry_kind(Some(metadata.file_type())) {
+                paths.insert(
+                    relative,
+                    ScannedEntry {
+                        kind,
+                        identity: Some(SourceIdentity::from_metadata(
+                            &metadata,
+                            kind,
+                            entry.path(),
+                        )),
+                    },
+                );
             } else {
                 findings.push(format!(
                     "skipped non-regular filesystem entry: {}",
@@ -137,7 +156,6 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
 
     let (tracked, tracked_findings) = tracked_paths(&target)?;
     findings.extend(tracked_findings);
-    let mut identities = BTreeMap::new();
     for tracked in tracked {
         if !paths.contains_key(&tracked) {
             let absolute = target.join(&tracked);
@@ -158,44 +176,59 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
                 ));
                 continue;
             };
-            identities.insert(
+            paths.insert(
                 tracked.clone(),
-                SourceIdentity::from_metadata(&metadata, kind, &absolute),
+                ScannedEntry {
+                    kind,
+                    identity: Some(SourceIdentity::from_metadata(&metadata, kind, &absolute)),
+                },
             );
-            paths.insert(tracked.clone(), kind);
         }
 
         let mut parent = tracked.parent();
         while let Some(path) = parent {
             if !path.as_os_str().is_empty() {
-                paths
-                    .entry(path.to_path_buf())
-                    .or_insert(EntryKind::Directory);
+                paths.entry(path.to_path_buf()).or_insert(ScannedEntry {
+                    kind: EntryKind::Directory,
+                    identity: None,
+                });
             }
             parent = path.parent();
         }
     }
 
-    let entries = paths
-        .into_iter()
-        .map(|(path, kind)| Entry { path, kind })
-        .collect::<Vec<_>>();
-    for entry in &entries {
-        if identities.contains_key(&entry.path) {
+    for (path, entry) in &mut paths {
+        if entry.identity.is_some() {
             continue;
         }
 
-        let absolute = target.join(&entry.path);
+        let absolute = target.join(path);
         let metadata =
             std::fs::symlink_metadata(&absolute).map_err(|source| ScanError::Metadata {
                 path: absolute.clone(),
                 source,
             })?;
-        identities.insert(
-            entry.path.clone(),
-            SourceIdentity::from_metadata(&metadata, entry.kind, &absolute),
-        );
+        entry.identity = Some(SourceIdentity::from_metadata(
+            &metadata, entry.kind, &absolute,
+        ));
     }
+
+    let mut identities = BTreeMap::new();
+    let entries = paths
+        .into_iter()
+        .map(|(path, entry)| {
+            identities.insert(
+                path.clone(),
+                entry
+                    .identity
+                    .expect("scanned entries have identities before returning"),
+            );
+            Entry {
+                path,
+                kind: entry.kind,
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(ScanResult {
         entries,
