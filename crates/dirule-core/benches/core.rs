@@ -93,7 +93,7 @@ fn benchmark_planning(criterion: &mut Criterion) {
     let compiled = config.compile().unwrap();
     let mut group = criterion.benchmark_group("planning");
 
-    for count in [100, 1_000, 10_000] {
+    for count in [100, 1_000, 10_000, 100_000] {
         let entries = entries(count);
         group.throughput(Throughput::Elements(count as u64));
 
