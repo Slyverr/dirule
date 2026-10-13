@@ -1,0 +1,244 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+struct TempProject(PathBuf);
+
+impl TempProject {
+    fn new() -> Self {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock is after Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dirule-cli-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&path).expect("create temp project");
+        Self(path)
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_dirule"))
+            .args(args)
+            .current_dir(&self.0)
+            .output()
+            .expect("run dirule")
+    }
+}
+
+impl Drop for TempProject {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn text(path: &Path) -> String {
+    fs::read_to_string(path).expect("read fixture file")
+}
+
+fn copy_tree(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("create copied fixture directory");
+    for entry in fs::read_dir(source).expect("read fixture directory") {
+        let entry = entry.expect("read fixture entry");
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type().expect("inspect fixture entry").is_dir() {
+            copy_tree(&source_path, &destination_path);
+        } else {
+            fs::copy(source_path, destination_path).expect("copy fixture file");
+        }
+    }
+}
+
+#[test]
+fn cli_initializes_checks_plans_applies_and_emits_json() {
+    let project = TempProject::new();
+    let directory = project.0.join("HTTPServer");
+    fs::create_dir_all(&directory).expect("create fixture directory");
+    fs::write(project.0.join("MyXMLParser.rs"), "parser").expect("write root file");
+    fs::write(directory.join("OAuthToken.txt"), "token").expect("write nested file");
+
+    let init = project.run(&["init", "--color", "always"]);
+    assert!(init.status.success());
+    assert!(String::from_utf8_lossy(&init.stdout).contains("\u{1b}[32mCreated"));
+    assert!(project.0.join("dirule.toml").is_file());
+
+    let plan = project.run(&["plan", "--color", "always"]);
+    assert!(plan.status.success());
+    let output = String::from_utf8_lossy(&plan.stdout);
+    assert!(output.contains("3 rename(s), 0 conflict(s)"));
+    assert!(output.contains("\u{1b}[31mMyXMLParser.rs\u{1b}[0m"));
+    assert!(output.contains("\u{1b}[32mmy-xml-parser.rs\u{1b}[0m"));
+    assert!(output.contains("OAuthToken.txt"));
+
+    let plain = project.run(&["plan", "--color", "never"]);
+    assert!(plain.status.success());
+    assert!(!String::from_utf8_lossy(&plain.stdout).contains('\u{1b}'));
+
+    let check = project.run(&["check"]);
+    assert_eq!(check.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("Check failed"));
+    assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
+
+    let json = project.run(&["plan", "--format", "json"]);
+    assert!(json.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).expect("valid JSON plan");
+    let changes = value["entries"]
+        .as_array()
+        .expect("plan entries")
+        .iter()
+        .filter(|entry| entry["source"] != entry["destination"])
+        .count();
+    assert_eq!(changes, 3);
+    assert!(!String::from_utf8_lossy(&json.stdout).contains('\u{1b}'));
+
+    let apply = project.run(&["apply", "--yes", "--color", "always"]);
+    assert!(apply.status.success());
+    assert!(String::from_utf8_lossy(&apply.stdout).contains("Applied 3 rename(s)."));
+    assert_eq!(text(&project.0.join("my-xml-parser.rs")), "parser");
+    assert_eq!(
+        text(&project.0.join("http-server/o-auth-token.txt")),
+        "token"
+    );
+
+    let check = project.run(&["check"]);
+    assert!(check.status.success());
+    assert!(String::from_utf8_lossy(&check.stdout).contains("Check passed"));
+}
+
+#[test]
+fn init_preserves_an_existing_config() {
+    let project = TempProject::new();
+    let config = project.0.join("dirule.toml");
+    fs::write(&config, "user-owned config\n").expect("write existing config");
+
+    let init = project.run(&["init"]);
+
+    assert_eq!(init.status.code(), Some(2));
+    assert_eq!(text(&config), "user-owned config\n");
+    assert!(String::from_utf8_lossy(&init.stderr).contains("cannot create"));
+}
+
+#[test]
+fn preset_listing_uses_home_config_when_xdg_config_home_is_empty() {
+    let project = TempProject::new();
+    let presets = project.0.join(".config/dirule/presets");
+    fs::create_dir_all(&presets).expect("create user preset directory");
+    fs::write(presets.join("downloads.toml"), "preset").expect("write preset fixture");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dirule"))
+        .args(["presets", "list"])
+        .current_dir(&project.0)
+        .env("HOME", &project.0)
+        .env("XDG_CONFIG_HOME", "")
+        .output()
+        .expect("run dirule");
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("downloads"));
+}
+
+#[test]
+fn explicit_target_overrides_the_configured_target() {
+    let project = TempProject::new();
+    let configured = project.0.join("configured");
+    let override_target = project.0.join("override");
+    fs::create_dir_all(&configured).expect("create configured target");
+    fs::create_dir_all(&override_target).expect("create override target");
+    fs::write(configured.join("OtherFile.txt"), "configured").expect("write configured file");
+    fs::write(override_target.join("MyXMLParser.txt"), "override").expect("write target file");
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\ntarget = \"configured\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write configuration");
+
+    let plan = Command::new(env!("CARGO_BIN_EXE_dirule"))
+        .args(["plan", "--target", "override"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run dirule");
+
+    assert!(plan.status.success());
+    let output = String::from_utf8_lossy(&plan.stdout);
+    assert!(output.contains("MyXMLParser.txt -> my-xml-parser.txt"));
+    assert!(!output.contains("OtherFile.txt"));
+}
+
+#[test]
+fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
+    let project = TempProject::new();
+    fs::write(project.0.join("MyFile.txt"), "content").expect("write source file");
+    assert!(project.run(&["init"]).status.success());
+
+    let apply = project.run(&["apply"]);
+
+    assert_eq!(apply.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&apply.stderr).contains("use --yes"));
+    assert!(project.0.join("MyFile.txt").is_file());
+    assert!(!project.0.join("my-file.txt").exists());
+}
+
+#[test]
+fn cli_checks_a_real_project_config_without_mutating_it() {
+    let project = TempProject::new();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/invoice-project");
+    copy_tree(&fixture, &project.0);
+
+    let check = project.run(&["check"]);
+    assert_eq!(check.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&check.stdout)
+            .contains("Invoices/2026-Acme-Quarter 1.pdf -> Archive/2026/acme/quarter-1.pdf")
+    );
+    assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
+    assert_eq!(
+        text(&project.0.join("Invoices/2026-Acme-Quarter 1.pdf")),
+        "invoice contents\n"
+    );
+    assert!(!project.0.join("Archive/2026/acme/quarter-1.pdf").exists());
+}
+
+#[test]
+fn cli_can_skip_conflicts_and_apply_unrelated_moves() {
+    let project = TempProject::new();
+    fs::write(project.0.join("First.txt"), "first source").expect("write first source");
+    fs::write(project.0.join("Second.txt"), "second source").expect("write second source");
+    fs::write(project.0.join("Independent.txt"), "independent move")
+        .expect("write independent source");
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\ntarget = \".\"\n\n[[rules]]\nname = \"first\"\nmatch = \"First.txt\"\nto = \"template:collision.txt\"\n\n[[rules]]\nname = \"second\"\nmatch = \"Second.txt\"\nto = \"template:collision.txt\"\n\n[[rules]]\nname = \"independent\"\nmatch = \"Independent.txt\"\nto = \"template:renamed.txt\"\n",
+    )
+    .expect("write fixture config");
+
+    let abort = project.run(&["apply", "--yes"]);
+    assert_eq!(abort.status.code(), Some(2));
+    assert!(project.0.join("Independent.txt").is_file());
+
+    let skip = project.run(&["apply", "--yes", "--on-conflict", "skip"]);
+    assert!(skip.status.success());
+    assert!(
+        String::from_utf8_lossy(&skip.stdout)
+            .contains("Applied 1 rename(s); skipped 1 conflict(s).")
+    );
+    assert!(project.0.join("First.txt").is_file());
+    assert!(project.0.join("Second.txt").is_file());
+    assert_eq!(text(&project.0.join("renamed.txt")), "independent move");
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_reports_a_skipped_symlink_once() {
+    use std::os::unix::fs::symlink;
+
+    let project = TempProject::new();
+    fs::write(project.0.join("target.txt"), "target").expect("write target file");
+    symlink("target.txt", project.0.join("MyLink")).expect("create symlink");
+    assert!(project.run(&["init"]).status.success());
+
+    let plan = project.run(&["plan"]);
+    assert!(plan.status.success());
+    let output = String::from_utf8_lossy(&plan.stdout);
+    assert!(output.contains("1 finding(s)"));
+    assert_eq!(output.matches("skipped symlink MyLink").count(), 1);
+}

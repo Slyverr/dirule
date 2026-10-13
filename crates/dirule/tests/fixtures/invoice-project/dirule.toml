@@ -1,0 +1,8 @@
+version = "1.0"
+name = "Invoice archive"
+target = "."
+
+[[rules]]
+name = "Archive dated invoices"
+match = "Invoices/<year>-<vendor>-<title>.pdf"
+to = "template:Archive/${year}/${vendor|kebab-case}/${title|kebab-case}.pdf"

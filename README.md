@@ -1,22 +1,31 @@
 # Dirule
 
-Dirule is a local-first CLI tool planned for defining reusable rules over file and directory paths. Its intended workflow is to check whether paths follow those rules, preview required changes, and apply an approved plan.
+Dirule is a local-first CLI for applying reusable rules to file and directory names. It can check a target, preview planned renames, and apply an approved plan. Rules are stored in a project's `dirule.toml`; Dirule changes paths, not file contents.
 
-## Status
+## Development status
 
-Dirule is at its initial workspace scaffold. The binary crate currently prints a placeholder message; configuration, rule evaluation, planning, and filesystem changes are not implemented yet.
+Dirule is under active development. Its configuration format and command behavior may change.
+
+## Quick start
+
+From a project checkout, create the starter configuration and preview it:
+
+```sh
+cargo run -p dirule -- init
+cargo run -p dirule -- plan
+cargo run -p dirule -- check
+cargo run -p dirule -- apply
+```
+
+`apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output.
 
 ## Workspace
 
-- `crates/dirule`: binary entry point.
-- `crates/dirule-core`: placeholder for shared rule logic.
-- `crates/dirule-fs`: placeholder for filesystem operations; it will depend on `dirule-core`.
+- `crates/dirule`: CLI and application orchestration.
+- `crates/dirule-core`: configuration, matching, transforms, and planning.
+- `crates/dirule-fs`: ignore-aware scanning and filesystem operations.
 
-The workspace uses Rust edition 2024 and Cargo resolver 3.
-
-## Development
-
-See [Contributing](CONTRIBUTING.md) for workspace checks and commit conventions.
+The workspace uses Rust edition 2024 and Cargo resolver 3. See [Contributing](CONTRIBUTING.md) for development checks and commit conventions.
 
 ## License
 
