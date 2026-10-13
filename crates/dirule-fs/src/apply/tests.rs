@@ -188,6 +188,17 @@ impl MutationRecorder for JournalInterference<'_> {
         destination: &std::path::Path,
         kind: EntryKind,
     ) -> Result<Option<u64>, ApplyError> {
+        if !self.injected && destination == self.target.join("z-moved.txt") {
+            std::fs::write(self.target.join("a-source.txt"), "external file")
+                .expect("occupy the original path");
+            self.injected = true;
+
+            return Err(ApplyError::Io {
+                path: source.to_path_buf(),
+                source: std::io::Error::other("simulated later operation failure"),
+            });
+        }
+
         self.recorder.move_intent(object, source, destination, kind)
     }
 
@@ -197,17 +208,7 @@ impl MutationRecorder for JournalInterference<'_> {
         destination: &std::path::Path,
         kind: EntryKind,
     ) -> Result<(), ApplyError> {
-        self.recorder.move_completed(sequence, destination, kind)?;
-
-        if !self.injected && destination == self.target.join("moved.txt") {
-            std::fs::write(self.target.join("a-source.txt"), "external file")
-                .expect("occupy the original path");
-            std::fs::remove_file(self.target.join("z-source.txt"))
-                .expect("remove the later source to fail apply");
-            self.injected = true;
-        }
-
-        Ok(())
+        self.recorder.move_completed(sequence, destination, kind)
     }
 
     fn directory_intent(&mut self, directory: &std::path::Path) -> Result<Option<u64>, ApplyError> {
@@ -273,7 +274,7 @@ fn apply_journal_records_a_real_rollback_failure_as_partially_recovered() {
         ConflictPolicy::Abort,
         &mut recorder,
     )
-    .expect_err("missing second source should fail apply");
+    .expect_err("simulated later operation failure should trigger rollback");
     let run_id = recorder
         .recorder
         .id()
