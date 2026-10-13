@@ -75,6 +75,10 @@ dirule plan --preset downloads
 
 By default, `presets save` reads `dirule.toml` from the current directory. Pass `--config FILE` to save another configuration. Presets are stored in Dirule's platform-specific user configuration directory, and an existing preset is never overwritten. Removing a preset asks for confirmation; pass `--yes` for a non-interactive run.
 
+## Shell completions
+
+Generate a completion script from the current CLI definition with `dirule completions SHELL`. Supported shells are Bash, Elvish, Fish, PowerShell, and Zsh. Redirect the output to the completion location used by your shell.
+
 ## Nix
 
 Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`. The GitHub flake commands in [Install](#install) require public repository access or configured GitHub authentication.

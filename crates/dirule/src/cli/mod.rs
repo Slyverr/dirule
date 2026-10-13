@@ -2,7 +2,7 @@ mod args;
 mod output;
 
 use self::args::{Cli, CliCommand, ColorChoice, ConflictAction, PresetsCommand, RunsCommand};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use dirule_core::{CURRENT_CONFIG_VERSION, Config, Plan, parse_config, plan};
 use dirule_fs::{ConflictPolicy, JournalStore, apply_journaled, scan, validate_destinations};
 use std::error::Error;
@@ -169,6 +169,12 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 options.format,
                 color,
             )?;
+            Ok(())
+        }
+        CliCommand::Completions { shell } => {
+            let mut command = Cli::command();
+            let binary_name = command.get_name().to_owned();
+            clap_complete::generate(shell, &mut command, binary_name, &mut io::stdout());
             Ok(())
         }
     }

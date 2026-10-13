@@ -172,6 +172,25 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
 }
 
 #[test]
+fn completions_generate_commands_and_global_options() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dirule"))
+        .args(["completions", "bash"])
+        .output()
+        .expect("generate Bash completions");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let script = String::from_utf8_lossy(&output.stdout);
+    assert!(script.contains("completions"));
+    assert!(script.contains("presets"));
+    assert!(script.contains("--target"));
+    assert!(script.contains("--format"));
+}
+
+#[test]
 fn apply_and_undo_emit_single_json_documents() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());
