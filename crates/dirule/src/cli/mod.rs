@@ -251,7 +251,7 @@ fn evaluate(
         .into());
     }
 
-    let config: Config = parse_config(&fs::read_to_string(&config_path)?)?;
+    let (config, _) = load_config(&config_path)?;
     let target = options
         .target
         .map(|path| resolve_target(&cwd, path))
@@ -267,6 +267,15 @@ fn evaluate(
     validate_destinations(&target, &mut plan)?;
     plan.findings.append(&mut scan.findings);
     Ok((target, plan, scan))
+}
+
+fn load_config(path: &Path) -> Result<(Config, String), Box<dyn Error>> {
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read configuration {}: {error}", path.display()))?;
+    let config = parse_config(&contents)
+        .map_err(|error| format!("invalid configuration {}: {error}", path.display()))?;
+
+    Ok((config, contents))
 }
 
 fn list_presets(format: args::OutputFormat, color: ColorChoice) -> Result<(), Box<dyn Error>> {
@@ -307,9 +316,7 @@ fn save_preset(options: args::PresetSaveArgs, color: ColorChoice) -> Result<(), 
             .unwrap_or_else(|| PathBuf::from("dirule.toml")),
     );
     let destination = preset_path(&options.name)?;
-    let contents = fs::read_to_string(&source_path)
-        .map_err(|error| format!("cannot read {}: {error}", source_path.display()))?;
-    parse_config(&contents)?;
+    let (_, contents) = load_config(&source_path)?;
 
     let directory = destination
         .parent()

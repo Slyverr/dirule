@@ -355,6 +355,37 @@ fn init_preserves_an_existing_config() {
 }
 
 #[test]
+fn malformed_config_errors_identify_the_source_file() {
+    let project = TempProject::new();
+    let config_path = project.0.join("rules.toml");
+    fs::write(&config_path, "version = 12\n").expect("write malformed config");
+
+    let plan = project.run(&["plan", "--config", "rules.toml"]);
+    let plan_error = String::from_utf8_lossy(&plan.stderr);
+    assert_eq!(plan.status.code(), Some(2));
+    assert!(plan_error.contains("rules.toml"));
+    assert!(plan_error.contains("configuration"));
+
+    let mut save = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut save, &project);
+    let save = save
+        .args(["presets", "save", "invalid", "--config", "rules.toml"])
+        .current_dir(&project.0)
+        .output()
+        .expect("reject malformed preset source");
+    let save_error = String::from_utf8_lossy(&save.stderr);
+
+    assert_eq!(save.status.code(), Some(2));
+    assert!(save_error.contains("rules.toml"));
+    assert!(save_error.contains("configuration"));
+    assert!(
+        !preset_config_base(&project)
+            .join("dirule/presets/invalid.toml")
+            .exists()
+    );
+}
+
+#[test]
 fn commands_do_not_search_parent_directories_for_a_config() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());
