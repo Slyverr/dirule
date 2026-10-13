@@ -4,7 +4,7 @@ use crate::{
     transform_filename,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -188,29 +188,36 @@ impl RuleKind {
 }
 
 fn find_conflicts(plan: &mut Plan, original_paths: &HashSet<PathBuf>) {
-    let mut destinations = BTreeMap::<PathBuf, Vec<usize>>::new();
-    for (index, entry) in plan.entries.iter().enumerate() {
+    let mut destinations = HashMap::<PathBuf, bool>::new();
+    for entry in &plan.entries {
         if entry.source != entry.destination {
             destinations
                 .entry(entry.destination.clone())
-                .or_default()
-                .push(index);
+                .and_modify(|has_multiple_owners| *has_multiple_owners = true)
+                .or_insert(false);
         }
     }
 
-    for (destination, owners) in destinations {
-        if owners.len() > 1 {
-            plan.conflicts.push(Conflict {
-                path: destination,
-                reason: "multiple entries have the same planned destination".into(),
-            });
-        } else if original_paths.contains(&destination) {
-            plan.conflicts.push(Conflict {
-                path: destination,
-                reason: "destination already exists in the scanned tree".into(),
-            });
-        }
-    }
+    let mut destination_conflicts = destinations
+        .into_iter()
+        .filter_map(|(destination, has_multiple_owners)| {
+            if has_multiple_owners {
+                Some(Conflict {
+                    path: destination,
+                    reason: "multiple entries have the same planned destination".into(),
+                })
+            } else if original_paths.contains(&destination) {
+                Some(Conflict {
+                    path: destination,
+                    reason: "destination already exists in the scanned tree".into(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    destination_conflicts.sort_by(|left, right| left.path.cmp(&right.path));
+    plan.conflicts.extend(destination_conflicts);
     let mut file_destinations = HashMap::<PathBuf, Vec<usize>>::new();
     for (index, entry) in plan.entries.iter().enumerate() {
         if entry.kind == EntryKind::File && entry.source != entry.destination {

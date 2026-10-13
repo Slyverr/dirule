@@ -566,6 +566,54 @@ to = "template:archive/${part}.txt"
 }
 
 #[test]
+fn conflicts_are_reported_in_destination_order() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid configuration");
+    let entries = [
+        Entry {
+            path: PathBuf::from("C__D.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("A--B.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("A B.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("C--D.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("A__B.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned
+            .conflicts
+            .iter()
+            .map(|conflict| conflict.path.clone())
+            .collect::<Vec<_>>(),
+        [PathBuf::from("a-b.txt"), PathBuf::from("c-d.txt")]
+    );
+}
+
+#[test]
 fn conflicts_detect_files_that_would_become_parent_paths() {
     let config = parse_config(
         r#"
