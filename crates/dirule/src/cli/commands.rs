@@ -2,7 +2,19 @@ use super::{args, config, journal, output, presets, prompt};
 use clap::CommandFactory;
 use dirule_fs::{ConflictPolicy, apply_journaled};
 use std::error::Error;
+use std::fmt;
 use std::io::{self, Write};
+
+#[derive(Debug)]
+pub(super) struct CheckFailure;
+
+impl fmt::Display for CheckFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("target does not satisfy the configured rules")
+    }
+}
+
+impl Error for CheckFailure {}
 
 pub(super) fn run(
     command: args::CliCommand,
@@ -24,7 +36,7 @@ pub(super) fn run(
                 verbose,
             )?;
             if result.has_changes() || !result.is_conflict_free() {
-                return Err("target does not satisfy the configured rules".into());
+                return Err(Box::new(CheckFailure));
             }
 
             Ok(())

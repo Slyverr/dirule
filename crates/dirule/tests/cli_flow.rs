@@ -135,7 +135,7 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     assert!(!plain_output.contains('\u{1b}'));
 
     let check = project.run(&["check"]);
-    assert_eq!(check.status.code(), Some(2));
+    assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("Check failed"));
     assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
     assert!(!project.journal_directory().exists());
@@ -400,6 +400,9 @@ fn malformed_config_errors_identify_the_source_file() {
     assert_eq!(plan.status.code(), Some(2));
     assert!(plan_error.contains("rules.toml"));
     assert!(plan_error.contains("configuration"));
+
+    let check = project.run(&["check", "--config", "rules.toml"]);
+    assert_eq!(check.status.code(), Some(2));
 
     let mut save = Command::new(env!("CARGO_BIN_EXE_dirule"));
     configure_preset_environment(&mut save, &project);
@@ -1015,7 +1018,7 @@ fn check_reports_conflicts_without_mutating_the_target() {
 
     let check = project.run(&["check"]);
 
-    assert_eq!(check.status.code(), Some(2));
+    assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("1 conflict(s)"));
     assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
     assert_eq!(text(&project.0.join("A__B.txt")), "first");
@@ -1092,7 +1095,7 @@ fn cli_checks_a_real_project_config_without_mutating_it() {
     copy_tree(&fixture, &project.0);
 
     let check = project.run(&["check"]);
-    assert_eq!(check.status.code(), Some(2));
+    assert_eq!(check.status.code(), Some(1));
     let output = String::from_utf8_lossy(&check.stdout).replace('\\', "/");
     assert!(
         output.contains("Invoices/2026-Acme-Quarter 1.pdf -> Archive/2026/acme/quarter-1.pdf"),

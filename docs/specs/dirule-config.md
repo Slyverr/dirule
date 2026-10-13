@@ -183,3 +183,4 @@ Tests should verify:
 - Explicit target override, configured target, current-directory default, exact config/preset selection, and no parent-directory config search.
 - Configuration validation accepts a valid config whose target does not exist, rejects invalid config and preset sources, and does not scan or mutate the target.
 - `check` succeeds when paths satisfy the rules and fails for a proposed path change or conflict without changing the filesystem.
+- `check` exits with status `0` when paths satisfy the rules, status `1` when a proposed change or conflict is found, and status `2` when an error prevents evaluation.

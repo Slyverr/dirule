@@ -51,6 +51,8 @@ cargo run -p dirule -- apply
 
 `validate` checks the selected config and compiles its rules without scanning the target. `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`; `validate` accepts the config or preset options without `--target`. Use `--format json` for structured output, or `--verbose` to show the rule responsible for each rename and identify paths inherited from a renamed directory.
 
+For CI, `check` exits with status `0` when all paths satisfy the rules and `1` when changes or conflicts are found. Errors that prevent the check from running exit with status `2`.
+
 Use `--color auto|always|never` to control terminal colors. Automatic color follows terminal support and honors non-empty `NO_COLOR` and `TERM=dumb`; an explicit `--color` choice takes precedence.
 
 With `apply --format json`, the result stays on stdout. When confirmation is required, Dirule writes the human-readable plan preview to stderr.

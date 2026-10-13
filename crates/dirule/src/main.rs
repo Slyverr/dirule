@@ -5,7 +5,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             dirule::cli::print_error(&error);
-            ExitCode::from(2)
+            ExitCode::from(error.exit_code())
         }
     }
 }
