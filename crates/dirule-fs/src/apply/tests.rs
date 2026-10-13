@@ -188,7 +188,11 @@ impl MutationRecorder for JournalInterference<'_> {
         destination: &std::path::Path,
         kind: EntryKind,
     ) -> Result<Option<u64>, ApplyError> {
-        if !self.injected && destination == self.target.join("z-moved.txt") {
+        if !self.injected
+            && destination
+                .file_name()
+                .is_some_and(|name| name == "z-moved.txt")
+        {
             std::fs::write(self.target.join("a-source.txt"), "external file")
                 .expect("occupy the original path");
             self.injected = true;
