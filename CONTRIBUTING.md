@@ -31,13 +31,14 @@ Put integration tests for public behavior in the crate's `tests/` directory, gro
 
 ## Benchmarks
 
-Run the `dirule-core` Criterion benchmarks with:
+Run the Criterion benchmarks with:
 
 ```sh
 cargo bench -p dirule-core --bench core
+cargo bench -p dirule-fs --bench scan
 ```
 
-They cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
+The core benchmarks cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. The filesystem benchmark measures repeat scans of nested trees with ignored paths. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
 
 ## Commits
 
