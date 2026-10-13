@@ -27,6 +27,14 @@ pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) {
     );
 }
 
+pub(super) fn removed_preset(name: &str, color: ColorChoice) {
+    println!(
+        "{} Removed preset {}",
+        paint("Done.", "32", color),
+        preset_name(name, color)
+    );
+}
+
 pub(super) fn error(message: &str, color: ColorChoice) {
     let enabled = color_enabled(color, std::io::stderr().is_terminal());
     if enabled {
@@ -111,8 +119,8 @@ pub(super) fn no_changes(color: ColorChoice) {
     println!("{}", paint("No changes to apply.", "32", color));
 }
 
-pub(super) fn cancelled(color: ColorChoice) {
-    println!("{}", paint("Apply cancelled.", "33", color));
+pub(super) fn cancelled(action: &str, color: ColorChoice) {
+    println!("{}.", paint(&format!("{action} cancelled"), "33", color));
 }
 
 pub(super) fn applied(moved: usize, skipped: usize, color: ColorChoice) {

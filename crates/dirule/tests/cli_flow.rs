@@ -255,6 +255,39 @@ fn preset_save_copies_a_valid_config_without_overwriting_existing_presets() {
 }
 
 #[test]
+fn preset_remove_requires_confirmation_without_an_interactive_terminal() {
+    let project = TempProject::new();
+    let preset = preset_config_base(&project).join("dirule/presets/downloads.toml");
+    fs::create_dir_all(preset.parent().expect("preset parent"))
+        .expect("create user preset directory");
+    fs::write(&preset, "preset contents").expect("write preset");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let rejected = command
+        .args(["presets", "remove", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("require remove confirmation");
+
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("use --yes to remove"));
+    assert!(preset.is_file());
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let removed = command
+        .args(["presets", "remove", "downloads", "--yes"])
+        .current_dir(&project.0)
+        .output()
+        .expect("remove preset");
+
+    assert!(removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stdout).contains("Removed preset downloads"));
+    assert!(!preset.exists());
+}
+
+#[test]
 fn explicit_target_overrides_the_configured_target() {
     let project = TempProject::new();
     let configured = project.0.join("configured");

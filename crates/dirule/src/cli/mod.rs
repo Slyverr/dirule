@@ -83,9 +83,13 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 }
                 return Ok(());
             }
-            if !confirm(yes)? {
+            if !confirm(
+                "Apply this plan?",
+                "use --yes to apply without an interactive terminal",
+                yes,
+            )? {
                 if format == args::OutputFormat::Human {
-                    output::cancelled(color);
+                    output::cancelled("Apply", color);
                 }
                 return Ok(());
             }
@@ -102,6 +106,7 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         CliCommand::Presets(args) => match args.command {
             PresetsCommand::List => list_presets(color),
             PresetsCommand::Save(options) => save_preset(options, color),
+            PresetsCommand::Remove(options) => remove_preset(options, color),
         },
     }
 }
@@ -239,6 +244,28 @@ fn save_preset(options: args::PresetSaveArgs, color: ColorChoice) -> Result<(), 
     Ok(())
 }
 
+fn remove_preset(
+    options: args::PresetRemoveArgs,
+    color: ColorChoice,
+) -> Result<(), Box<dyn Error>> {
+    let path = preset_path(&options.name)?;
+    if !path.is_file() {
+        return Err(format!("user preset {:?} does not exist", options.name).into());
+    }
+    if !confirm(
+        &format!("Remove user preset {:?}?", options.name),
+        "use --yes to remove a preset without an interactive terminal",
+        options.yes,
+    )? {
+        output::cancelled("Preset removal", color);
+        return Ok(());
+    }
+
+    fs::remove_file(&path).map_err(|error| format!("cannot remove {}: {error}", path.display()))?;
+    output::removed_preset(&options.name, color);
+    Ok(())
+}
+
 fn preset_path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
     if name.is_empty()
         || !name
@@ -279,14 +306,14 @@ fn resolve(base: &Path, path: PathBuf) -> PathBuf {
     }
 }
 
-fn confirm(yes: bool) -> Result<bool, Box<dyn Error>> {
+fn confirm(prompt: &str, non_interactive_hint: &str, yes: bool) -> Result<bool, Box<dyn Error>> {
     if yes {
         return Ok(true);
     }
     if !io::stdin().is_terminal() {
-        return Err("use --yes to apply without an interactive terminal".into());
+        return Err(non_interactive_hint.into());
     }
-    eprint!("Apply this plan? [y/N] ");
+    eprint!("{prompt} [y/N] ");
     io::stderr().flush()?;
     let mut answer = String::new();
     io::stdin().read_line(&mut answer)?;

@@ -90,6 +90,8 @@ pub(super) enum PresetsCommand {
     List,
     /// Save a project config as a global preset.
     Save(PresetSaveArgs),
+    /// Remove a user preset.
+    Remove(PresetRemoveArgs),
 }
 
 #[derive(Debug, Args)]
@@ -100,6 +102,16 @@ pub(super) struct PresetSaveArgs {
     /// Read rules from this TOML file instead of ./dirule.toml.
     #[arg(long, value_name = "FILE")]
     pub(super) config: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PresetRemoveArgs {
+    /// Name of the preset to remove.
+    pub(super) name: String,
+
+    /// Remove without an interactive confirmation.
+    #[arg(long)]
+    pub(super) yes: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
