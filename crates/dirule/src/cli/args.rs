@@ -47,7 +47,7 @@ pub(super) enum CliCommand {
 #[derive(Debug, Args)]
 pub(super) struct OperationArgs {
     /// Directory to check or organize.
-    #[arg(long, value_name = "PATH")]
+    #[arg(short, long, value_name = "PATH")]
     pub(super) target: Option<PathBuf>,
 
     #[command(flatten)]
@@ -58,7 +58,7 @@ pub(super) struct OperationArgs {
     pub(super) verbose: bool,
 
     /// Output as human-readable text or JSON.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
     pub(super) format: OutputFormat,
 }
 
@@ -66,11 +66,11 @@ pub(super) struct OperationArgs {
 #[group(multiple = false)]
 pub(super) struct RuleSourceArgs {
     /// Read rules from this TOML file.
-    #[arg(long, value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE")]
     pub(super) config: Option<PathBuf>,
 
     /// Select a named preset.
-    #[arg(long, value_name = "NAME")]
+    #[arg(short, long, value_name = "NAME")]
     pub(super) preset: Option<String>,
 }
 
@@ -80,7 +80,7 @@ pub(super) struct ValidateArgs {
     pub(super) rules: RuleSourceArgs,
 
     /// Output as human-readable text or JSON.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
     pub(super) format: OutputFormat,
 }
 
@@ -90,7 +90,7 @@ pub(super) struct ApplyArgs {
     pub(super) operation: OperationArgs,
 
     /// Skip the interactive confirmation prompt.
-    #[arg(long)]
+    #[arg(short, long)]
     pub(super) yes: bool,
 
     /// Choose whether conflicts abort the operation or skip affected paths.
@@ -116,7 +116,7 @@ pub(super) enum PresetsCommand {
     /// List available presets.
     List {
         /// Output as human-readable text or JSON.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
         format: OutputFormat,
     },
     /// Save a project config as a global preset.
@@ -141,7 +141,7 @@ pub(super) enum RunsCommand {
     /// List recorded apply runs.
     List {
         /// Output as human-readable text or JSON.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
         format: OutputFormat,
     },
     /// Show the renames recorded for a run.
@@ -150,7 +150,7 @@ pub(super) enum RunsCommand {
         run_id: String,
 
         /// Output as human-readable text or JSON.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
         format: OutputFormat,
     },
 }
@@ -161,11 +161,11 @@ pub(super) struct UndoArgs {
     pub(super) run_id: String,
 
     /// Skip the interactive confirmation prompt.
-    #[arg(long)]
+    #[arg(short, long)]
     pub(super) yes: bool,
 
     /// Output as human-readable text or JSON.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
     pub(super) format: OutputFormat,
 }
 
@@ -175,7 +175,7 @@ pub(super) struct PresetSaveArgs {
     pub(super) name: String,
 
     /// Read rules from this TOML file instead of ./dirule.toml.
-    #[arg(long, value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE")]
     pub(super) config: Option<PathBuf>,
 }
 
@@ -185,7 +185,7 @@ pub(super) struct PresetRemoveArgs {
     pub(super) name: String,
 
     /// Remove without an interactive confirmation.
-    #[arg(long)]
+    #[arg(short, long)]
     pub(super) yes: bool,
 }
 

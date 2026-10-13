@@ -259,6 +259,89 @@ fn cli_plans_pascal_case_names_in_text_and_json() {
 }
 
 #[test]
+fn common_short_options_work_through_the_public_cli() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+
+    let target = project.0.join("target");
+    fs::create_dir(&target).expect("create target directory");
+    fs::write(target.join("MyXMLParser.rs"), "parser").expect("write target file");
+    let canonical_target = target.canonicalize().expect("canonicalize target");
+
+    let validate = project.run(&["validate", "-c", "dirule.toml", "-f", "json"]);
+    assert!(validate.status.success());
+    let validate: serde_json::Value =
+        serde_json::from_slice(&validate.stdout).expect("valid validation JSON");
+    assert_eq!(validate["valid"], true);
+
+    let plan = project.run(&["plan", "-t", "target", "-c", "dirule.toml", "-f", "json"]);
+    assert!(plan.status.success());
+    let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).expect("valid plan JSON");
+    assert_eq!(plan["target"], canonical_target.to_string_lossy().as_ref());
+    assert!(plan["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "MyXMLParser.rs" && entry["destination"] == "my-xml-parser.rs"
+    }));
+
+    let mut save = project.command(&["presets", "save", "compact", "-c", "dirule.toml"]);
+    configure_preset_environment(&mut save, &project);
+    let save = save.output().expect("save preset");
+    assert!(
+        save.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&save.stdout),
+        String::from_utf8_lossy(&save.stderr)
+    );
+
+    let mut list = project.command(&["presets", "list", "-f", "json"]);
+    configure_preset_environment(&mut list, &project);
+    let list = list.output().expect("list presets");
+    assert!(list.status.success());
+    let list: serde_json::Value = serde_json::from_slice(&list.stdout).expect("valid preset JSON");
+    assert!(
+        list["presets"]
+            .as_array()
+            .unwrap()
+            .contains(&"compact".into())
+    );
+
+    let mut apply =
+        project.command(&["apply", "-t", "target", "-p", "compact", "-y", "-f", "json"]);
+    configure_preset_environment(&mut apply, &project);
+    let apply = apply.output().expect("apply preset");
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("valid apply JSON");
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("applied run ID");
+
+    let runs = project.run(&["runs", "list", "-f", "json"]);
+    assert!(runs.status.success());
+    let runs: serde_json::Value = serde_json::from_slice(&runs.stdout).expect("valid runs JSON");
+    assert_eq!(runs["runs"][0]["id"], run_id);
+
+    let details = project.run(&["runs", "show", run_id, "-f", "json"]);
+    assert!(details.status.success());
+    let details: serde_json::Value =
+        serde_json::from_slice(&details.stdout).expect("valid run details JSON");
+    assert_eq!(details["run"]["id"], run_id);
+
+    let undo = project.run(&["undo", run_id, "-y", "-f", "json"]);
+    assert!(undo.status.success());
+    let undo: serde_json::Value = serde_json::from_slice(&undo.stdout).expect("valid undo JSON");
+    assert_eq!(undo["status"], "undone");
+    assert!(target.join("MyXMLParser.rs").is_file());
+
+    let mut remove = project.command(&["presets", "remove", "compact", "-y"]);
+    configure_preset_environment(&mut remove, &project);
+    assert!(remove.output().expect("remove preset").status.success());
+}
+
+#[test]
 fn plan_exits_cleanly_when_a_piped_reader_closes_early() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());
