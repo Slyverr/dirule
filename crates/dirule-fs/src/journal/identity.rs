@@ -1,4 +1,6 @@
-use super::{JournalError, decode_hex, encode_hex};
+use super::JournalError;
+#[cfg(unix)]
+use super::{decode_hex, encode_hex};
 use dirule_core::EntryKind;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -25,7 +27,7 @@ impl EncodedPath {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
-            return Ok(Self::WindowsUtf16(path.as_os_str().encode_wide().collect()));
+            Ok(Self::WindowsUtf16(path.as_os_str().encode_wide().collect()))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -88,7 +90,7 @@ impl ObjectIdentity {
         }
     }
 
-    pub(super) fn from_metadata(metadata: &fs::Metadata, kind: EntryKind) -> Self {
+    pub(super) fn from_metadata(metadata: &fs::Metadata, kind: EntryKind, path: &Path) -> Self {
         let modified = metadata
             .modified()
             .ok()
@@ -96,6 +98,7 @@ impl ObjectIdentity {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let _ = path;
             Self {
                 kind,
                 length: metadata.len(),
@@ -107,18 +110,20 @@ impl ObjectIdentity {
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::MetadataExt;
+            let (volume_serial_number, file_index) = crate::windows_identity::get(path)
+                .map_or((None, None), |(volume, index)| (Some(volume), Some(index)));
             Self {
                 kind,
                 length: metadata.len(),
                 modified_seconds: modified.map(|time| time.as_secs()),
                 modified_nanos: modified.map(|time| time.subsec_nanos()),
-                volume_serial_number: metadata.volume_serial_number(),
-                file_index: metadata.file_index(),
+                volume_serial_number,
+                file_index,
             }
         }
         #[cfg(not(any(unix, windows)))]
         {
+            let _ = path;
             Self {
                 kind,
                 length: metadata.len(),
@@ -128,12 +133,12 @@ impl ObjectIdentity {
         }
     }
 
-    pub(super) fn matches(&self, metadata: &fs::Metadata, kind: EntryKind) -> bool {
+    pub(super) fn matches(&self, metadata: &fs::Metadata, kind: EntryKind, path: &Path) -> bool {
         if self.kind != kind {
             return false;
         }
         if kind == EntryKind::Directory {
-            return self.matches_object_id(metadata);
+            return self.matches_object_id(metadata, path);
         }
 
         let modified = metadata
@@ -143,32 +148,26 @@ impl ObjectIdentity {
         self.length == metadata.len()
             && self.modified_seconds == modified.map(|time| time.as_secs())
             && self.modified_nanos == modified.map(|time| time.subsec_nanos())
-            && self.matches_object_id(metadata)
+            && self.matches_object_id(metadata, path)
     }
 
-    fn matches_object_id(&self, metadata: &fs::Metadata) -> bool {
+    fn matches_object_id(&self, metadata: &fs::Metadata, path: &Path) -> bool {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let _ = path;
             self.inode != 0 && self.device == metadata.dev() && self.inode == metadata.ino()
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::MetadataExt;
-            matches!(
-                (
-                    self.volume_serial_number,
-                    metadata.volume_serial_number(),
-                    self.file_index,
-                    metadata.file_index()
-                ),
-                (Some(expected_volume), Some(actual_volume), Some(expected_file), Some(actual_file))
-                    if expected_volume == actual_volume && expected_file == actual_file
-            )
+            let _ = metadata;
+            crate::windows_identity::get(path).is_some_and(|(volume, index)| {
+                self.volume_serial_number == Some(volume) && self.file_index == Some(index)
+            })
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = metadata;
+            let _ = (metadata, path);
             false
         }
     }

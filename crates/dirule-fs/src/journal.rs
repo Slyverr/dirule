@@ -326,7 +326,7 @@ impl JournalStore {
                     let destination_path = checked_target_path(&target, &source)?;
                     let metadata = fs::symlink_metadata(&source_path)
                         .map_err(|source| JournalError::io(&source_path, source))?;
-                    if !identity.matches(&metadata, identity.kind) {
+                    if !identity.matches(&metadata, identity.kind, &source_path) {
                         return Err(JournalError::ChangedObject {
                             run_id: run_id.to_owned(),
                             path: source_path,
@@ -351,7 +351,7 @@ impl JournalStore {
                         let directory = checked_target_path(&target, &path)?;
                         let metadata = fs::symlink_metadata(&directory)
                             .map_err(|source| JournalError::io(&directory, source))?;
-                        if !identity.matches(&metadata, EntryKind::Directory) {
+                        if !identity.matches(&metadata, EntryKind::Directory, &directory) {
                             return Err(JournalError::ChangedObject {
                                 run_id: run_id.to_owned(),
                                 path: directory,
@@ -363,7 +363,7 @@ impl JournalStore {
                             Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
                                 let metadata = fs::symlink_metadata(&directory)
                                     .map_err(|source| JournalError::io(&directory, source))?;
-                                if !identity.matches(&metadata, EntryKind::Directory) {
+                                if !identity.matches(&metadata, EntryKind::Directory, &directory) {
                                     return Err(JournalError::ChangedObject {
                                         run_id: run_id.to_owned(),
                                         path: directory,
@@ -430,7 +430,11 @@ impl JournalStore {
                 id: id.clone(),
                 target: EncodedPath::from_path(&target)?,
                 target_display: target.to_string_lossy().into_owned(),
-                target_identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory),
+                target_identity: ObjectIdentity::from_metadata(
+                    &metadata,
+                    EntryKind::Directory,
+                    &target,
+                ),
                 started_at,
                 plan_fingerprint: fingerprint(plan),
             };
@@ -716,7 +720,7 @@ impl JournalWriter {
                 object,
                 source: source_relative.to_path_buf(),
                 destination: destination_relative.to_path_buf(),
-                identity: ObjectIdentity::from_metadata(&metadata, kind),
+                identity: ObjectIdentity::from_metadata(&metadata, kind, source),
             },
             &self.path,
         )?;
@@ -735,7 +739,7 @@ impl JournalWriter {
             &mut self.file,
             &JournalRecord::MoveCompleted {
                 sequence,
-                identity: ObjectIdentity::from_metadata(&metadata, kind),
+                identity: ObjectIdentity::from_metadata(&metadata, kind, destination),
             },
             &self.path,
         )
@@ -766,6 +770,7 @@ impl JournalWriter {
             Some(ObjectIdentity::from_metadata(
                 &metadata,
                 EntryKind::Directory,
+                directory,
             ))
         } else {
             None
@@ -799,7 +804,7 @@ impl JournalWriter {
             &JournalRecord::DirectoryChanged {
                 sequence,
                 action: DirectoryAction::Create,
-                identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory),
+                identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory, directory),
             },
             &self.path,
         )
@@ -842,7 +847,7 @@ impl JournalWriter {
             &JournalRecord::DirectoryRetained {
                 sequence,
                 path: relative.to_path_buf(),
-                identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory),
+                identity: ObjectIdentity::from_metadata(&metadata, EntryKind::Directory, directory),
             },
             &self.path,
         )?;
@@ -993,21 +998,21 @@ fn create_private_file(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-fn set_private_directory(path: &Path) -> Result<(), JournalError> {
+fn set_private_directory(_path: &Path) -> Result<(), JournalError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|source| JournalError::io(path, source))?;
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o700))
+            .map_err(|source| JournalError::io(_path, source))?;
     }
     Ok(())
 }
 
-fn sync_directory(path: &Path) -> Result<(), JournalError> {
+fn sync_directory(_path: &Path) -> Result<(), JournalError> {
     #[cfg(unix)]
-    File::open(path)
+    File::open(_path)
         .and_then(|file| file.sync_all())
-        .map_err(|source| JournalError::io(path, source))?;
+        .map_err(|source| JournalError::io(_path, source))?;
     Ok(())
 }
 
@@ -1045,6 +1050,7 @@ fn fingerprint(plan: &Plan) -> String {
     format!("fnv1a64:{hash:016x}")
 }
 
+#[cfg(unix)]
 fn encode_hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut encoded = String::with_capacity(bytes.len() * 2);
@@ -1055,6 +1061,7 @@ fn encode_hex(bytes: &[u8]) -> String {
     encoded
 }
 
+#[cfg(unix)]
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
     if value.len() & 1 != 0 {
         return None;

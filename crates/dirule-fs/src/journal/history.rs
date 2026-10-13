@@ -304,7 +304,9 @@ impl JournalHistory {
                                     action: DirectoryAction::Remove,
                                     identity,
                                 }),
-                            Ok(metadata) if identity.matches(&metadata, EntryKind::Directory) => {}
+                            Ok(metadata)
+                                if identity.matches(&metadata, EntryKind::Directory, &absolute) => {
+                            }
                             _ => {
                                 return Err(JournalError::AmbiguousOperation {
                                     run_id: self.id.clone(),
@@ -584,7 +586,7 @@ pub(super) fn validate_target_identity(
         fs::symlink_metadata(&canonical).map_err(|source| JournalError::io(&canonical, source))?;
     if !metadata.is_dir()
         || metadata.file_type().is_symlink()
-        || !identity.matches(&metadata, EntryKind::Directory)
+        || !identity.matches(&metadata, EntryKind::Directory, &canonical)
     {
         return Err(JournalError::ChangedTarget(run_id.to_owned()));
     }
@@ -651,7 +653,7 @@ fn operation_still_at_source(
 
 fn matches_identity(path: &Path, identity: &ObjectIdentity) -> Result<bool, JournalError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(identity.matches(&metadata, identity.kind)),
+        Ok(metadata) => Ok(identity.matches(&metadata, identity.kind, path)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(source) => Err(JournalError::io(path, source)),
     }
@@ -729,7 +731,7 @@ pub(super) fn preflight_undo(
                 if *action == DirectoryAction::Create {
                     let metadata = fs::symlink_metadata(&absolute)
                         .map_err(|source| JournalError::io(&absolute, source))?;
-                    if !identity.matches(&metadata, EntryKind::Directory) {
+                    if !identity.matches(&metadata, EntryKind::Directory, &absolute) {
                         return Err(JournalError::ChangedObject {
                             run_id: run_id.into(),
                             path: absolute,
@@ -801,13 +803,12 @@ fn cancel_inverse_mutations(mutations: Vec<UndoMutation>) -> Vec<UndoMutation> {
     pending
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::path_exists;
     use crate::journal::JournalError;
     use std::path::Path;
 
-    #[cfg(unix)]
     #[test]
     fn path_existence_propagates_metadata_errors() {
         use std::os::unix::ffi::OsStrExt;

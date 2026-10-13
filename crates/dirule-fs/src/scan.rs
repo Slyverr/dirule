@@ -70,7 +70,8 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
             path: target.clone(),
             source,
         })?;
-    let target_identity = SourceIdentity::from_metadata(&target_metadata, EntryKind::Directory);
+    let target_identity =
+        SourceIdentity::from_metadata(&target_metadata, EntryKind::Directory, &target);
     if let (_, Some(source)) = ignore::gitignore::Gitignore::global() {
         return Err(ScanError::Walk {
             path: target.clone(),
@@ -157,7 +158,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
             };
             identities.insert(
                 tracked.clone(),
-                SourceIdentity::from_metadata(&metadata, kind),
+                SourceIdentity::from_metadata(&metadata, kind, &absolute),
             );
             paths.insert(tracked.clone(), kind);
         }
@@ -185,12 +186,12 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         let absolute = target.join(&entry.path);
         let metadata =
             std::fs::symlink_metadata(&absolute).map_err(|source| ScanError::Metadata {
-                path: absolute,
+                path: absolute.clone(),
                 source,
             })?;
         identities.insert(
             entry.path.clone(),
-            SourceIdentity::from_metadata(&metadata, entry.kind),
+            SourceIdentity::from_metadata(&metadata, entry.kind, &absolute),
         );
     }
 
@@ -244,10 +245,11 @@ fn validate_ignore_file(path: &Path) -> Result<(), ScanError> {
 }
 
 impl SourceIdentity {
-    fn from_metadata(metadata: &std::fs::Metadata, kind: EntryKind) -> Self {
+    fn from_metadata(metadata: &std::fs::Metadata, kind: EntryKind, path: &Path) -> Self {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let _ = path;
             Self {
                 length: metadata.len(),
                 modified: metadata.modified().ok(),
@@ -258,17 +260,19 @@ impl SourceIdentity {
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::MetadataExt;
+            let (volume_serial_number, file_index) = crate::windows_identity::get(path)
+                .map_or((None, None), |(volume, index)| (Some(volume), Some(index)));
             Self {
                 length: metadata.len(),
                 modified: metadata.modified().ok(),
                 kind,
-                volume_serial_number: metadata.volume_serial_number(),
-                file_index: metadata.file_index(),
+                volume_serial_number,
+                file_index,
             }
         }
         #[cfg(not(any(unix, windows)))]
         {
+            let _ = path;
             Self {
                 length: metadata.len(),
                 modified: metadata.modified().ok(),
@@ -277,55 +281,62 @@ impl SourceIdentity {
         }
     }
 
-    pub(crate) fn matches(&self, metadata: &std::fs::Metadata, kind: EntryKind) -> bool {
+    pub(crate) fn matches(
+        &self,
+        metadata: &std::fs::Metadata,
+        kind: EntryKind,
+        path: &Path,
+    ) -> bool {
         let common = self.length == metadata.len()
             && self.modified == metadata.modified().ok()
             && self.kind == kind;
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let _ = path;
             common && self.device == metadata.dev() && self.inode == metadata.ino()
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::MetadataExt;
             common
-                && self.volume_serial_number == metadata.volume_serial_number()
-                && self.file_index == metadata.file_index()
+                && crate::windows_identity::get(path).is_some_and(|(volume, index)| {
+                    self.volume_serial_number == Some(volume) && self.file_index == Some(index)
+                })
         }
         #[cfg(not(any(unix, windows)))]
         {
+            let _ = path;
             common
         }
     }
 
-    pub(crate) fn matches_object(&self, metadata: &std::fs::Metadata, kind: EntryKind) -> bool {
+    pub(crate) fn matches_object(
+        &self,
+        metadata: &std::fs::Metadata,
+        kind: EntryKind,
+        path: &Path,
+    ) -> bool {
         if self.kind != kind {
             return false;
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let _ = path;
             self.device == metadata.dev() && self.inode == metadata.ino()
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::MetadataExt;
-            match (
-                self.volume_serial_number,
-                self.file_index,
-                metadata.volume_serial_number(),
-                metadata.file_index(),
-            ) {
-                (Some(old_volume), Some(old_index), Some(new_volume), Some(new_index)) => {
-                    old_volume == new_volume && old_index == new_index
+            match crate::windows_identity::get(path) {
+                Some((volume, index)) => {
+                    self.volume_serial_number == Some(volume) && self.file_index == Some(index)
                 }
-                _ => self.matches(metadata, kind),
+                None => self.matches(metadata, kind, path),
             }
         }
         #[cfg(not(any(unix, windows)))]
         {
-            self.matches(metadata, kind)
+            self.matches(metadata, kind, path)
         }
     }
 }

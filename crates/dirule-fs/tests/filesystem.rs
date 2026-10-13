@@ -1,4 +1,6 @@
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry, parse_config, plan};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use dirule_fs::validate_destinations;
 use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -543,15 +545,6 @@ fn apply_rejects_a_replaced_source_with_same_size_and_timestamp() {
         .expect("inspect source")
         .modified()
         .expect("read source timestamp");
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        let metadata = std::fs::metadata(&source).expect("inspect Windows source identity");
-        if metadata.volume_serial_number().is_none() || metadata.file_index().is_none() {
-            return;
-        }
-    }
-
     std::fs::write(&replacement, "Replaced").expect("write replacement");
     std::fs::File::open(&replacement)
         .expect("open replacement")

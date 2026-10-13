@@ -262,10 +262,9 @@ fn apply_recorded(
         source,
     })?;
     if !target_metadata.is_dir()
-        || !snapshot
-            .target_identity
-            .as_ref()
-            .is_some_and(|identity| identity.matches_object(&target_metadata, EntryKind::Directory))
+        || !snapshot.target_identity.as_ref().is_some_and(|identity| {
+            identity.matches_object(&target_metadata, EntryKind::Directory, &target)
+        })
     {
         return Err(ApplyError::ChangedTarget(target));
     }
@@ -423,7 +422,7 @@ fn apply_entry(
     let identity_matches = snapshot
         .identities
         .get(&entry.source)
-        .is_some_and(|identity| identity.matches(&metadata, entry.kind));
+        .is_some_and(|identity| identity.matches(&metadata, entry.kind, &source));
     if !source_kind_matches || !identity_matches {
         return Err(ApplyError::ChangedSource(source));
     }
@@ -609,7 +608,7 @@ fn validate_sources(
         let identity_matches = snapshot
             .identities
             .get(&entry.source)
-            .is_some_and(|identity| identity.matches(&metadata, entry.kind));
+            .is_some_and(|identity| identity.matches(&metadata, entry.kind, &source));
         if !source_kind_matches || !identity_matches {
             return Err(ApplyError::ChangedSource(source));
         }

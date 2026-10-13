@@ -1,6 +1,8 @@
 mod apply;
 mod journal;
 mod scan;
+#[cfg(windows)]
+mod windows_identity;
 
 pub use apply::{
     ApplyError, ApplyReport, ConflictPolicy, JournaledApplyReport, apply, apply_journaled,
