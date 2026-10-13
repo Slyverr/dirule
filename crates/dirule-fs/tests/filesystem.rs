@@ -32,6 +32,11 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
     std::fs::create_dir(temp.0.join("ignored")).expect("create ignored directory");
     std::fs::write(temp.0.join("ignored/file.txt"), "ignored").expect("write ignored file");
     std::fs::write(temp.0.join(".hidden"), "visible to rules").expect("write hidden file");
+    std::fs::create_dir(temp.0.join("nested")).expect("create nested directory");
+    std::fs::write(temp.0.join("nested/.ignore"), "ignored/\n").expect("write nested ignore file");
+    std::fs::create_dir(temp.0.join("nested/ignored")).expect("create nested ignored directory");
+    std::fs::write(temp.0.join("nested/ignored/file.txt"), "ignored")
+        .expect("write nested ignored file");
 
     let result = scan(&temp.0).expect("scan target");
     let paths = result
@@ -41,6 +46,7 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
         .collect::<Vec<_>>();
     assert!(paths.contains(&PathBuf::from(".hidden")));
     assert!(!paths.iter().any(|path| path.starts_with("ignored")));
+    assert!(!paths.iter().any(|path| path.starts_with("nested/ignored")));
 }
 
 #[cfg(unix)]
