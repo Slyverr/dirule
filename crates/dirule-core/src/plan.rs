@@ -73,11 +73,7 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
         }
     }
 
-    ordered.sort_by(|left, right| {
-        depth(&left.path)
-            .cmp(&depth(&right.path))
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    ordered.sort_by_cached_key(|entry| (depth(&entry.path), entry.path.as_path()));
     let original_paths: HashSet<PathBuf> = ordered
         .iter()
         .map(|entry| clean_path(&entry.path))

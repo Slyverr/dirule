@@ -385,7 +385,7 @@ fn planning_skips_and_reports_non_unicode_paths() {
 }
 
 #[test]
-fn planning_propagates_directory_names_and_keeps_first_match_on_original_paths() {
+fn planning_propagates_directory_names_from_unsorted_entries() {
     let config = Config {
         name: None,
         target: None,
@@ -409,12 +409,12 @@ fn planning_propagates_directory_names_and_keeps_first_match_on_original_paths()
     };
     let entries = [
         Entry {
-            path: PathBuf::from("MyXMLParser"),
-            kind: EntryKind::Directory,
-        },
-        Entry {
             path: PathBuf::from("MyXMLParser/ReadMe.txt"),
             kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("MyXMLParser"),
+            kind: EntryKind::Directory,
         },
     ];
     let result = plan(&config, &entries).expect("valid plan");
