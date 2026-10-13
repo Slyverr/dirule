@@ -1,4 +1,5 @@
 use crate::{AcronymLexicon, Error, Result};
+use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,7 +23,11 @@ impl Transform {
 }
 
 pub fn transform(value: &str, operation: Transform, acronyms: &AcronymLexicon) -> String {
-    render_tokens(tokenize(value, acronyms), operation)
+    let tokens = tokenize(value, acronyms);
+    let mut output = String::with_capacity(value.len());
+    render_tokens(value, &tokens, operation, &mut output);
+
+    output
 }
 
 pub fn transform_filename(value: &str, operation: Transform, acronyms: &AcronymLexicon) -> String {
@@ -30,11 +35,12 @@ pub fn transform_filename(value: &str, operation: Transform, acronyms: &AcronymL
         .strip_prefix('.')
         .map_or((false, value), |v| (true, v));
     let (stem, extension) = split_extension(value);
-    let mut output = String::new();
+    let tokens = tokenize(stem, acronyms);
+    let mut output = String::with_capacity(value.len());
     if hidden {
         output.push('.');
     }
-    output.push_str(&render_tokens(tokenize(stem, acronyms), operation));
+    render_tokens(stem, &tokens, operation, &mut output);
     if let Some(extension) = extension {
         output.push('.');
         output.push_str(extension);
@@ -42,30 +48,26 @@ pub fn transform_filename(value: &str, operation: Transform, acronyms: &AcronymL
     output
 }
 
-fn render_tokens(tokens: Vec<String>, operation: Transform) -> String {
-    match operation {
-        Transform::SnakeCase => tokens
-            .iter()
-            .map(|word| word.to_lowercase())
-            .collect::<Vec<_>>()
-            .join("_"),
-        Transform::KebabCase => tokens
-            .iter()
-            .map(|word| word.to_lowercase())
-            .collect::<Vec<_>>()
-            .join("-"),
-        Transform::CamelCase => tokens
-            .iter()
-            .enumerate()
-            .map(|(index, word)| {
-                if index == 0 {
-                    word.to_lowercase()
-                } else {
-                    title_case(word)
-                }
-            })
-            .collect::<String>(),
-        Transform::PascalCase => tokens.iter().map(|word| title_case(word)).collect(),
+fn render_tokens(value: &str, tokens: &[Range<usize>], operation: Transform, output: &mut String) {
+    let separator = match operation {
+        Transform::SnakeCase => Some('_'),
+        Transform::KebabCase => Some('-'),
+        Transform::CamelCase | Transform::PascalCase => None,
+    };
+
+    for (index, range) in tokens.iter().enumerate() {
+        if index > 0
+            && let Some(separator) = separator
+        {
+            output.push(separator);
+        }
+
+        let token = &value[range.clone()];
+        match operation {
+            Transform::SnakeCase | Transform::KebabCase => lowercase_into(token, output),
+            Transform::CamelCase if index == 0 => lowercase_into(token, output),
+            Transform::CamelCase | Transform::PascalCase => title_case_into(token, output),
+        }
     }
 }
 
@@ -76,7 +78,7 @@ fn split_extension(value: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<String> {
+fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<Range<usize>> {
     let graphemes: Vec<(usize, &str)> = value.grapheme_indices(true).collect();
     if acronyms.is_empty() {
         return tokenize_generic(&graphemes);
@@ -88,7 +90,8 @@ fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<String> {
     while index < graphemes.len() {
         if let Some((acronym, length)) = acronym_at(value, &graphemes, index, acronyms) {
             result.extend(tokenize_generic(&graphemes[start..index]));
-            result.push(acronym.to_owned());
+            let byte_start = graphemes[index].0;
+            result.push(byte_start..byte_start + acronym.len());
             index += length;
             start = index;
         } else {
@@ -157,8 +160,8 @@ fn is_token_boundary(graphemes: &[(usize, &str)], index: usize) -> bool {
             && next.is_some_and(char::is_lowercase))
 }
 
-fn tokenize_generic(graphemes: &[(usize, &str)]) -> Vec<String> {
-    let mut ranges = Vec::new();
+fn tokenize_generic(graphemes: &[(usize, &str)]) -> Vec<Range<usize>> {
+    let mut tokens = Vec::new();
     let mut start = 0;
     for index in 1..graphemes.len() {
         let previous = first_char(graphemes[index - 1].1);
@@ -174,26 +177,33 @@ fn tokenize_generic(graphemes: &[(usize, &str)]) -> Vec<String> {
                 && current.is_uppercase()
                 && next.is_some_and(char::is_lowercase));
         if boundary {
-            let word = &graphemes[start..index];
-            if word
-                .iter()
-                .any(|(_, cluster)| first_char(cluster).is_alphanumeric())
-            {
-                ranges.push(word.iter().map(|(_, cluster)| *cluster).collect());
-            }
-
+            push_token_range(graphemes, start, index, &mut tokens);
             start = index;
         }
     }
-    let word = &graphemes[start..];
+    push_token_range(graphemes, start, graphemes.len(), &mut tokens);
+
+    tokens
+}
+
+fn push_token_range(
+    graphemes: &[(usize, &str)],
+    start: usize,
+    end: usize,
+    tokens: &mut Vec<Range<usize>>,
+) {
+    if start >= end {
+        return;
+    }
+
+    let word = &graphemes[start..end];
     if word
         .iter()
         .any(|(_, cluster)| first_char(cluster).is_alphanumeric())
     {
-        ranges.push(word.iter().map(|(_, cluster)| *cluster).collect());
+        let (last_offset, last_cluster) = word.last().expect("token range is not empty");
+        tokens.push(graphemes[start].0..last_offset + last_cluster.len());
     }
-
-    ranges
 }
 
 fn first_char(grapheme: &str) -> char {
@@ -203,12 +213,20 @@ fn first_char(grapheme: &str) -> char {
         .expect("grapheme clusters are never empty")
 }
 
-fn title_case(value: &str) -> String {
+fn lowercase_into(value: &str, output: &mut String) {
+    for character in value.chars() {
+        output.extend(character.to_lowercase());
+    }
+}
+
+fn title_case_into(value: &str, output: &mut String) {
     let mut chars = value.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first
-            .to_uppercase()
-            .chain(chars.flat_map(char::to_lowercase))
-            .collect()
-    })
+    let Some(first) = chars.next() else {
+        return;
+    };
+
+    output.extend(first.to_uppercase());
+    for character in chars {
+        output.extend(character.to_lowercase());
+    }
 }
