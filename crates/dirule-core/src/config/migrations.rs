@@ -33,9 +33,15 @@ fn upgrade_through(
                     "no configuration migration path from {version} to {target}"
                 ))
             })?;
-        if migration.to <= migration.from || migration.to > target {
+        if !migration.to.immediately_follows(migration.from) {
             return Err(Error::Config(format!(
-                "invalid migration step from {} to {}",
+                "migration step from {} to {} must advance exactly one version",
+                migration.from, migration.to
+            )));
+        }
+        if migration.to > target {
+            return Err(Error::Config(format!(
+                "migration step from {} to {} exceeds target version {target}",
                 migration.from, migration.to
             )));
         }
@@ -64,6 +70,11 @@ mod tests {
 
     fn advance_major(mut document: toml::Value) -> crate::Result<toml::Value> {
         document["version"] = toml::Value::String("2.0".into());
+        Ok(document)
+    }
+
+    fn jump_minor(mut document: toml::Value) -> crate::Result<toml::Value> {
+        document["version"] = toml::Value::String("1.2".into());
         Ok(document)
     }
 
@@ -108,6 +119,29 @@ mod tests {
             error
                 .to_string()
                 .contains("no configuration migration path")
+        );
+    }
+
+    #[test]
+    fn rejects_a_migration_that_skips_a_version() {
+        let migrations = [Migration {
+            from: ConfigVersion::new(1, 0),
+            to: ConfigVersion::new(1, 2),
+            apply: jump_minor,
+        }];
+        let document = toml::from_str("version = '1.0'").expect("valid document");
+        let error = upgrade_through(
+            document,
+            ConfigVersion::new(1, 0),
+            ConfigVersion::new(1, 2),
+            &migrations,
+        )
+        .expect_err("migration must not skip a format version");
+
+        assert!(
+            error
+                .to_string()
+                .contains("must advance exactly one version")
         );
     }
 }

@@ -15,6 +15,18 @@ impl ConfigVersion {
         Self { major, minor }
     }
 
+    pub(super) const fn immediately_follows(self, previous: Self) -> bool {
+        let follows_minor = match previous.minor.checked_add(1) {
+            Some(minor) => self.major == previous.major && self.minor == minor,
+            None => false,
+        };
+        let follows_major = match previous.major.checked_add(1) {
+            Some(major) => self.major == major && self.minor == 0,
+            None => false,
+        };
+        follows_minor || follows_major
+    }
+
     fn parse(value: &str) -> std::result::Result<Self, String> {
         let Some((major, minor)) = value.split_once('.') else {
             return Err("expected a version string in `major.minor` form".into());
