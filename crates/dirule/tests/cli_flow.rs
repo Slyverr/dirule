@@ -472,7 +472,12 @@ fn preset_listing_uses_the_platform_config_directory() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("downloads"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("downloads"),
+        "expected the preset listing to include downloads; stdout: {stdout}\nstderr: {stderr}"
+    );
 }
 
 #[test]
