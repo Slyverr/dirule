@@ -45,9 +45,17 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         CliCommand::Init => initialize(color),
         CliCommand::Check(options) => {
             let format = options.format;
+            let verbose = options.verbose;
             let (target, result, _) = evaluate(options)?;
 
-            output::plan(&target, &result, format, color, output::PlanContext::Check)?;
+            output::plan(
+                &target,
+                &result,
+                format,
+                color,
+                output::PlanContext::Check,
+                verbose,
+            )?;
             if result.has_changes() || !result.is_conflict_free() {
                 return Err("target does not satisfy the configured rules".into());
             }
@@ -56,6 +64,7 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         }
         CliCommand::Plan(options) => {
             let format = options.format;
+            let verbose = options.verbose;
             let (target, result, _) = evaluate(options)?;
 
             output::plan(
@@ -64,6 +73,7 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 format,
                 color,
                 output::PlanContext::Preview,
+                verbose,
             )?;
             if !result.is_conflict_free() {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());
@@ -77,10 +87,18 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 on_conflict,
             } = options;
             let format = operation.format;
+            let verbose = operation.verbose;
             let (target, result, snapshot) = evaluate(operation)?;
 
             if format == args::OutputFormat::Human {
-                output::plan(&target, &result, format, color, output::PlanContext::Apply)?;
+                output::plan(
+                    &target,
+                    &result,
+                    format,
+                    color,
+                    output::PlanContext::Apply,
+                    verbose,
+                )?;
             }
             if !result.is_conflict_free() && on_conflict == ConflictAction::Abort {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());

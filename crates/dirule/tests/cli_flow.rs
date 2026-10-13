@@ -626,6 +626,32 @@ fn cli_checks_a_real_project_config_without_mutating_it() {
 }
 
 #[test]
+fn verbose_plan_explains_rule_ownership_and_inherited_directory_paths() {
+    let project = TempProject::new();
+    fs::create_dir(project.0.join("HTTPServer")).expect("create source directory");
+    fs::write(project.0.join("HTTPServer/ReadMe.txt"), "notes").expect("write nested source file");
+    fs::write(project.0.join("MyXMLParser.pdf"), "document").expect("write root source file");
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\ntarget = \".\"\n\n[[rules]]\nname = \"Normalize directory\"\nmatch = \"HTTPServer\"\nto = \"builtin:kebab-case\"\n\n[[rules]]\nname = \"Normalize parser file\"\nmatch = \"MyXMLParser.pdf\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write fixture config");
+
+    let plan = project.run(&["plan"]);
+    assert!(plan.status.success());
+    assert!(!String::from_utf8_lossy(&plan.stdout).contains("[rule:"));
+
+    let verbose = project.run(&["plan", "--verbose"]);
+    assert!(verbose.status.success());
+    let output = String::from_utf8_lossy(&verbose.stdout).replace('\\', "/");
+    assert!(output.contains("HTTPServer -> http-server [rule: Normalize directory]"));
+    assert!(output.contains(
+        "HTTPServer/ReadMe.txt -> http-server/ReadMe.txt [inherited from directory rename]"
+    ));
+    assert!(output.contains("MyXMLParser.pdf -> my-xml-parser.pdf [rule: Normalize parser file]"));
+}
+
+#[test]
 fn cli_can_skip_conflicts_and_apply_unrelated_moves() {
     let project = TempProject::new();
     fs::write(project.0.join("First.txt"), "first source").expect("write first source");

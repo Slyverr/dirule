@@ -90,6 +90,7 @@ pub(super) fn plan(
     format: OutputFormat,
     color: ColorChoice,
     context: PlanContext,
+    verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
         println!(
@@ -127,10 +128,22 @@ pub(super) fn plan(
         println!("\nChanges:");
         for entry in &plan.entries {
             if entry.source != entry.destination {
+                let attribution = if verbose {
+                    let detail = entry
+                        .rule
+                        .as_deref()
+                        .map(|rule| format!("rule: {rule}"))
+                        .unwrap_or_else(|| "inherited from directory rename".to_owned());
+                    format!(" [{}]", paint(&detail, "36", color))
+                } else {
+                    String::new()
+                };
+
                 println!(
-                    "  {} -> {}",
+                    "  {} -> {}{}",
                     paint(&entry.source.display().to_string(), "31", color),
-                    paint(&entry.destination.display().to_string(), "32", color)
+                    paint(&entry.destination.display().to_string(), "32", color),
+                    attribution
                 );
             }
         }

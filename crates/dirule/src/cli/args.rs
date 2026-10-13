@@ -51,6 +51,10 @@ pub(super) struct OperationArgs {
     #[command(flatten)]
     pub(super) rules: RuleSourceArgs,
 
+    /// Show rule ownership and inherited paths in text output.
+    #[arg(short, long)]
+    pub(super) verbose: bool,
+
     /// Output as human-readable text or JSON.
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     pub(super) format: OutputFormat,

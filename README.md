@@ -48,7 +48,7 @@ cargo run -p dirule -- check
 cargo run -p dirule -- apply
 ```
 
-`apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output.
+`apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output, or `--verbose` to show the rule responsible for each rename and identify paths inherited from a renamed directory.
 
 JSON plans include the canonical target path; their source and destination paths are target-relative and use `/` separators on every platform.
 
