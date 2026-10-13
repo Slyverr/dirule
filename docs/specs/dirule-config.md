@@ -133,6 +133,8 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 - `--config FILE` and `--preset NAME` are mutually exclusive. Each loads exactly the selected source; neither is merged with discovered configuration.
 - Without either option, load `dirule.toml` from the current working directory only. Do not search parent directories. If absent, report an error that points to `init`, `--config`, and `--preset`.
 
+`dirule validate` loads and compiles the selected configuration without scanning or requiring its target to exist. It accepts the same `--config FILE` and `--preset NAME` options and uses the same current-directory default and source-selection errors. It succeeds only when parsing, migrations, rule validation, and compilation succeed. Human output identifies the selected source and rule count. `--format json` emits a versioned object with `valid`, `source` (`kind` and `name`), and `rule_count` fields. Validation never changes the configuration, target, or user state.
+
 ## Evaluation and filesystem safety
 
 - Scan files and directories below the selected target; do not rename the target directory itself.
@@ -178,4 +180,5 @@ Tests should verify:
 - Apply rejects a source replaced since planning even when the replacement has the same length and modification time.
 - Git ignore behavior for nested rules, tracked paths, global excludes, `.ignore` outside Git, and hidden files; unreadable or malformed ignore files must stop planning.
 - Explicit target override, configured target, current-directory default, exact config/preset selection, and no parent-directory config search.
+- Configuration validation accepts a valid config whose target does not exist, rejects invalid config and preset sources, and does not scan or mutate the target.
 - `check` succeeds when paths satisfy the rules and fails for a proposed path change or conflict without changing the filesystem.
