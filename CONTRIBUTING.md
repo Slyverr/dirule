@@ -29,6 +29,16 @@ For changes to rule behavior, cover the behavior and its edge cases. For filesys
 
 Put integration tests for public behavior in the crate's `tests/` directory, grouped by the behavior they cover. These tests should exercise the crate's public API. Keep unit tests that need private implementation details beside the code they test in a `#[cfg(test)]` module. Avoid collecting crate-wide behavior tests in `lib.rs`.
 
+## Benchmarks
+
+Run the `dirule-core` Criterion benchmarks with:
+
+```sh
+cargo bench -p dirule-core --bench core
+```
+
+They cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
+
 ## Commits
 
 Use this first-line format:
