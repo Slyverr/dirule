@@ -323,6 +323,11 @@ impl SourceIdentity {
         kind: EntryKind,
         path: &Path,
     ) -> bool {
+        #[cfg(windows)]
+        if kind == EntryKind::Directory {
+            return self.matches_object(metadata, kind, path);
+        }
+
         let common = self.length == metadata.len()
             && self.modified == metadata.modified().ok()
             && self.kind == kind;
