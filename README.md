@@ -6,6 +6,10 @@ Dirule is a local-first CLI for applying reusable rules to file and directory na
 
 Dirule is under active development. Its configuration format and command behavior may change.
 
+## Release notes
+
+See [CHANGELOG.md](CHANGELOG.md) for features and fixes included in each version.
+
 ## Install
 
 From the repository root, install the current checkout with Cargo:
