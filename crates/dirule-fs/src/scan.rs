@@ -43,6 +43,12 @@ pub enum ScanError {
         #[source]
         source: std::io::Error,
     },
+    #[error("cannot read ignore file {path}: {source}")]
+    IgnoreFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("cannot read tracked paths from Git: {0}")]
     Git(String),
     #[error("target is not a directory: {0}")]
@@ -72,9 +78,12 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         });
     }
 
-    let mut paths = BTreeMap::<PathBuf, EntryKind>::new();
-    let mut findings = Vec::new();
-    for item in ignore::WalkBuilder::new(&target)
+    for directory in target.ancestors() {
+        validate_ignore_files(directory)?;
+    }
+
+    let mut builder = ignore::WalkBuilder::new(&target);
+    builder
         .hidden(false)
         .ignore(true)
         .git_ignore(true)
@@ -82,9 +91,11 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .git_exclude(true)
         .parents(true)
         .require_git(false)
-        .follow_links(false)
-        .build()
-    {
+        .follow_links(false);
+
+    let mut paths = BTreeMap::<PathBuf, EntryKind>::new();
+    let mut findings = Vec::new();
+    for item in builder.build() {
         let entry = item.map_err(|source| ScanError::Walk {
             path: target.clone(),
             source,
@@ -99,6 +110,11 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         if entry.path() == target {
             continue;
         }
+
+        if entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            validate_ignore_files(entry.path())?;
+        }
+
         if let Some(relative) = relative_unicode(&target, entry.path()) {
             if let Some(kind) = entry_kind(entry.file_type()) {
                 paths.insert(relative, kind);
@@ -184,6 +200,35 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         target_identity: Some(target_identity),
         identities,
     })
+}
+
+fn validate_ignore_files(directory: &Path) -> Result<(), ScanError> {
+    for name in [".ignore", ".gitignore"] {
+        let path = directory.join(name);
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => return Err(ScanError::IgnoreFile { path, source }),
+        };
+        if !metadata.is_file() {
+            return Err(ScanError::IgnoreFile {
+                path,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "ignore rules must be a regular file",
+                ),
+            });
+        }
+
+        let mut file = std::fs::File::open(&path).map_err(|source| ScanError::IgnoreFile {
+            path: path.clone(),
+            source,
+        })?;
+        std::io::copy(&mut file, &mut std::io::sink())
+            .map_err(|source| ScanError::IgnoreFile { path, source })?;
+    }
+
+    Ok(())
 }
 
 impl SourceIdentity {

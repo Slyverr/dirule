@@ -769,3 +769,30 @@ fn scan_fails_when_an_ignore_file_is_malformed() {
 
     assert!(error.to_string().contains("cannot scan target"));
 }
+
+#[cfg(unix)]
+#[test]
+fn scan_fails_when_an_ignore_file_is_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for relative in [Path::new(".ignore"), Path::new("nested/.gitignore")] {
+        let temp = TempDir::new();
+        let ignore_file = temp.0.join(relative);
+        let ignore_directory = relative.parent().unwrap_or(Path::new(""));
+        std::fs::create_dir_all(temp.0.join(ignore_directory))
+            .expect("create ignore file directory");
+        std::fs::write(&ignore_file, "ignored/\n").expect("write ignore file");
+        std::fs::create_dir_all(temp.0.join(ignore_directory).join("ignored"))
+            .expect("create ignored directory");
+        std::fs::set_permissions(&ignore_file, std::fs::Permissions::from_mode(0o000))
+            .expect("remove ignore file read permissions");
+
+        if std::fs::read(&ignore_file).is_ok() {
+            continue;
+        }
+
+        let error = scan(&temp.0).expect_err("unreadable ignore rules must fail scanning");
+
+        assert!(error.to_string().contains("ignore"));
+    }
+}
