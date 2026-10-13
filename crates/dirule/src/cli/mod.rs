@@ -103,6 +103,14 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                     output::PlanContext::Apply,
                     verbose,
                 )?;
+            } else if output::json_apply_preview_needed(format, yes, &result) {
+                output::plan_to_stderr(
+                    &target,
+                    &result,
+                    color,
+                    output::PlanContext::Apply,
+                    verbose,
+                )?;
             }
             if !result.is_conflict_free() && on_conflict == ConflictAction::Abort {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());

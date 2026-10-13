@@ -193,7 +193,53 @@ pub(super) fn plan(
         return Ok(());
     }
 
-    let styles = Colorizer::stdout(color);
+    let stdout = io::stdout();
+    let mut writer = stdout.lock();
+
+    write_text_plan(
+        &mut writer,
+        target,
+        plan,
+        Colorizer::stdout(color),
+        context,
+        verbose,
+    )?;
+
+    Ok(())
+}
+
+pub(super) fn plan_to_stderr(
+    target: &Path,
+    plan: &Plan,
+    color: ColorChoice,
+    context: PlanContext,
+    verbose: bool,
+) -> io::Result<()> {
+    let stderr = io::stderr();
+    let mut writer = stderr.lock();
+
+    write_text_plan(
+        &mut writer,
+        target,
+        plan,
+        Colorizer::stderr(color),
+        context,
+        verbose,
+    )
+}
+
+pub(super) fn json_apply_preview_needed(format: OutputFormat, yes: bool, plan: &Plan) -> bool {
+    format == OutputFormat::Json && !yes && (plan.has_changes() || !plan.is_conflict_free())
+}
+
+fn write_text_plan<W: Write>(
+    writer: &mut W,
+    target: &Path,
+    plan: &Plan,
+    styles: Colorizer,
+    context: PlanContext,
+    verbose: bool,
+) -> io::Result<()> {
     let changes = plan
         .entries
         .iter()
@@ -205,21 +251,23 @@ pub(super) fn plan(
         PlanContext::Check => ("Check failed", "31"),
         PlanContext::Apply => ("Apply preview", "36"),
     };
-    println!("{}", styles.style(label, heading_color));
-    println!(
+    writeln!(writer, "{}", styles.style(label, heading_color))?;
+    writeln!(
+        writer,
         "  {} {}",
         styles.style("Target:", "36"),
         styles.style(target.display(), "36")
-    );
-    println!(
+    )?;
+    writeln!(
+        writer,
         "  {} rename(s), {} conflict(s), {} finding(s)",
         changes,
         plan.conflicts.len(),
         plan.findings.len()
-    );
+    )?;
 
     if changes > 0 {
-        println!("\nChanges:");
+        writeln!(writer, "\nChanges:")?;
         for entry in &plan.entries {
             if entry.source != entry.destination {
                 let attribution = if verbose {
@@ -233,39 +281,41 @@ pub(super) fn plan(
                     String::new()
                 };
 
-                println!(
+                writeln!(
+                    writer,
                     "  {} -> {}{}",
                     styles.style(entry.source.display(), "31"),
                     styles.style(entry.destination.display(), "32"),
                     attribution
-                );
+                )?;
             }
         }
     } else if plan.conflicts.is_empty() && plan.findings.is_empty() {
-        println!("\nNo changes needed.");
+        writeln!(writer, "\nNo changes needed.")?;
     }
 
     if !plan.conflicts.is_empty() {
-        println!("\nConflicts:");
+        writeln!(writer, "\nConflicts:")?;
         for conflict in &plan.conflicts {
-            println!(
+            writeln!(
+                writer,
                 "  {} {} ({})",
                 styles.style("!", "31"),
                 conflict.path.display(),
                 conflict.reason
-            );
+            )?;
         }
     }
 
     if !plan.findings.is_empty() {
-        println!("\nFindings:");
+        writeln!(writer, "\nFindings:")?;
         for finding in &plan.findings {
-            println!("  {} {finding}", styles.style("i", "36"));
+            writeln!(writer, "  {} {finding}", styles.style("i", "36"))?;
         }
     }
 
     if matches!(context, PlanContext::Check) && changes == 0 && plan.conflicts.is_empty() {
-        println!("Target matches the configured rules.");
+        writeln!(writer, "Target matches the configured rules.")?;
     }
 
     Ok(())
@@ -529,8 +579,13 @@ fn color_enabled_for(
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorChoice, Colorizer, color_enabled_for};
+    use super::{
+        ColorChoice, Colorizer, PlanContext, color_enabled_for, json_apply_preview_needed,
+        write_text_plan,
+    };
+    use dirule_core::{EntryKind, Plan, PlannedEntry};
     use std::ffi::OsStr;
+    use std::path::Path;
 
     #[test]
     fn auto_color_requires_a_terminal_and_color_support() {
@@ -577,5 +632,67 @@ mod tests {
             "\x1b[31msource.txt\x1b[0m"
         );
         assert_eq!(format!("{}", plain.style("source.txt", "31")), "source.txt");
+    }
+
+    #[test]
+    fn json_apply_preview_is_shown_before_confirmation_only_when_needed() {
+        let plan = Plan {
+            entries: vec![PlannedEntry {
+                source: Path::new("MyFile.txt").to_owned(),
+                destination: Path::new("my-file.txt").to_owned(),
+                kind: EntryKind::File,
+                rule: None,
+            }],
+            ..Plan::default()
+        };
+
+        assert!(json_apply_preview_needed(
+            super::OutputFormat::Json,
+            false,
+            &plan
+        ));
+        assert!(!json_apply_preview_needed(
+            super::OutputFormat::Json,
+            true,
+            &plan
+        ));
+        assert!(!json_apply_preview_needed(
+            super::OutputFormat::Human,
+            false,
+            &plan
+        ));
+        assert!(!json_apply_preview_needed(
+            super::OutputFormat::Json,
+            false,
+            &Plan::default()
+        ));
+    }
+
+    #[test]
+    fn text_plan_preview_can_be_rendered_to_an_independent_stream() {
+        let plan = Plan {
+            entries: vec![PlannedEntry {
+                source: Path::new("MyFile.txt").to_owned(),
+                destination: Path::new("my-file.txt").to_owned(),
+                kind: EntryKind::File,
+                rule: None,
+            }],
+            ..Plan::default()
+        };
+        let mut output = Vec::new();
+
+        write_text_plan(
+            &mut output,
+            Path::new("/project"),
+            &plan,
+            Colorizer { enabled: false },
+            PlanContext::Apply,
+            false,
+        )
+        .expect("render plan preview");
+
+        let output = String::from_utf8(output).expect("UTF-8 plan output");
+        assert!(output.contains("Apply preview"));
+        assert!(output.contains("MyFile.txt -> my-file.txt"));
     }
 }

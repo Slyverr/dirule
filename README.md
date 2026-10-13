@@ -52,6 +52,8 @@ cargo run -p dirule -- apply
 
 Use `--color auto|always|never` to control terminal colors. Automatic color follows terminal support and honors non-empty `NO_COLOR` and `TERM=dumb`; an explicit `--color` choice takes precedence.
 
+With `apply --format json`, the result stays on stdout. When confirmation is required, Dirule writes the human-readable plan preview to stderr.
+
 Targets equal to `~` or beginning with `~/` expand against the user's home directory (`~\\` is also accepted on Windows). No shell or environment-variable expansion is performed.
 
 JSON plans include the canonical target path; their source and destination paths are target-relative and use `/` separators on every platform.

@@ -278,6 +278,7 @@ fn apply_and_undo_emit_single_json_documents() {
         "{}",
         String::from_utf8_lossy(&apply.stderr)
     );
+    assert!(!String::from_utf8_lossy(&apply.stderr).contains("Apply preview"));
     let apply: serde_json::Value =
         serde_json::from_slice(&apply.stdout).expect("one apply JSON document");
     assert_eq!(apply["execution"]["status"], "applied");
@@ -919,6 +920,18 @@ fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
 
     assert_eq!(apply.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&apply.stderr).contains("use --yes"));
+    assert!(project.0.join("MyFile.txt").is_file());
+    assert!(!project.0.join("my-file.txt").exists());
+    assert!(!project.journal_directory().exists());
+
+    let apply_json = project.run(&["apply", "--format", "json"]);
+
+    assert_eq!(apply_json.status.code(), Some(2));
+    assert!(apply_json.stdout.is_empty());
+    let apply_json_error = String::from_utf8_lossy(&apply_json.stderr);
+    assert!(apply_json_error.contains("Apply preview"));
+    assert!(apply_json_error.contains("MyFile.txt -> my-file.txt"));
+    assert!(apply_json_error.contains("use --yes"));
     assert!(project.0.join("MyFile.txt").is_file());
     assert!(!project.0.join("my-file.txt").exists());
     assert!(!project.journal_directory().exists());
