@@ -1,5 +1,6 @@
 use dirule_core::{EntryKind, Plan, PlannedEntry};
 use dirule_fs::{ConflictPolicy, JournalStatus, JournalStore, apply_journaled, scan};
+use fs4::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -151,6 +152,28 @@ fn journaled_apply_can_be_listed_and_undone() {
     );
     assert!(!target.join("after.txt").exists());
     assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn active_run_lock_blocks_reading_and_undo_without_mutation() {
+    let (_temp, target, store, run_id, journal) = journaled_file_run();
+    let lock_path = journal.with_extension("lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .expect("open run lock");
+    FileExt::try_lock(&lock).expect("lock run exclusively");
+
+    assert!(matches!(store.list(), Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id));
+    assert!(
+        matches!(store.get(&run_id), Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id)
+    );
+    assert!(
+        matches!(store.undo(&run_id), Err(dirule_fs::JournalError::RunBusy(id)) if id == run_id)
+    );
+    assert!(target.join("after.txt").exists());
+    assert!(!target.join("before.txt").exists());
 }
 
 #[test]

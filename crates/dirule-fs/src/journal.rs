@@ -1,5 +1,6 @@
 use crate::apply::{ApplyError, MutationRecorder};
 use dirule_core::{EntryKind, Plan};
+use fs4::{FileExt, TryLockError};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -47,6 +48,8 @@ pub enum JournalError {
     InvalidRunId(String),
     #[error("run {0} cannot be undone: {1}")]
     NotUndoable(String, String),
+    #[error("run {0} is currently being modified; retry after it finishes")]
+    RunBusy(String),
     #[error("run {0} no longer targets the same directory")]
     ChangedTarget(String),
     #[error("cannot verify run {run_id} operation at {path}")]
@@ -228,6 +231,11 @@ impl JournalStore {
                 .extension()
                 .is_some_and(|extension| extension == "jsonl")
             {
+                let run_id = path
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| JournalError::InvalidRunId(path.display().to_string()))?;
+                let _lock = RunLock::acquire(&path, run_id, LockMode::Shared)?;
                 runs.push(read_run(&path)?);
             }
         }
@@ -237,6 +245,7 @@ impl JournalStore {
 
     pub fn get(&self, run_id: &str) -> Result<JournalDetails, JournalError> {
         let path = self.run_path(run_id)?;
+        let _lock = RunLock::acquire(&path, run_id, LockMode::Shared)?;
         let records = read_records(&path)?;
         let history = JournalHistory::from_records(&path, records)?;
         if history.id != run_id {
@@ -275,6 +284,7 @@ impl JournalStore {
 
     pub fn undo(&self, run_id: &str) -> Result<UndoReport, JournalError> {
         let path = self.run_path(run_id)?;
+        let run_lock = RunLock::acquire(&path, run_id, LockMode::Exclusive)?;
         let records = read_records(&path)?;
         let history = JournalHistory::from_records(&path, records)?;
         history.validate_undoable(run_id)?;
@@ -285,7 +295,7 @@ impl JournalStore {
         mutations.reverse();
         preflight_undo(run_id, &target, &mutations)?;
 
-        let mut writer = JournalWriter::open(&path, run_id, &target, &history.records)?;
+        let mut writer = JournalWriter::open(&path, run_id, &target, &history.records, run_lock)?;
         writer.status(JournalStatus::Undoing)?;
         let mut retained_directories = history
             .records
@@ -397,6 +407,11 @@ impl JournalStore {
         loop {
             let id = next_run_id();
             let path = self.directory.join(format!("{id}.jsonl"));
+            let lock = match RunLock::acquire(&path, &id, LockMode::Exclusive) {
+                Ok(lock) => lock,
+                Err(JournalError::RunBusy(_)) => continue,
+                Err(error) => return Err(error),
+            };
             match create_private_file(&path) {
                 Ok(mut file) => {
                     let started_at = SystemTime::now()
@@ -426,6 +441,7 @@ impl JournalStore {
                         path,
                         file,
                         next_sequence: 0,
+                        _run_lock: lock,
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -452,6 +468,48 @@ pub(crate) struct JournalWriter {
     path: PathBuf,
     file: File,
     next_sequence: u64,
+    _run_lock: RunLock,
+}
+
+struct RunLock {
+    _file: File,
+}
+
+#[derive(Clone, Copy)]
+enum LockMode {
+    Shared,
+    Exclusive,
+}
+
+impl RunLock {
+    fn acquire(journal: &Path, run_id: &str, mode: LockMode) -> Result<Self, JournalError> {
+        let path = journal.with_extension("lock");
+        let mut options = OpenOptions::new();
+        options.create(true).read(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options
+            .open(&path)
+            .map_err(|source| JournalError::io(&path, source))?;
+        let result = match mode {
+            LockMode::Shared => FileExt::try_lock_shared(&file),
+            LockMode::Exclusive => FileExt::try_lock(&file),
+        };
+        match result {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(TryLockError::WouldBlock) => Err(JournalError::RunBusy(run_id.to_owned())),
+            Err(TryLockError::Error(source)) => Err(JournalError::io(path, source)),
+        }
+    }
+}
+
+impl Drop for RunLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
 }
 
 pub(crate) struct JournalRecorder<'a> {
@@ -560,6 +618,7 @@ impl JournalWriter {
         id: &str,
         target: &Path,
         records: &[JournalRecord],
+        run_lock: RunLock,
     ) -> Result<Self, JournalError> {
         let next_sequence = records
             .iter()
@@ -593,6 +652,7 @@ impl JournalWriter {
             path: path.to_path_buf(),
             file,
             next_sequence,
+            _run_lock: run_lock,
         })
     }
 

@@ -18,6 +18,8 @@ If the state location cannot be determined or written, apply fails before changi
 
 Each run has a unique, user-visible identifier and its own append-only journal. A journal contains the canonical target path, start time, plan fingerprint, format version, and ordered filesystem mutation events. Use JSON Lines so each intent and completion can be appended and synced independently. Restrict permissions on Unix state directories and journal files to the owning user.
 
+A companion lock file coordinates access to each run. Apply holds an exclusive lock for the full mutation and recording window; undo holds it while validating, mutating, and recording recovery. Listing and inspection take a shared lock and return a retryable busy error when a run is changing. Locks are released by the operating system when the process exits, so an abandoned run can still be inspected and recovered after a crash. Lock files remain beside journals and are not run records.
+
 Journal readers migrate older formats through registered one-step migrations before interpreting events. Reject ambiguous or missing migration routes and unknown future versions; preserve the original journal when migration fails.
 
 ## Recording apply
