@@ -86,15 +86,16 @@ pub(super) fn stage_sources(
             continue;
         }
 
+        destination_owners
+            .entry(entry.destination.clone())
+            .or_default()
+            .push(index);
+
         let destination = target.join(&entry.destination);
         match std::fs::symlink_metadata(&destination) {
             Ok(metadata) if !metadata.file_type().is_symlink() => {
                 match std::fs::canonicalize(&destination) {
                     Ok(canonical) => {
-                        destination_owners
-                            .entry(entry.destination.clone())
-                            .or_default()
-                            .push(index);
                         destination_owners.entry(canonical).or_default().push(index);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
