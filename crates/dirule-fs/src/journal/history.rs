@@ -333,11 +333,18 @@ impl JournalHistory {
 
 fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), JournalError> {
     let mut intents = BTreeMap::new();
+    let mut last_sequence = None;
 
     for record in records {
         match record {
             JournalRecord::MoveIntent { sequence, .. } => {
-                insert_intent(path, &mut intents, *sequence, IntentKind::Move)?;
+                insert_intent(
+                    path,
+                    &mut intents,
+                    &mut last_sequence,
+                    *sequence,
+                    IntentKind::Move,
+                )?;
             }
             JournalRecord::DirectoryIntent {
                 sequence,
@@ -348,6 +355,7 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
                 insert_intent(
                     path,
                     &mut intents,
+                    &mut last_sequence,
                     *sequence,
                     IntentKind::Directory {
                         action: *action,
@@ -406,24 +414,30 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
 fn insert_intent<'a>(
     path: &Path,
     intents: &mut BTreeMap<u64, Intent<'a>>,
+    last_sequence: &mut Option<u64>,
     sequence: u64,
     kind: IntentKind<'a>,
 ) -> Result<(), JournalError> {
-    if intents
-        .insert(
-            sequence,
-            Intent {
-                kind,
-                completed: false,
-            },
-        )
-        .is_some()
-    {
+    if intents.contains_key(&sequence) {
         return Err(invalid_events(
             path,
             format!("duplicate journal sequence {sequence}"),
         ));
     }
+    if last_sequence.is_some_and(|previous| sequence < previous) {
+        return Err(invalid_events(
+            path,
+            format!("journal sequence {sequence} is out of order"),
+        ));
+    }
+    intents.insert(
+        sequence,
+        Intent {
+            kind,
+            completed: false,
+        },
+    );
+    *last_sequence = Some(sequence);
 
     Ok(())
 }

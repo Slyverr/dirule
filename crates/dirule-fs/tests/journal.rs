@@ -40,20 +40,32 @@ fn store(temp: &TempDir) -> JournalStore {
 }
 
 fn journaled_file_run() -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
+    journaled_run(&[("before.txt", "after.txt")])
+}
+
+fn journaled_run(files: &[(&str, &str)]) -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
     let temp = TempDir::new();
     let target = temp.0.join("project");
     std::fs::create_dir(&target).expect("create project");
-    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    for (source, _) in files {
+        std::fs::write(target.join(source), "contents").expect("write source file");
+    }
     let snapshot = scan(&target).expect("scan project");
     let store = store(&temp);
-    let applied = apply_journaled(
-        &target,
-        &one_file_plan("before.txt", "after.txt"),
-        &snapshot,
-        ConflictPolicy::Abort,
-        &store,
-    )
-    .expect("apply with journal");
+    let plan = Plan {
+        entries: files
+            .iter()
+            .map(|(source, destination)| PlannedEntry {
+                source: PathBuf::from(source),
+                destination: PathBuf::from(destination),
+                kind: EntryKind::File,
+                rule: Some("test".into()),
+            })
+            .collect(),
+        ..Plan::default()
+    };
+    let applied = apply_journaled(&target, &plan, &snapshot, ConflictPolicy::Abort, &store)
+        .expect("apply with journal");
     let run_id = applied.run_id.expect("mutation creates a journal run");
     let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
 
@@ -458,6 +470,49 @@ fn duplicate_journal_operation_sequences_are_rejected() {
     let error = store.list().expect_err("duplicate sequences are invalid");
 
     assert!(error.to_string().contains("duplicate journal sequence"));
+}
+
+#[test]
+fn out_of_order_journal_operation_sequences_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) =
+        journaled_run(&[("first.txt", "one.txt"), ("second.txt", "two.txt")]);
+    let mut records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let second_intent = records
+        .iter_mut()
+        .find(|line| line.contains("\"record\":\"move_intent\"") && line.contains("second.txt"))
+        .expect("second move intent");
+    *second_intent = second_intent.replace("\"sequence\":1", "\"sequence\":3");
+    let first_intent = records
+        .iter_mut()
+        .find(|line| line.contains("\"record\":\"move_intent\"") && line.contains("first.txt"))
+        .expect("first move intent");
+    *first_intent = first_intent.replace("\"sequence\":0", "\"sequence\":4");
+    let first_completion = records
+        .iter_mut()
+        .find(|line| {
+            line.contains("\"record\":\"move_completed\"") && line.contains("\"sequence\":0")
+        })
+        .expect("first move completion");
+    *first_completion = first_completion.replace("\"sequence\":0", "\"sequence\":4");
+    let second_completion = records
+        .iter_mut()
+        .find(|line| {
+            line.contains("\"record\":\"move_completed\"") && line.contains("\"sequence\":1")
+        })
+        .expect("second move completion");
+    *second_completion = second_completion.replace("\"sequence\":1", "\"sequence\":3");
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("reorder journal sequences");
+
+    let error = store
+        .list()
+        .expect_err("out-of-order sequences are invalid");
+
+    assert!(error.to_string().contains("is out of order"));
 }
 
 #[test]
