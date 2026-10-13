@@ -52,6 +52,27 @@ fn simulate_interrupted_move(journal: &PathBuf) {
     std::fs::write(journal, format!("{retained}\n")).expect("simulate a crash after move intent");
 }
 
+fn simulate_interrupted_undo(journal: &PathBuf) {
+    let mut records = std::fs::read_to_string(journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let completion = records
+        .iter()
+        .rposition(|line| line.contains("\"record\":\"move_completed\""))
+        .expect("undo move completion record");
+    records.remove(completion);
+    let final_status = records
+        .iter()
+        .rposition(|line| line.contains("\"record\":\"status\""))
+        .expect("final status record");
+    records.remove(final_status);
+
+    std::fs::write(journal, format!("{}\n", records.join("\n")))
+        .expect("simulate a crash after reverse rename");
+}
+
 #[test]
 fn journaled_apply_can_be_listed_and_undone() {
     let temp = TempDir::new();
@@ -208,6 +229,40 @@ fn interrupted_apply_with_ambiguous_destination_is_left_untouched() {
     );
     assert!(!target.join("before.txt").exists());
     assert_eq!(store.list().unwrap()[0].status, JournalStatus::Interrupted);
+}
+
+#[test]
+fn interrupted_undo_after_reverse_rename_can_be_retried() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    store.undo(&run_id).expect("undo the apply");
+    let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
+    simulate_interrupted_undo(&journal);
+
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undoing);
+    store
+        .undo(&run_id)
+        .expect("reconcile and finish the interrupted undo");
+
+    assert_eq!(
+        std::fs::read(target.join("before.txt")).unwrap(),
+        b"contents"
+    );
+    assert!(!target.join("after.txt").exists());
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
 }
 
 #[test]
