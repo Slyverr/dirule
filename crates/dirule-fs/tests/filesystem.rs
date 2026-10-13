@@ -128,7 +128,6 @@ fn scan_limits_tracked_git_paths_to_targets_with_literal_characters() {
     assert!(!paths.contains(&PathBuf::from("unrelated.txt")));
 }
 
-#[cfg(unix)]
 #[test]
 fn scan_git_missing_child() {
     let Some(target) = std::env::var_os("DIRULE_GIT_MISSING_TARGET") else {
@@ -142,18 +141,12 @@ fn scan_git_missing_child() {
     ));
 }
 
-#[cfg(unix)]
 #[test]
 fn scan_fails_when_git_is_unavailable_inside_a_repository() {
     let temp = TempDir::new();
     let target = temp.0.join("target");
     std::fs::create_dir(&target).expect("create scan target");
-    let init = Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&temp.0)
-        .output()
-        .expect("initialize Git fixture");
-    assert!(init.status.success(), "initialize Git fixture");
+    std::fs::create_dir(temp.0.join(".git")).expect("create repository marker");
 
     let empty_bin = temp.0.join("empty-bin");
     std::fs::create_dir(&empty_bin).expect("create empty PATH directory");
