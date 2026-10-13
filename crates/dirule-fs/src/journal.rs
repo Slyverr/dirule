@@ -41,6 +41,8 @@ pub enum JournalError {
     UnsupportedVersion { path: PathBuf, version: String },
     #[error("journal {path} cannot be migrated: {message}")]
     Migration { path: PathBuf, message: String },
+    #[error("journal {path} has invalid events: {message}")]
+    InvalidEvents { path: PathBuf, message: String },
     #[error("run identifier is invalid: {0}")]
     InvalidRunId(String),
     #[error("run {0} cannot be undone: {1}")]

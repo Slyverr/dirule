@@ -1,6 +1,6 @@
 use dirule_core::{EntryKind, Plan, PlannedEntry};
 use dirule_fs::{ConflictPolicy, JournalStatus, JournalStore, apply_journaled, scan};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -39,7 +39,28 @@ fn store(temp: &TempDir) -> JournalStore {
     JournalStore::new(temp.0.join("state/runs"))
 }
 
-fn simulate_interrupted_move(journal: &PathBuf) {
+fn journaled_file_run() -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    let journal = temp.0.join(format!("state/runs/{run_id}.jsonl"));
+
+    (temp, target, store, run_id, journal)
+}
+
+fn simulate_interrupted_move(journal: &Path) {
     let retained = std::fs::read_to_string(journal)
         .expect("read journal")
         .lines()
@@ -52,7 +73,7 @@ fn simulate_interrupted_move(journal: &PathBuf) {
     std::fs::write(journal, format!("{retained}\n")).expect("simulate a crash after move intent");
 }
 
-fn simulate_interrupted_undo(journal: &PathBuf) {
+fn simulate_interrupted_undo(journal: &Path) {
     let mut records = std::fs::read_to_string(journal)
         .expect("read journal")
         .lines()
@@ -414,6 +435,94 @@ fn future_journal_versions_are_rejected_without_rewriting_the_source() {
     assert_eq!(
         std::fs::read(journal).expect("read unchanged journal"),
         original
+    );
+}
+
+#[test]
+fn duplicate_journal_operation_sequences_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let mut records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let intent = records
+        .iter()
+        .find(|line| line.contains("\"record\":\"move_intent\""))
+        .expect("move intent")
+        .clone();
+    records.insert(2, intent);
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("duplicate move intent sequence");
+
+    let error = store.list().expect_err("duplicate sequences are invalid");
+
+    assert!(error.to_string().contains("duplicate journal sequence"));
+}
+
+#[test]
+fn orphaned_journal_completions_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .filter(|line| !line.contains("\"record\":\"move_intent\""))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("remove intent and preserve its completion");
+
+    let error = store.list().expect_err("completion must have an intent");
+
+    assert!(error.to_string().contains("has no matching intent"));
+}
+
+#[test]
+fn duplicate_journal_completions_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let mut records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let completion = records
+        .iter()
+        .find(|line| line.contains("\"record\":\"move_completed\""))
+        .expect("move completion")
+        .clone();
+    records.push(completion);
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("duplicate move completion");
+
+    let error = store.list().expect_err("duplicate completions are invalid");
+
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate or mismatched completion")
+    );
+}
+
+#[test]
+fn mismatched_journal_completion_kinds_are_rejected() {
+    let (_temp, _target, store, _run_id, journal) = journaled_file_run();
+    let records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(|line| {
+            line.replace("move_completed", "directory_changed")
+                .replace("\"identity\":", "\"action\":\"create\",\"identity\":")
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("replace move completion with a directory completion");
+
+    let error = store.list().expect_err("completion kinds must match");
+
+    assert!(
+        error
+            .to_string()
+            .contains("mismatched directory completion")
     );
 }
 

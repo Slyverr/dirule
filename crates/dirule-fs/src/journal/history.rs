@@ -1,8 +1,22 @@
 use super::identity::ObjectIdentity;
 use super::{CURRENT_JOURNAL_VERSION, DirectoryAction, JournalError, JournalRecord, JournalStatus};
 use dirule_core::EntryKind;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+enum IntentKind<'a> {
+    Move,
+    Directory {
+        action: DirectoryAction,
+        path: &'a Path,
+    },
+}
+
+struct Intent<'a> {
+    kind: IntentKind<'a>,
+    completed: bool,
+}
 
 pub(super) struct JournalHistory {
     pub(super) id: String,
@@ -49,6 +63,9 @@ impl JournalHistory {
                 version: version.clone(),
             });
         }
+
+        validate_events(path, &records[1..])?;
+
         let mut status = JournalStatus::Applying;
         for record in &records[1..] {
             if let JournalRecord::Status { status: value } = record {
@@ -311,6 +328,142 @@ impl JournalHistory {
             }
         }
         Ok(cancel_inverse_mutations(mutations))
+    }
+}
+
+fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), JournalError> {
+    let mut intents = BTreeMap::new();
+
+    for record in records {
+        match record {
+            JournalRecord::MoveIntent { sequence, .. } => {
+                insert_intent(path, &mut intents, *sequence, IntentKind::Move)?;
+            }
+            JournalRecord::DirectoryIntent {
+                sequence,
+                path: directory,
+                action,
+                ..
+            } => {
+                insert_intent(
+                    path,
+                    &mut intents,
+                    *sequence,
+                    IntentKind::Directory {
+                        action: *action,
+                        path: directory,
+                    },
+                )?;
+            }
+            JournalRecord::MoveCompleted { sequence, .. } => {
+                complete_intent(path, &mut intents, *sequence, false)?;
+            }
+            JournalRecord::DirectoryChanged {
+                sequence, action, ..
+            } => {
+                let intent = find_intent(path, &mut intents, *sequence)?;
+                match intent.kind {
+                    IntentKind::Directory {
+                        action: expected, ..
+                    } if expected == *action => {}
+                    _ => {
+                        return Err(invalid_events(
+                            path,
+                            format!("sequence {sequence} has a mismatched directory completion"),
+                        ));
+                    }
+                }
+                complete_intent(path, &mut intents, *sequence, true)?;
+            }
+            JournalRecord::DirectoryRetained {
+                sequence,
+                path: retained_path,
+                ..
+            } => {
+                let intent = find_intent(path, &mut intents, *sequence)?;
+                match intent.kind {
+                    IntentKind::Directory {
+                        action: DirectoryAction::Remove,
+                        path: intended_path,
+                    } if intended_path == retained_path && !intent.completed => {
+                        intent.completed = true;
+                    }
+                    _ => {
+                        return Err(invalid_events(
+                            path,
+                            format!("sequence {sequence} has a mismatched retained directory"),
+                        ));
+                    }
+                }
+            }
+            JournalRecord::Header { .. } | JournalRecord::Status { .. } => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn insert_intent<'a>(
+    path: &Path,
+    intents: &mut BTreeMap<u64, Intent<'a>>,
+    sequence: u64,
+    kind: IntentKind<'a>,
+) -> Result<(), JournalError> {
+    if intents
+        .insert(
+            sequence,
+            Intent {
+                kind,
+                completed: false,
+            },
+        )
+        .is_some()
+    {
+        return Err(invalid_events(
+            path,
+            format!("duplicate journal sequence {sequence}"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn find_intent<'entry, 'records>(
+    path: &Path,
+    intents: &'entry mut BTreeMap<u64, Intent<'records>>,
+    sequence: u64,
+) -> Result<&'entry mut Intent<'records>, JournalError> {
+    intents.get_mut(&sequence).ok_or_else(|| {
+        invalid_events(
+            path,
+            format!("sequence {sequence} completion has no matching intent"),
+        )
+    })
+}
+
+fn complete_intent(
+    path: &Path,
+    intents: &mut BTreeMap<u64, Intent<'_>>,
+    sequence: u64,
+    directory: bool,
+) -> Result<(), JournalError> {
+    let intent = find_intent(path, intents, sequence)?;
+    let matches_kind = matches!(intent.kind, IntentKind::Directory { .. }) == directory;
+    if !matches_kind || intent.completed {
+        return Err(invalid_events(
+            path,
+            format!("sequence {sequence} has a duplicate or mismatched completion"),
+        ));
+    }
+    intent.completed = true;
+
+    Ok(())
+}
+
+fn invalid_events(path: &Path, message: String) -> JournalError {
+    JournalError::InvalidEvents {
+        path: path.to_path_buf(),
+        message,
     }
 }
 
