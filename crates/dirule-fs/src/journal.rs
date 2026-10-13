@@ -3,7 +3,7 @@ use dirule_core::{EntryKind, Plan};
 use fs4::{FileExt, TryLockError};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -246,8 +246,8 @@ impl JournalStore {
     pub fn get(&self, run_id: &str) -> Result<JournalDetails, JournalError> {
         let path = self.run_path(run_id)?;
         let _lock = RunLock::acquire_existing(&path, run_id, LockMode::Shared)?;
-        let records = read_records(&path)?;
-        let history = JournalHistory::from_records(&path, records)?;
+        let journal = read_records(&path)?;
+        let history = JournalHistory::from_records(&path, journal.records)?;
         if history.id != run_id {
             return Err(JournalError::InvalidRunId(run_id.to_owned()));
         }
@@ -285,8 +285,8 @@ impl JournalStore {
     pub fn undo(&self, run_id: &str) -> Result<UndoReport, JournalError> {
         let path = self.run_path(run_id)?;
         let run_lock = RunLock::acquire_existing(&path, run_id, LockMode::Exclusive)?;
-        let records = read_records(&path)?;
-        let history = JournalHistory::from_records(&path, records)?;
+        let journal = read_records(&path)?;
+        let history = JournalHistory::from_records(&path, journal.records)?;
         history.validate_undoable(run_id)?;
 
         let target = history.target.clone();
@@ -295,7 +295,15 @@ impl JournalStore {
         mutations.reverse();
         preflight_undo(run_id, &target, &mutations)?;
 
-        let mut writer = JournalWriter::open(&path, run_id, &target, &history.records, run_lock)?;
+        let mut writer = JournalWriter::open(
+            &path,
+            run_id,
+            &target,
+            &history.records,
+            journal.valid_length,
+            journal.observed_length,
+            run_lock,
+        )?;
         writer.status(JournalStatus::Undoing)?;
         let mut retained_directories = history
             .records
@@ -641,6 +649,8 @@ impl JournalWriter {
         id: &str,
         target: &Path,
         records: &[JournalRecord],
+        valid_length: u64,
+        observed_length: u64,
         run_lock: RunLock,
     ) -> Result<Self, JournalError> {
         let next_sequence = records
@@ -652,19 +662,22 @@ impl JournalWriter {
             })
             .max()
             .map_or(0, |sequence| sequence + 1);
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .append(true)
             .open(path)
             .map_err(|source| JournalError::io(path, source))?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)
-            .map_err(|source| JournalError::io(path, source))?;
-        let valid_length = contents
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map_or(0, |index| index + 1) as u64;
-        if valid_length != contents.len() as u64 {
+        let file_length = file
+            .metadata()
+            .map_err(|source| JournalError::io(path, source))?
+            .len();
+        if file_length != observed_length {
+            return Err(JournalError::InvalidEvents {
+                path: path.to_path_buf(),
+                message: "journal changed while preparing undo".into(),
+            });
+        }
+        if file_length > valid_length {
             file.set_len(valid_length)
                 .and_then(|()| file.sync_all())
                 .map_err(|source| JournalError::io(path, source))?;
@@ -861,8 +874,8 @@ impl JournalWriter {
 }
 
 fn read_run(path: &Path) -> Result<JournalRun, JournalError> {
-    let records = read_records(path)?;
-    let history = JournalHistory::from_records(path, records)?;
+    let journal = read_records(path)?;
+    let history = JournalHistory::from_records(path, journal.records)?;
     Ok(run_from_history(&history))
 }
 
@@ -886,12 +899,20 @@ fn run_from_history(history: &JournalHistory) -> JournalRun {
     }
 }
 
-fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {
+struct JournalRecords {
+    records: Vec<JournalRecord>,
+    valid_length: u64,
+    observed_length: u64,
+}
+
+fn read_records(path: &Path) -> Result<JournalRecords, JournalError> {
     let file = File::open(path).map_err(|source| JournalError::io(path, source))?;
     let mut reader = BufReader::new(file);
     let mut records = Vec::new();
     let mut line = Vec::new();
     let mut line_number = 0;
+    let mut valid_length = 0;
+    let mut observed_length = 0;
     loop {
         line.clear();
         if reader
@@ -902,12 +923,14 @@ fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {
             break;
         }
         line_number += 1;
+        observed_length += line.len() as u64;
         if !line.ends_with(b"\n") {
             if records.is_empty() {
                 return Err(JournalError::InvalidRunId(path.display().to_string()));
             }
             break;
         }
+        valid_length += line.len() as u64;
         records.push(parse_value(path, line_number, &line)?);
     }
     if records.is_empty() {
@@ -924,7 +947,7 @@ fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {
             message,
         }
     })?;
-    records
+    let records = records
         .into_iter()
         .enumerate()
         .map(|(index, record)| {
@@ -934,7 +957,12 @@ fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {
                 source,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(JournalRecords {
+        records,
+        valid_length,
+        observed_length,
+    })
 }
 
 fn parse_value(path: &Path, line: usize, bytes: &[u8]) -> Result<serde_json::Value, JournalError> {
