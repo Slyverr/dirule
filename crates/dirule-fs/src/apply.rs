@@ -35,7 +35,7 @@ pub enum ApplyError {
     MissingSource(PathBuf),
     #[error("destination already exists: {0}")]
     ExistingDestination(PathBuf),
-    #[error("planned path is not a safe target-relative path: {0}")]
+    #[error("planned path is unsafe or unsupported on this filesystem: {0}")]
     UnsafePath(PathBuf),
     #[error("filesystem does not support atomic no-replace renames at: {0}")]
     AtomicRenameUnsupported(PathBuf),
@@ -653,7 +653,57 @@ fn ensure_relative(path: &Path) -> Result<(), ApplyError> {
     {
         return Err(ApplyError::UnsafePath(path.to_path_buf()));
     }
+
+    #[cfg(windows)]
+    if path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_none_or(invalid_windows_component)
+    }) {
+        return Err(ApplyError::UnsafePath(path.to_path_buf()));
+    }
+
     Ok(())
+}
+
+#[cfg(windows)]
+fn invalid_windows_component(value: &str) -> bool {
+    if value.ends_with(' ') || value.ends_with('.') {
+        return true;
+    }
+
+    if value.chars().any(|character| {
+        character <= '\u{001f}'
+            || matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            )
+    }) {
+        return true;
+    }
+
+    let device_name = value
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    if matches!(device_name.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+
+    ["COM", "LPT"].iter().any(|prefix| {
+        device_name
+            .strip_prefix(prefix)
+            .and_then(|suffix| {
+                let mut characters = suffix.chars();
+                let digit = characters.next()?;
+                (characters.next().is_none() && matches!(digit, '1'..='9' | '¹' | '²' | '³'))
+                    .then_some(())
+            })
+            .is_some()
+    })
 }
 
 fn ensure_parent_safe(root: &Path, path: &Path) -> Result<(), ApplyError> {

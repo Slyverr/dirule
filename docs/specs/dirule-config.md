@@ -149,6 +149,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 - If a filesystem operation fails after apply has moved any entries, roll completed moves back in reverse order and remove destination directories created by that apply. If rollback cannot restore the original state, report each rollback failure alongside the original operation error.
 - Skip symlinks and never follow them. Report skipped links; explicit symlink operations need a separate design.
 - Skip and report entries whose names cannot be represented as valid Unicode config paths; never create a lossy destination.
+- On Windows, reject destination components with reserved characters or control characters, trailing spaces or periods, and reserved DOS device names instead of letting Win32 reinterpret them.
 - If an ignore file cannot be read or parsed, fail planning with its path and error instead of using a partial file list.
 
 For example, if a specific `HTTPServer.pdf` rule precedes a general `**/*.pdf` rule, the first rule owns the original path. Its planned output is not reconsidered by later rules. A file such as `MyReport.pdf` can still be owned by the general rule.

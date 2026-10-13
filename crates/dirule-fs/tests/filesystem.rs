@@ -533,6 +533,58 @@ fn apply_rejects_a_replaced_target_when_source_identity_is_preserved() {
     assert!(displaced.join("source").is_file());
 }
 
+#[cfg(windows)]
+#[test]
+fn destinations_reject_names_that_win32_reinterprets_or_disallows() {
+    let temp = TempDir::new();
+    for name in [
+        "bad:name.txt",
+        "bad?.txt",
+        "trailing.",
+        "trailing ",
+        "CON",
+        "nul.txt",
+        "COM9.log",
+        "LPT³",
+        "control\u{0001}name",
+    ] {
+        let mut plan = Plan {
+            entries: vec![PlannedEntry {
+                source: PathBuf::from("source.txt"),
+                destination: PathBuf::from(name),
+                kind: EntryKind::File,
+                rule: None,
+            }],
+            ..Plan::default()
+        };
+
+        assert!(
+            matches!(
+                validate_destinations(&temp.0, &mut plan),
+                Err(ApplyError::UnsafePath(_))
+            ),
+            "expected Windows to reject {name:?}"
+        );
+    }
+
+    for name in [".hidden", "COM10.log", "console.txt"] {
+        let mut plan = Plan {
+            entries: vec![PlannedEntry {
+                source: PathBuf::from("source.txt"),
+                destination: PathBuf::from(name),
+                kind: EntryKind::File,
+                rule: None,
+            }],
+            ..Plan::default()
+        };
+
+        assert!(
+            validate_destinations(&temp.0, &mut plan).is_ok(),
+            "expected Windows to accept {name:?}"
+        );
+    }
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn apply_rejects_a_replaced_source_with_same_size_and_timestamp() {
