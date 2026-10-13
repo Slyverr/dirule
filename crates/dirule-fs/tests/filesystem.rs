@@ -310,6 +310,57 @@ fn scan_includes_git_tracked_paths_even_when_ignored() {
 }
 
 #[test]
+fn scan_applies_repository_ignore_rules_to_nested_targets() {
+    let temp = TempDir::new();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("initialize Git fixture");
+    assert!(init.success(), "initialize Git fixture");
+
+    let target = temp.0.join("target");
+    std::fs::create_dir(&target).expect("create nested target");
+    std::fs::write(
+        temp.0.join(".gitignore"),
+        "/target/ignored-tracked.txt\n/target/ignored-untracked.txt\n",
+    )
+    .expect("write repository ignore rule");
+    std::fs::write(target.join("ignored-tracked.txt"), "tracked despite ignore")
+        .expect("write tracked ignored file");
+    std::fs::write(
+        target.join("ignored-untracked.txt"),
+        "excluded by parent rule",
+    )
+    .expect("write untracked ignored file");
+    std::fs::write(target.join("visible.txt"), "included").expect("write visible file");
+
+    let add_rules = Command::new("git")
+        .args(["add", ".gitignore"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("stage repository ignore rules");
+    assert!(add_rules.success(), "stage repository ignore rules");
+    let add_ignored = Command::new("git")
+        .args(["add", "-f", "--", "target/ignored-tracked.txt"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("force-stage ignored file");
+    assert!(add_ignored.success(), "force-stage ignored file");
+
+    let result = scan(&target).expect("scan nested target");
+    let paths = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+
+    assert!(paths.contains(&PathBuf::from("ignored-tracked.txt")));
+    assert!(!paths.contains(&PathBuf::from("ignored-untracked.txt")));
+    assert!(paths.contains(&PathBuf::from("visible.txt")));
+}
+
+#[test]
 fn apply_moves_directory_once_and_preserves_its_descendants() {
     let temp = TempDir::new();
     std::fs::create_dir(temp.0.join("old")).expect("create source directory");
