@@ -10,3 +10,6 @@ thiserror = "2"
 toml = "0.9"
 unicode-segmentation = "1.13"
 wax = { version = "0.7", default-features = false }
+
+[dev-dependencies]
+criterion = "0.8.2"
