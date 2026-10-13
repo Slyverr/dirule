@@ -9,6 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  nix:
+    name: Nix (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: nix build --no-link .#dirule
+      - run: nix run .#dirule -- --version
+
   msrv:
     name: Verify (Rust 1.88)
     runs-on: ubuntu-latest
