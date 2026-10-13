@@ -11,6 +11,8 @@ Dirule is a Rust Cargo workspace. Keep contributions focused and follow the work
 
 ## Rust style
 
+Use Rust 1.88 or newer for local development and validation.
+
 Use blank lines to separate distinct steps in function bodies and type declarations. Keep related declarations and operations together, and keep the import block contiguous. Do not add blank lines mechanically between every statement; use them to make logical transitions easier to scan. Run `cargo fmt` for standard Rust formatting.
 
 ## Validation

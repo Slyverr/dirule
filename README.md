@@ -93,7 +93,7 @@ The flake supports x86_64 and ARM64 Linux, plus ARM64 macOS. On Intel macOS, ins
 - `crates/dirule-core`: configuration, matching, transforms, and planning.
 - `crates/dirule-fs`: ignore-aware scanning and filesystem operations.
 
-The workspace uses Rust edition 2024 and Cargo resolver 3. See [Contributing](CONTRIBUTING.md) for development checks and commit conventions.
+The workspace uses Rust 1.88 or newer, Rust edition 2024, and Cargo resolver 3. See [Contributing](CONTRIBUTING.md) for development checks and commit conventions.
 
 ## License
 
