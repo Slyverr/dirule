@@ -1028,6 +1028,35 @@ fn check_reports_conflicts_without_mutating_the_target() {
 }
 
 #[test]
+fn check_json_reports_violations_with_failure_status_without_mutation() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("MyFile.txt"), "content").expect("write nonconforming file");
+
+    let check = project.run(&["check", "--format", "json"]);
+
+    assert_eq!(check.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&check.stdout).expect("valid check JSON");
+    assert_eq!(value["schema_version"], "1.0");
+    let entries = value["entries"].as_array().expect("entries array");
+    assert!(
+        entries.iter().any(|entry| {
+            entry["source"] == "MyFile.txt" && entry["destination"] == "my-file.txt"
+        })
+    );
+    assert!(
+        value["conflicts"]
+            .as_array()
+            .expect("conflicts array")
+            .is_empty()
+    );
+    assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
+    assert!(project.0.join("MyFile.txt").is_file());
+    assert!(!project.0.join("my-file.txt").exists());
+    assert!(!project.journal_directory().exists());
+}
+
+#[test]
 fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     let project = TempProject::new();
     fs::write(project.0.join("MyFile.txt"), "content").expect("write source file");
