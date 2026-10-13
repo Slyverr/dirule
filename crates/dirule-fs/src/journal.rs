@@ -255,7 +255,7 @@ impl JournalStore {
         let run = run_from_history(&history);
         let operations = history
             .records
-            .iter()
+            .into_iter()
             .take_while(|record| {
                 !matches!(
                     record,
@@ -271,8 +271,8 @@ impl JournalStore {
                     identity,
                     ..
                 } => Some(JournalOperation {
-                    source: source.clone(),
-                    destination: destination.clone(),
+                    source,
+                    destination,
                     kind: identity.kind,
                 }),
                 _ => None,
