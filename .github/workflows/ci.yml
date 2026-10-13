@@ -21,6 +21,7 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
+      - run: nix flake check --all-systems --no-build
       - run: nix develop --command cargo fmt --all -- --check
       - run: nix build --no-link .#dirule
       - run: nix run .#dirule -- --version
