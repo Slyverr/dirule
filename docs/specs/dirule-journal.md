@@ -32,7 +32,7 @@ The existing immediate rollback after an apply error remains. Rollback steps are
 
 ## Run listing
 
-`dirule runs list` lists run identifiers, targets, timestamps, and status. Status is derived from the valid journal events and includes applying, applied, interrupted, partially recovered, and undone. A truncated final JSONL record may be ignored and reconciled from its preceding intent; malformed complete records or an unsupported format version are errors. Listing never changes the target or journal.
+`dirule runs list` lists run identifiers, targets, timestamps, and status. `dirule runs show RUN_ID` displays the target, status, and target-relative rename operations recorded for one run. Status is derived from the valid journal events and includes applying, applied, interrupted, partially recovered, and undone. A truncated final JSONL record may be ignored and reconciled from its preceding intent; malformed complete records or an unsupported format version are errors. Listing and inspection never change the target or journal.
 
 Status records must follow the run state: applying may finish as applied, failed rolled back, partially recovered, or incomplete; applying or interrupted runs may enter undoing; applied or partially recovered runs may also enter undoing; undoing may be repeated after another interruption and then end as undone. Failed-rollback and undone states are terminal. Reject impossible status transitions and mutation events after a terminal state.
 
@@ -61,3 +61,4 @@ Human apply output includes the run identifier and the command to undo it. `runs
 - A newly created parent is removed only when empty and known to belong to the run.
 - Apply-time rollback failures remain visible in the run list and do not discard recovery data.
 - Human and JSON apply/run outputs expose enough information to locate and undo a run.
+- `runs show` exposes recorded rename paths in human and JSON output without mutating the run or target.

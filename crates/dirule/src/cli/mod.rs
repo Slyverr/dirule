@@ -150,6 +150,11 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 output::runs(&runs, format, color);
                 Ok(())
             }
+            RunsCommand::Show { run_id, format } => {
+                let details = JournalStore::new(journal_directory()?).get(&run_id)?;
+                output::run_details(&details, format, color)?;
+                Ok(())
+            }
         },
         CliCommand::Undo(options) => {
             if !confirm(

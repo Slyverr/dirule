@@ -161,6 +161,26 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let run_id = runs["runs"][0]["id"].as_str().expect("journal run ID");
     assert_eq!(runs["runs"][0]["status"], "applied");
 
+    let details = project.run(&["runs", "show", run_id, "--format", "json"]);
+    assert!(
+        details.status.success(),
+        "{}",
+        String::from_utf8_lossy(&details.stderr)
+    );
+    let details: serde_json::Value =
+        serde_json::from_slice(&details.stdout).expect("valid run details JSON");
+    assert_eq!(details["run"]["id"], run_id);
+    assert_eq!(details["changes"].as_array().unwrap().len(), 3);
+    assert!(details["changes"].as_array().unwrap().iter().any(|change| {
+        change["source"] == "MyXMLParser.rs" && change["destination"] == "my-xml-parser.rs"
+    }));
+
+    let details = project.run(&["runs", "show", run_id]);
+    assert!(details.status.success());
+    let details = String::from_utf8_lossy(&details.stdout);
+    assert!(details.contains("Apply run"));
+    assert!(details.contains("MyXMLParser.rs -> my-xml-parser.rs (file)"));
+
     let undo = project.run(&["undo", run_id, "--yes"]);
     assert!(
         undo.status.success(),

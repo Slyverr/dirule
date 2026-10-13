@@ -1,6 +1,6 @@
 use super::args::{ColorChoice, OutputFormat};
 use dirule_core::Plan;
-use dirule_fs::{JournalRun, JournalStatus};
+use dirule_fs::{JournalDetails, JournalRun, JournalStatus};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -250,6 +250,60 @@ pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice
             run.started_at,
             run.target.display()
         );
+    }
+}
+
+pub(super) fn run_details(
+    details: &JournalDetails,
+    format: OutputFormat,
+    color: ColorChoice,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if format == OutputFormat::Json {
+        let value = serde_json::json!({
+            "schema_version": CURRENT_OUTPUT_VERSION,
+            "run": {
+                "id": details.run.id,
+                "target": details.run.target,
+                "started_at": details.run.started_at,
+                "status": status_name(details.run.status),
+                "operations": details.run.operations,
+            },
+            "changes": details.operations.iter().map(|operation| serde_json::json!({
+                "source": portable_path(&operation.source),
+                "destination": portable_path(&operation.destination),
+                "kind": operation.kind,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+
+    println!("Apply run {}", paint(&details.run.id, "36", color));
+    println!("  Status: {}", status_name(details.run.status));
+    println!("  Target: {}", details.run.target.display());
+    println!("  Renames: {}", details.run.operations);
+    if details.operations.is_empty() {
+        println!("\nNo rename operations recorded.");
+    } else {
+        println!("\nChanges:");
+        for operation in &details.operations {
+            println!(
+                "  {} -> {} ({})",
+                paint(&portable_path(&operation.source), "31", color),
+                paint(&portable_path(&operation.destination), "32", color),
+                operation_kind(operation.kind)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn operation_kind(kind: dirule_core::EntryKind) -> &'static str {
+    match kind {
+        dirule_core::EntryKind::File => "file",
+        dirule_core::EntryKind::Directory => "directory",
+        dirule_core::EntryKind::Symlink => "symlink",
     }
 }
 

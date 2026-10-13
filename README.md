@@ -58,10 +58,11 @@ Each successful apply records its filesystem moves in Dirule's user state direct
 
 ```sh
 dirule runs list
+dirule runs show RUN_ID
 dirule undo RUN_ID
 ```
 
-Undo asks for confirmation; use `--yes` in a non-interactive session. Dirule refuses to overwrite a path or undo a file whose recorded identity has changed. Non-empty directories created during apply are kept and reported after undo. The journal stores paths and filesystem metadata, not file contents, so it is recovery history rather than a backup.
+`runs show` displays the target and renames recorded for a run. Undo asks for confirmation; use `--yes` in a non-interactive session. Dirule refuses to overwrite a path or undo a file whose recorded identity has changed. Non-empty directories created during apply are kept and reported after undo. The journal stores paths and filesystem metadata, not file contents, so it is recovery history rather than a backup.
 
 ## Presets
 

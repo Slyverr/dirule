@@ -119,6 +119,15 @@ pub(super) enum RunsCommand {
         #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
         format: OutputFormat,
     },
+    /// Show the renames recorded for a run.
+    Show {
+        /// Identifier shown by `dirule runs list` or after `dirule apply`.
+        run_id: String,
+
+        /// Output as human-readable text or JSON.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Debug, Args)]
