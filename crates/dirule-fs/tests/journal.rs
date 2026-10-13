@@ -63,6 +63,109 @@ fn run_details_include_target_relative_rename_operations() {
     assert_eq!(details.operations[0].kind, dirule_core::EntryKind::File);
 }
 
+#[test]
+fn invalid_run_ids_cannot_escape_the_journal_directory() {
+    let temp = TempDir::new();
+    let store = store(&temp);
+    let outside = temp.0.join("outside.jsonl");
+    std::fs::write(&outside, "leave this file untouched").expect("create outside file");
+
+    let error = store
+        .get("../outside")
+        .expect_err("path traversal is not a valid run identifier");
+
+    assert!(matches!(error, dirule_fs::JournalError::InvalidRunId(_)));
+    assert_eq!(
+        std::fs::read_to_string(outside).expect("read outside file"),
+        "leave this file untouched"
+    );
+}
+
+#[test]
+fn undo_rejects_journal_paths_that_escape_the_target() {
+    let (temp, target, store, run_id, journal) = journaled_file_run();
+    let outside = temp.0.join("outside.txt");
+    std::fs::write(&outside, "outside contents").expect("create outside file");
+
+    let records = std::fs::read_to_string(&journal)
+        .expect("read journal")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value =
+                serde_json::from_str(line).expect("parse journal record");
+            if record["record"] == "move_intent" {
+                record["destination"] = serde_json::Value::String("../outside.txt".into());
+            }
+            serde_json::to_string(&record).expect("serialize journal record")
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(&journal, format!("{}\n", records.join("\n")))
+        .expect("replace destination with an escaping path");
+
+    let error = store
+        .undo(&run_id)
+        .expect_err("undo must reject a path outside the target");
+
+    assert!(matches!(error, dirule_fs::JournalError::TargetPath(_)));
+    assert_eq!(
+        std::fs::read(target.join("after.txt")).expect("read renamed file"),
+        b"contents"
+    );
+    assert!(!target.join("before.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(outside).expect("read outside file"),
+        "outside contents"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn undo_rejects_symlinked_parent_components() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    let nested = target.join("nested");
+    let outside = temp.0.join("external");
+    std::fs::create_dir_all(&nested).expect("create nested target directory");
+    std::fs::write(nested.join("before.txt"), "contents").expect("create source file");
+
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("nested/before.txt", "nested/after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+
+    std::fs::rename(&nested, &outside).expect("move renamed directory outside the target");
+    symlink(&outside, &nested).expect("replace parent directory with symlink");
+
+    let error = store
+        .undo(&run_id)
+        .expect_err("undo must reject a symlinked parent component");
+
+    assert!(matches!(
+        error,
+        dirule_fs::JournalError::ChangedObject { .. }
+    ));
+    assert!(
+        std::fs::symlink_metadata(&nested)
+            .expect("inspect replaced parent")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        std::fs::read(outside.join("after.txt")).expect("read moved file"),
+        b"contents"
+    );
+    assert!(!outside.join("before.txt").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn journal_state_uses_owner_only_permissions() {
