@@ -42,6 +42,49 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
 }
 
 #[test]
+fn scan_respects_configured_global_gitignore() {
+    let temp = TempDir::new();
+    let target = temp.0.join("target");
+    std::fs::create_dir(&target).expect("create scan target");
+    std::fs::write(target.join("globally-ignored.txt"), "ignored")
+        .expect("write globally ignored file");
+
+    let global_ignore = temp.0.join("global-ignore");
+    std::fs::write(&global_ignore, "globally-ignored.txt\n").expect("write global ignore rules");
+    let git_config = temp.0.join("gitconfig");
+    let global_ignore = global_ignore.to_string_lossy().replace('\\', "/");
+    std::fs::write(
+        &git_config,
+        format!("[core]\n\texcludesFile = {global_ignore}\n"),
+    )
+    .expect("write isolated Git config");
+
+    let output = Command::new(std::env::current_exe().expect("test executable path"))
+        .args(["--exact", "scan_global_gitignore_child", "--nocapture"])
+        .env("GIT_CONFIG_GLOBAL", git_config)
+        .env("DIRULE_GLOBAL_IGNORE_TARGET", target)
+        .output()
+        .expect("run isolated global-ignore test");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn scan_global_gitignore_child() {
+    let Some(target) = std::env::var_os("DIRULE_GLOBAL_IGNORE_TARGET") else {
+        return;
+    };
+    let result = scan(Path::new(&target)).expect("scan using isolated global Git config");
+
+    assert!(result.entries.is_empty());
+}
+
+#[test]
 fn scan_includes_git_tracked_paths_even_when_ignored() {
     let temp = TempDir::new();
     let init = Command::new("git")

@@ -66,6 +66,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .hidden(false)
         .ignore(true)
         .git_ignore(true)
+        .git_global(true)
         .git_exclude(true)
         .parents(true)
         .require_git(false)
