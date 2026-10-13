@@ -6,6 +6,7 @@ pub enum Transform {
     SnakeCase,
     KebabCase,
     CamelCase,
+    PascalCase,
 }
 
 impl Transform {
@@ -14,6 +15,7 @@ impl Transform {
             "snake-case" => Ok(Self::SnakeCase),
             "kebab-case" => Ok(Self::KebabCase),
             "camel-case" => Ok(Self::CamelCase),
+            "pascal-case" => Ok(Self::PascalCase),
             other => Err(Error::Config(format!("unknown transform `{other}`"))),
         }
     }
@@ -63,6 +65,7 @@ fn render_tokens(tokens: Vec<String>, operation: Transform) -> String {
                 }
             })
             .collect::<String>(),
+        Transform::PascalCase => tokens.iter().map(|word| title_case(word)).collect(),
     }
 }
 

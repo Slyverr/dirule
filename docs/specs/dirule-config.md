@@ -92,7 +92,7 @@ The template filter calls the same operation as `to = "builtin:kebab-case"`; bot
 
 ## Built-in transformations and word splitting
 
-The initial built-in transformations are `snake-case`, `kebab-case`, and `camel-case`. They operate on tokens produced by one shared word splitter:
+The built-in transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. They operate on tokens produced by one shared word splitter:
 
 - Split between a lowercase letter and a following uppercase letter: `MyConfig` becomes `My` + `Config`.
 - Split an uppercase run before its final capital when that capital starts a lowercase word: `HTTPServer` becomes `HTTP` + `Server`; `MyXMLParser` becomes `My` + `XML` + `Parser`.
@@ -108,6 +108,7 @@ Output styles are defined as follows:
 - `snake-case` lowercases tokens and joins them with `_`.
 - `kebab-case` lowercases tokens and joins them with `-`.
 - `camel-case` lowercases the first token and title-cases subsequent tokens without separators.
+- `pascal-case` title-cases every token and joins them without separators.
 
 Punctuation runs create one separator; leading and trailing punctuation do not create empty tokens. Unicode case conversion and case-boundary detection use Unicode properties supported by the implementation. Scripts without case retain their letters, while punctuation and supported letter/digit transitions follow the same rules. Preserve a dotfile's leading dot as its hidden-file marker while transforming its remaining stem.
 
@@ -167,7 +168,7 @@ Tests should verify:
 - Valid configuration parsing; useful errors for missing or malformed fields, patterns, captures, templates, and transformation names.
 - Migration of a document through a complete sequence of format migrations, including meaning preservation; rejection of unknown future versions and missing migration steps.
 - Root-level and nested glob matching, including `**/` matching zero directories, named captures, and safe template expansion.
-- All three transformations for ordinary names, uppercase runs, letter/digit transitions, punctuation, Unicode cased letters, scripts without case, dotfiles, and multiple extensions.
+- All four transformations for ordinary names, uppercase runs, letter/digit transitions, punctuation, Unicode cased letters, scripts without case, dotfiles, and multiple extensions.
 - Acronym behavior for generic uppercase runs such as `HTTPServer`, configured mixed-case spellings such as `iOSGuide`, longest-first tokenization, and non-matching inside a larger token.
 - Identical transformation output from built-in `to` values and equivalent template filters.
 - First-match ownership against original paths and one combined plan detecting collisions across rules before any filesystem change.

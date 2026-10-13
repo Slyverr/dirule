@@ -77,7 +77,7 @@ match = "**/*"
 to = "builtin:kebab-case"
 ```
 
-`<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `builtin:` applies a built-in case transformation to the entry name. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
+`<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `builtin:` applies a built-in case transformation to the entry name. Available transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
 
 ## Apply history
 

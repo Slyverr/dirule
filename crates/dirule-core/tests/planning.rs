@@ -62,6 +62,21 @@ to = "builtin:kebab-case"
         PathBuf::from("ios-guide.txt")
     );
 
+    let mut pascal_case = config.clone();
+    pascal_case.rules[0].to = "builtin:pascal-case".into();
+    let planned = plan(&pascal_case, &entries).expect("valid PascalCase plan");
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("IosGuide.txt")
+    );
+
+    pascal_case.rules[0].to = "template:${stem|pascal-case}.${extension}".into();
+    let planned = plan(&pascal_case, &entries).expect("valid PascalCase template plan");
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("IosGuide.txt")
+    );
+
     let mut without_entries = config;
     without_entries.acronyms.entries.clear();
     let planned = plan(&without_entries, &entries).expect("valid plan without acronym entries");
@@ -102,6 +117,7 @@ to = "builtin:kebab-case"
         ("snake-case", "snake-case"),
         ("kebab-case", "kebab-case"),
         ("camel-case", "camel-case"),
+        ("pascal-case", "pascal-case"),
     ] {
         let mut builtin_config = config.clone();
         builtin_config.rules[0].to = format!("builtin:{builtin}");

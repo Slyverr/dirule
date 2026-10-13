@@ -217,6 +217,39 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
 }
 
 #[test]
+fn cli_plans_pascal_case_names_in_text_and_json() {
+    let project = TempProject::new();
+    fs::write(project.0.join("my-xml-parser.rs"), "parser").expect("write fixture file");
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\n\n[[rules]]\nname = \"PascalCase source files\"\nmatch = \"*.rs\"\nto = \"builtin:pascal-case\"\n",
+    )
+    .expect("write PascalCase config");
+
+    let text_plan = project.run(&["plan"]);
+
+    assert!(text_plan.status.success());
+    assert!(
+        String::from_utf8_lossy(&text_plan.stdout).contains("my-xml-parser.rs -> MyXmlParser.rs")
+    );
+
+    let json_plan = project.run(&["plan", "--format", "json"]);
+
+    assert!(json_plan.status.success());
+    let json_plan: serde_json::Value =
+        serde_json::from_slice(&json_plan.stdout).expect("valid PascalCase plan JSON");
+    let entry = json_plan["entries"]
+        .as_array()
+        .expect("plan entries")
+        .iter()
+        .find(|entry| entry["source"] == "my-xml-parser.rs")
+        .expect("PascalCase entry");
+    assert_eq!(entry["destination"], "MyXmlParser.rs");
+    assert!(project.0.join("my-xml-parser.rs").is_file());
+    assert!(!project.0.join("MyXmlParser.rs").exists());
+}
+
+#[test]
 fn plan_exits_cleanly_when_a_piped_reader_closes_early() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());

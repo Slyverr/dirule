@@ -28,6 +28,18 @@ fn handles_case_boundaries_dotfiles_and_extensions() {
         transform("OAuthToken", Transform::CamelCase, &acronyms),
         "oAuthToken"
     );
+    assert_eq!(
+        transform("MyXMLParser", Transform::PascalCase, &acronyms),
+        "MyXmlParser"
+    );
+    assert_eq!(
+        transform_filename("HTTPServer.rs", Transform::PascalCase, &acronyms),
+        "HttpServer.rs"
+    );
+    assert_eq!(
+        transform_filename(".JSONData", Transform::PascalCase, &acronyms),
+        ".JsonData"
+    );
 }
 
 #[test]

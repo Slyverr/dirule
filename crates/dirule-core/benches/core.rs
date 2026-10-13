@@ -52,6 +52,16 @@ fn benchmark_transform(criterion: &mut Criterion) {
             )
         })
     });
+
+    criterion.bench_function("transform/filename_pascal_case", |bencher| {
+        bencher.iter(|| {
+            transform_filename(
+                black_box("MyXMLParser_Q4.Report.pdf"),
+                dirule_core::Transform::PascalCase,
+                &acronyms,
+            )
+        })
+    });
 }
 
 fn benchmark_config(criterion: &mut Criterion) {
