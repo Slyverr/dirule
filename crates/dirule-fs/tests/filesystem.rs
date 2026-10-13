@@ -43,6 +43,7 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
         .iter()
         .map(|entry| entry.path.clone())
         .collect::<Vec<_>>();
+    assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(paths.contains(&PathBuf::from(".hidden")));
     assert!(!paths.iter().any(|path| path.starts_with("ignored")));
     assert!(!paths.iter().any(|path| path.starts_with("nested/ignored")));
