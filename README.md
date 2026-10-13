@@ -79,6 +79,8 @@ By default, `presets save` reads `dirule.toml` from the current directory. Pass 
 
 Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`.
 
+The flake supports x86_64 and ARM64 Linux, plus ARM64 macOS. On Intel macOS, install from source with Cargo or use a release archive.
+
 ## Workspace
 
 - `crates/dirule`: CLI and application orchestration.
