@@ -261,7 +261,10 @@ fn virtual_parent(path: &Path, destinations: &HashMap<PathBuf, PathBuf>) -> Path
     while let Some(parent) = ancestor {
         if let Some(destination) = destinations.get(parent) {
             let suffix = path.strip_prefix(parent).unwrap_or(path);
-            return destination.join(suffix.parent().unwrap_or_else(|| Path::new("")));
+            return suffix
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .map_or_else(|| destination.clone(), |parent| destination.join(parent));
         }
         ancestor = parent.parent();
     }

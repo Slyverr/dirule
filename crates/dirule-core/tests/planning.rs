@@ -1,5 +1,5 @@
 use dirule_core::{AcronymOptions, Config, Entry, EntryKind, Rule, RuleKind, parse_config, plan};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn built_in_transform_rules_can_use_named_match_captures() {
@@ -25,6 +25,47 @@ to = "builtin:kebab-case"
         planned.entries[0].destination,
         PathBuf::from("Invoices/http-server.pdf")
     );
+}
+
+#[test]
+fn template_parent_uses_the_planned_directory_name() {
+    let config = parse_config(
+        r#"
+version = "1.2"
+
+[[rules]]
+name = "Normalize directories"
+match = "**/*"
+kind = "directory"
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Normalize files under their planned parent"
+match = "HTTPServer/<stem>.txt"
+kind = "file"
+to = "template:${parent}/${stem|kebab-case}.${extension}"
+"#,
+    )
+    .expect("valid config");
+    let entries = [
+        Entry {
+            path: PathBuf::from("HTTPServer/ReadMe.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("HTTPServer"),
+            kind: EntryKind::Directory,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+    let file = planned
+        .entries
+        .iter()
+        .find(|entry| entry.source == Path::new("HTTPServer/ReadMe.txt"))
+        .expect("planned file entry");
+
+    assert_eq!(file.destination, PathBuf::from("http-server/read-me.txt"));
 }
 
 #[test]
