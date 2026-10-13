@@ -1176,6 +1176,23 @@ fn scan_skips_special_files() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn scan_skips_and_reports_non_unicode_paths() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let temp = TempDir::new();
+    let name = std::ffi::OsString::from_vec(vec![b'f', 0xff]);
+    std::fs::write(temp.0.join(name), "not representable in config paths")
+        .expect("write non-Unicode filename");
+
+    let result = scan(&temp.0).expect("scan target");
+
+    assert!(result.entries.is_empty());
+    assert_eq!(result.findings.len(), 1);
+    assert!(result.findings[0].contains("cannot be represented as Unicode"));
+}
+
 #[test]
 fn scan_fails_when_an_ignore_file_is_malformed() {
     let temp = TempDir::new();
