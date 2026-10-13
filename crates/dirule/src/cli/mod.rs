@@ -248,8 +248,9 @@ fn evaluate(
     let config: Config = parse_config(&fs::read_to_string(&config_path)?)?;
     let target = options
         .target
-        .map(|path| resolve(&cwd, path))
-        .or_else(|| config.target.clone().map(|path| resolve(&cwd, path)))
+        .map(|path| resolve_target(&cwd, path))
+        .or_else(|| config.target.clone().map(|path| resolve_target(&cwd, path)))
+        .transpose()?
         .unwrap_or(cwd);
     let target = target
         .canonicalize()
@@ -413,6 +414,49 @@ fn resolve(base: &Path, path: PathBuf) -> PathBuf {
         path
     } else {
         base.join(path)
+    }
+}
+
+fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, Box<dyn Error>> {
+    let Some(path_text) = path.to_str() else {
+        return Ok(resolve(base, path));
+    };
+    let home_relative = if path_text == "~" {
+        Some("")
+    } else {
+        #[cfg(windows)]
+        {
+            path_text
+                .strip_prefix("~/")
+                .or_else(|| path_text.strip_prefix("~\\"))
+        }
+        #[cfg(not(windows))]
+        {
+            path_text.strip_prefix("~/")
+        }
+    };
+    let Some(home_relative) = home_relative else {
+        return Ok(resolve(base, path));
+    };
+
+    let home = home_directory()
+        .filter(|path| path.is_absolute())
+        .ok_or("cannot expand target: user home directory is unavailable")?;
+    Ok(home.join(
+        home_relative
+            .trim_start_matches('/')
+            .trim_start_matches('\\'),
+    ))
+}
+
+fn home_directory() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        env_path("USERPROFILE")
+    }
+    #[cfg(not(windows))]
+    {
+        env_path("HOME")
     }
 }
 

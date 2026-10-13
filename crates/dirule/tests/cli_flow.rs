@@ -83,6 +83,13 @@ fn configure_preset_environment(command: &mut Command, project: &TempProject) {
     command.env("XDG_CONFIG_HOME", preset_config_base(project));
 }
 
+fn configure_home(command: &mut Command, home: &Path) {
+    #[cfg(target_os = "windows")]
+    command.env("USERPROFILE", home);
+    #[cfg(not(target_os = "windows"))]
+    command.env("HOME", home);
+}
+
 #[test]
 fn cli_initializes_checks_plans_applies_and_emits_json() {
     let project = TempProject::new();
@@ -588,6 +595,110 @@ fn explicit_target_overrides_the_configured_target() {
     assert!(output.contains(&format!("Target: {}", override_target.display())));
     assert!(output.contains("MyXMLParser.txt -> my-xml-parser.txt"));
     assert!(!output.contains("OtherFile.txt"));
+}
+
+#[test]
+fn target_expands_home_for_configured_defaults_and_cli_overrides() {
+    let project = TempProject::new();
+    let home = project.0.join("home");
+    let downloads = home.join("Downloads");
+    let archive = home.join("Archive");
+    #[cfg(target_os = "windows")]
+    let config_base = project.0.join("appdata");
+    #[cfg(target_os = "macos")]
+    let config_base = home.join("Library/Application Support");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let config_base = project.0.join("xdg-config");
+
+    fs::create_dir_all(&downloads).expect("create configured target");
+    fs::create_dir_all(&archive).expect("create override target");
+    fs::write(downloads.join("MyFile.txt"), "download").expect("write configured target file");
+    fs::write(archive.join("OtherFile.txt"), "archive").expect("write override target file");
+    let presets = config_base.join("dirule/presets");
+    fs::create_dir_all(&presets).expect("create global preset directory");
+    fs::write(
+        presets.join("downloads.toml"),
+        "version = \"1.0\"\ntarget = \"~/Downloads\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write global preset");
+
+    let mut configured_command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_home(&mut configured_command, &home);
+    #[cfg(target_os = "windows")]
+    configured_command.env("APPDATA", &config_base);
+    #[cfg(target_os = "macos")]
+    configured_command.env("HOME", &home);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    configured_command.env("XDG_CONFIG_HOME", &config_base);
+    let configured = configured_command
+        .args(["plan", "--preset", "downloads", "--format", "json"])
+        .current_dir(&project.0)
+        .output()
+        .expect("plan configured home target");
+    assert!(
+        configured.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&configured.stdout),
+        String::from_utf8_lossy(&configured.stderr)
+    );
+    let configured: serde_json::Value =
+        serde_json::from_slice(&configured.stdout).expect("valid configured target plan");
+    assert_eq!(
+        configured["target"],
+        downloads.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
+    assert!(
+        configured["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["source"] == "MyFile.txt" && entry["destination"] == "my-file.txt"
+            })
+    );
+
+    let mut override_command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_home(&mut override_command, &home);
+    #[cfg(target_os = "windows")]
+    override_command.env("APPDATA", &config_base);
+    #[cfg(target_os = "macos")]
+    override_command.env("HOME", &home);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    override_command.env("XDG_CONFIG_HOME", &config_base);
+    let override_plan = override_command
+        .args([
+            "plan",
+            "--target",
+            "~/Archive",
+            "--preset",
+            "downloads",
+            "--format",
+            "json",
+        ])
+        .current_dir(&project.0)
+        .output()
+        .expect("plan explicit home target");
+    assert!(
+        override_plan.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&override_plan.stdout),
+        String::from_utf8_lossy(&override_plan.stderr)
+    );
+    let override_plan: serde_json::Value =
+        serde_json::from_slice(&override_plan.stdout).expect("valid explicit target plan");
+    assert_eq!(
+        override_plan["target"],
+        archive.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
+    assert!(
+        override_plan["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["source"] == "OtherFile.txt" && entry["destination"] == "other-file.txt"
+            })
+    );
 }
 
 #[test]

@@ -128,7 +128,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 ## Target and config selection
 
 - `target` defaults to `.`. An explicit CLI `--target` overrides the configured value.
-- Relative targets and explicit `--config FILE` paths are resolved from the directory where Dirule is run.
+- Relative targets and explicit `--config FILE` paths are resolved from the directory where Dirule is run. A target equal to `~` or beginning with `~/` (or `~\\` on Windows) expands against the user's home directory, without shell evaluation. Other environment-variable and command substitutions are not performed.
 - `--config FILE` and `--preset NAME` are mutually exclusive. Each loads exactly the selected source; neither is merged with discovered configuration.
 - Without either option, load `dirule.toml` from the current working directory only. Do not search parent directories. If absent, report an error that points to `init`, `--config`, and `--preset`.
 
