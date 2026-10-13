@@ -45,6 +45,35 @@ to = "builtin:kebab-case"
     );
 }
 
+#[test]
+fn longer_project_acronyms_take_precedence_at_token_boundaries() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[acronyms]
+entries = ["API", "APIClient"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid acronym config");
+    let entries = [Entry {
+        path: PathBuf::from("APIClientGuide.txt"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("apiclient-guide.txt")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn planning_skips_and_reports_non_unicode_paths() {
@@ -112,4 +141,48 @@ fn planning_propagates_directory_names_and_keeps_first_match_on_original_paths()
         result.entries[1].rule.as_deref(),
         Some("Normalize remaining paths")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn path_separator_matching_does_not_treat_a_backslash_as_a_directory() {
+    let config = parse_config(
+        "version='1.0'\n[[rules]]\nname='nested path'\nmatch='nested/name'\nto='builtin:kebab-case'",
+    )
+    .expect("valid config");
+    let entries = [Entry {
+        path: PathBuf::from("nested\\name"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(planned.entries[0].source, PathBuf::from("nested\\name"));
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("nested\\name")
+    );
+    assert_eq!(planned.entries[0].rule, None);
+}
+
+#[cfg(unix)]
+#[test]
+fn templates_reject_backslash_paths_from_unix_filenames() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Preserve source path"
+match = "nested*"
+to = "template:${path}"
+"#,
+    )
+    .expect("valid config");
+    let entries = [Entry {
+        path: PathBuf::from("nested\\name"),
+        kind: EntryKind::File,
+    }];
+
+    assert!(plan(&config, &entries).is_err());
 }

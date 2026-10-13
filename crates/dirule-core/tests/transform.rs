@@ -29,3 +29,33 @@ fn handles_case_boundaries_dotfiles_and_extensions() {
         "oAuthToken"
     );
 }
+
+#[test]
+fn handles_digits_punctuation_unicode_and_multiple_extensions() {
+    let acronyms = AcronymLexicon::default();
+
+    assert_eq!(
+        transform("v2HTTPServer", Transform::SnakeCase, &acronyms),
+        "v_2_http_server"
+    );
+    assert_eq!(
+        transform("...My__XMLParser--", Transform::KebabCase, &acronyms),
+        "my-xml-parser"
+    );
+    assert_eq!(
+        transform("ÜberHTTPServer", Transform::KebabCase, &acronyms),
+        "über-http-server"
+    );
+    assert_eq!(
+        transform("東京/MyFile", Transform::KebabCase, &acronyms),
+        "東京-my-file"
+    );
+    assert_eq!(
+        transform_filename("archive.tar.GZ", Transform::KebabCase, &acronyms),
+        "archive-tar.GZ"
+    );
+    assert_eq!(
+        transform_filename(".JSONData", Transform::KebabCase, &acronyms),
+        ".json-data"
+    );
+}

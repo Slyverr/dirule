@@ -40,6 +40,23 @@ fn tree_globs_match_root_and_nested_paths_case_sensitively() {
 }
 
 #[test]
+fn supports_character_classes_question_marks_and_alternatives() {
+    let matcher = Matcher::new("archive/[!a-c]?.{pdf,png}").expect("valid glob pattern");
+
+    assert!(matcher.captures("archive/z7.pdf").is_some());
+    assert!(matcher.captures("archive/z7.png").is_some());
+    assert!(matcher.captures("archive/b7.pdf").is_none());
+    assert!(matcher.captures("archive/z7.txt").is_none());
+}
+
+#[test]
+fn rejects_ambiguous_capture_boundaries() {
+    for pattern in ["<first><last>.txt", "*<name>.txt", "<name>?.txt"] {
+        assert!(Matcher::new(pattern).is_err(), "accepted {pattern:?}");
+    }
+}
+
+#[test]
 fn rejects_capture_names_inside_alternations() {
     let config = parse_config(
         "version='1.0'\n[[rules]]\nname='x'\nmatch='{<name>,other}'\nto='template:${name}'",

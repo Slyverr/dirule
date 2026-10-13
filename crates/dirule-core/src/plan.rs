@@ -232,7 +232,11 @@ fn has_non_unicode_component(path: &Path) -> bool {
 }
 
 fn display_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    if cfg!(windows) {
+        path.to_string_lossy().replace('\\', "/")
+    } else {
+        path.to_string_lossy().into_owned()
+    }
 }
 
 fn split_extension(name: &str) -> (&str, &str) {
