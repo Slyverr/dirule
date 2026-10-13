@@ -81,4 +81,14 @@ jobs:
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
       - run: cargo run -p dirule -- check --color never
+      - name: Verify Cargo installation
+        if: runner.os == 'Linux'
+        run: |
+          install_root="$RUNNER_TEMP/dirule-install"
+          project_root="$RUNNER_TEMP/dirule-project"
+          cargo install --path crates/dirule --locked --offline --root "$install_root"
+          mkdir -p "$project_root"
+          cd "$project_root"
+          "$install_root/bin/dirule" init
+          "$install_root/bin/dirule" validate --color never
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
