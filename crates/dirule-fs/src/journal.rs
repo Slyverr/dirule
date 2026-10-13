@@ -737,9 +737,10 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
     if value.len() & 1 != 0 {
         return None;
     }
-    value
-        .as_bytes()
-        .chunks_exact(2)
+    let (pairs, _) = value.as_bytes().as_chunks::<2>();
+
+    pairs
+        .iter()
         .map(|pair| {
             let digit = |value: u8| match value {
                 b'0'..=b'9' => Some(value - b'0'),
