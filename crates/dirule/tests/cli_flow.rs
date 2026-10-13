@@ -88,7 +88,10 @@ fn preset_config_base(project: &TempProject) -> PathBuf {
 
 #[cfg(target_os = "macos")]
 fn preset_config_base(project: &TempProject) -> PathBuf {
-    project.0.join("Library/Application Support")
+    project
+        .0
+        .with_extension("home")
+        .join("Library/Application Support")
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -100,7 +103,7 @@ fn configure_preset_environment(command: &mut Command, project: &TempProject) {
     #[cfg(target_os = "windows")]
     command.env("APPDATA", preset_config_base(project));
     #[cfg(target_os = "macos")]
-    command.env("HOME", &project.0);
+    command.env("HOME", project.0.with_extension("home"));
     #[cfg(all(unix, not(target_os = "macos")))]
     command.env("XDG_CONFIG_HOME", preset_config_base(project));
 }
@@ -544,7 +547,7 @@ fn preset_listing_uses_the_platform_config_directory() {
     #[cfg(target_os = "windows")]
     let config_directory = project.0.join("appdata");
     #[cfg(target_os = "macos")]
-    let config_directory = project.0.join("Library/Application Support");
+    let config_directory = preset_config_base(&project);
     #[cfg(all(unix, not(target_os = "macos")))]
     let config_directory = project.0.join(".config");
 
@@ -556,7 +559,7 @@ fn preset_listing_uses_the_platform_config_directory() {
     #[cfg(target_os = "windows")]
     command.env("APPDATA", &config_directory);
     #[cfg(target_os = "macos")]
-    command.env("HOME", &project.0);
+    command.env("HOME", project.0.with_extension("home"));
     #[cfg(all(unix, not(target_os = "macos")))]
     command.env("HOME", &project.0).env("XDG_CONFIG_HOME", "");
 
