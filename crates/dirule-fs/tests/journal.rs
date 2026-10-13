@@ -177,6 +177,18 @@ fn active_run_lock_blocks_reading_and_undo_without_mutation() {
 }
 
 #[test]
+fn missing_run_reads_do_not_create_lock_files() {
+    let temp = TempDir::new();
+    let store = store(&temp);
+    let lock = temp.0.join("state/runs/missing.lock");
+
+    assert!(store.get("missing").is_err());
+    assert!(!lock.exists());
+    assert!(store.undo("missing").is_err());
+    assert!(!lock.exists());
+}
+
+#[test]
 fn journaled_case_only_rename_can_be_undone() {
     let temp = TempDir::new();
     let target = temp.0.join("project");

@@ -235,7 +235,7 @@ impl JournalStore {
                     .file_stem()
                     .and_then(|name| name.to_str())
                     .ok_or_else(|| JournalError::InvalidRunId(path.display().to_string()))?;
-                let _lock = RunLock::acquire(&path, run_id, LockMode::Shared)?;
+                let _lock = RunLock::acquire_existing(&path, run_id, LockMode::Shared)?;
                 runs.push(read_run(&path)?);
             }
         }
@@ -245,7 +245,7 @@ impl JournalStore {
 
     pub fn get(&self, run_id: &str) -> Result<JournalDetails, JournalError> {
         let path = self.run_path(run_id)?;
-        let _lock = RunLock::acquire(&path, run_id, LockMode::Shared)?;
+        let _lock = RunLock::acquire_existing(&path, run_id, LockMode::Shared)?;
         let records = read_records(&path)?;
         let history = JournalHistory::from_records(&path, records)?;
         if history.id != run_id {
@@ -284,7 +284,7 @@ impl JournalStore {
 
     pub fn undo(&self, run_id: &str) -> Result<UndoReport, JournalError> {
         let path = self.run_path(run_id)?;
-        let run_lock = RunLock::acquire(&path, run_id, LockMode::Exclusive)?;
+        let run_lock = RunLock::acquire_existing(&path, run_id, LockMode::Exclusive)?;
         let records = read_records(&path)?;
         let history = JournalHistory::from_records(&path, records)?;
         history.validate_undoable(run_id)?;
@@ -482,6 +482,16 @@ enum LockMode {
 }
 
 impl RunLock {
+    fn acquire_existing(
+        journal: &Path,
+        run_id: &str,
+        mode: LockMode,
+    ) -> Result<Self, JournalError> {
+        File::open(journal).map_err(|source| JournalError::io(journal, source))?;
+
+        Self::acquire(journal, run_id, mode)
+    }
+
     fn acquire(journal: &Path, run_id: &str, mode: LockMode) -> Result<Self, JournalError> {
         let path = journal.with_extension("lock");
         let mut options = OpenOptions::new();
