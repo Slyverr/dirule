@@ -128,6 +128,42 @@ to = "template:docs/${name}"
 }
 
 #[test]
+fn excluding_a_directory_path_does_not_exclude_its_children() {
+    let config = parse_config(
+        r#"
+version = "1.2"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+exclude = ["Archive"]
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid exclusion rule");
+    let entries = [
+        Entry {
+            path: PathBuf::from("Archive"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("Archive/ReadMe.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(planned.entries[0].destination, PathBuf::from("Archive"));
+    assert_eq!(planned.entries[0].rule, None);
+    assert_eq!(
+        planned.entries[1].destination,
+        PathBuf::from("Archive/read-me.txt")
+    );
+    assert_eq!(planned.entries[1].rule.as_deref(), Some("Normalize names"));
+}
+
+#[test]
 fn project_acronyms_drive_builtin_and_template_transformations() {
     let config = parse_config(
         r#"
