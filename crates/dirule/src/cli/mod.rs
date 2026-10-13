@@ -261,6 +261,7 @@ fn list_presets(format: args::OutputFormat, color: ColorChoice) -> Result<(), Bo
                 .extension()
                 .is_some_and(|extension| extension == "toml")
                 && let Some(name) = path.file_stem().and_then(|name| name.to_str())
+                && valid_preset_name(name)
             {
                 presets.push(name.to_owned());
             }
@@ -338,14 +339,17 @@ fn remove_preset(
 }
 
 fn preset_path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    {
+    if !valid_preset_name(name) {
         return Err("preset names may contain only ASCII letters, digits, '-' and '_'".into());
     }
     Ok(preset_directory()?.join(format!("{name}.toml")))
+}
+
+fn valid_preset_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
 fn preset_directory() -> Result<PathBuf, Box<dyn Error>> {

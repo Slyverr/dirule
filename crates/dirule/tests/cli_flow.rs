@@ -361,6 +361,7 @@ fn preset_listing_emits_versioned_json() {
     fs::create_dir_all(&presets).expect("create user preset directory");
     fs::write(presets.join("zeta.toml"), "preset").expect("write later preset");
     fs::write(presets.join("downloads.toml"), "preset").expect("write earlier preset");
+    fs::write(presets.join("not a valid name.toml"), "preset").expect("write invalid preset name");
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
     configure_preset_environment(&mut command, &project);
