@@ -1,7 +1,10 @@
 use super::args::{ColorChoice, OutputFormat};
 use dirule_core::Plan;
+use dirule_fs::{JournalRun, JournalStatus};
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+const CURRENT_OUTPUT_VERSION: &str = "1.0";
 
 #[derive(Clone, Copy)]
 pub(super) enum PlanContext {
@@ -51,20 +54,7 @@ pub(super) fn plan(
     context: PlanContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
-        let report = serde_json::json!({
-            "entries": plan.entries.iter().map(|entry| serde_json::json!({
-                "source": portable_path(&entry.source),
-                "destination": portable_path(&entry.destination),
-                "kind": entry.kind,
-                "rule": entry.rule,
-            })).collect::<Vec<_>>(),
-            "conflicts": plan.conflicts.iter().map(|conflict| serde_json::json!({
-                "path": portable_path(&conflict.path),
-                "reason": conflict.reason,
-            })).collect::<Vec<_>>(),
-            "findings": plan.findings,
-        });
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        println!("{}", serde_json::to_string_pretty(&plan_value(plan))?);
         return Ok(());
     }
 
@@ -128,6 +118,153 @@ pub(super) fn plan(
     Ok(())
 }
 
+pub(super) fn apply_result(
+    plan: &Plan,
+    status: &str,
+    moved: usize,
+    skipped: usize,
+    run_id: Option<&str>,
+    format: OutputFormat,
+    color: ColorChoice,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if format == OutputFormat::Json {
+        let value = serde_json::json!({
+            "schema_version": CURRENT_OUTPUT_VERSION,
+            "plan": plan_value(plan),
+            "execution": {
+                "status": status,
+                "moved": moved,
+                "skipped": skipped,
+                "run_id": run_id,
+            }
+        });
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+
+    match status {
+        "applied" => {
+            if skipped == 0 {
+                println!("{} Applied {moved} rename(s).", paint("Done.", "32", color));
+            } else {
+                println!(
+                    "{} Applied {moved} rename(s); skipped {skipped} conflict(s).",
+                    paint("Done.", "32", color)
+                );
+            }
+            if let Some(run_id) = run_id {
+                println!("Undo with: dirule undo {run_id}");
+            }
+        }
+        "no_changes" => no_changes(color),
+        "cancelled" => cancelled("Apply", color),
+        _ => println!("Apply status: {status}"),
+    }
+    Ok(())
+}
+
+fn plan_value(plan: &Plan) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": CURRENT_OUTPUT_VERSION,
+        "entries": plan.entries.iter().map(|entry| serde_json::json!({
+            "source": portable_path(&entry.source),
+            "destination": portable_path(&entry.destination),
+            "kind": entry.kind,
+            "rule": entry.rule,
+        })).collect::<Vec<_>>(),
+        "conflicts": plan.conflicts.iter().map(|conflict| serde_json::json!({
+            "path": portable_path(&conflict.path),
+            "reason": conflict.reason,
+        })).collect::<Vec<_>>(),
+        "findings": plan.findings,
+    })
+}
+
+pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice) {
+    if format == OutputFormat::Json {
+        let value = serde_json::json!({
+            "schema_version": CURRENT_OUTPUT_VERSION,
+            "runs": runs.iter().map(|run| serde_json::json!({
+                "id": run.id,
+                "target": run.target,
+                "started_at": run.started_at,
+                "status": status_name(run.status),
+                "operations": run.operations,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).expect("run listing is serializable")
+        );
+        return;
+    }
+
+    if runs.is_empty() {
+        println!("No apply runs found.");
+        return;
+    }
+    println!("Apply runs");
+    for run in runs {
+        println!(
+            "  {}  {}  {} rename(s)  started {}  {}",
+            paint(&run.id, "36", color),
+            status_name(run.status),
+            run.operations,
+            run.started_at,
+            run.target.display()
+        );
+    }
+}
+
+pub(super) fn undo_result(
+    run_id: &str,
+    status: &str,
+    retained_directories: &[PathBuf],
+    format: OutputFormat,
+    color: ColorChoice,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if format == OutputFormat::Json {
+        let value = serde_json::json!({
+            "schema_version": CURRENT_OUTPUT_VERSION,
+            "run_id": run_id,
+            "status": status,
+            "retained_directories": retained_directories
+                .iter()
+                .map(|path| portable_path(path.as_path()))
+                .collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else if status == "undone" {
+        println!(
+            "{} Undid run {}.",
+            paint("Done.", "32", color),
+            paint(run_id, "36", color)
+        );
+        for directory in retained_directories {
+            println!(
+                "{} Left non-empty directory {} in place.",
+                paint("Note:", "33", color),
+                directory.display()
+            );
+        }
+    } else {
+        cancelled("Undo", color);
+    }
+    Ok(())
+}
+
+fn status_name(status: JournalStatus) -> &'static str {
+    match status {
+        JournalStatus::Applying => "applying",
+        JournalStatus::Applied => "applied",
+        JournalStatus::FailedRolledBack => "failed_rolled_back",
+        JournalStatus::Interrupted => "interrupted",
+        JournalStatus::Undoing => "undoing",
+        JournalStatus::PartiallyRecovered => "partially_recovered",
+        JournalStatus::Undone => "undone",
+    }
+}
+
 fn portable_path(path: &Path) -> String {
     path.components()
         .map(|component| component.as_os_str().to_string_lossy())
@@ -141,17 +278,6 @@ pub(super) fn no_changes(color: ColorChoice) {
 
 pub(super) fn cancelled(action: &str, color: ColorChoice) {
     println!("{}.", paint(&format!("{action} cancelled"), "33", color));
-}
-
-pub(super) fn applied(moved: usize, skipped: usize, color: ColorChoice) {
-    if skipped == 0 {
-        println!("{} Applied {moved} rename(s).", paint("Done.", "32", color));
-    } else {
-        println!(
-            "{} Applied {moved} rename(s); skipped {skipped} conflict(s).",
-            paint("Done.", "32", color)
-        );
-    }
 }
 
 fn paint(text: &str, ansi_code: &str, choice: ColorChoice) -> String {

@@ -29,6 +29,10 @@ pub(super) enum CliCommand {
     Apply(ApplyArgs),
     /// Manage global presets.
     Presets(PresetsArgs),
+    /// Inspect saved apply runs.
+    Runs(RunsArgs),
+    /// Undo a previously applied run.
+    Undo(UndoArgs),
 }
 
 #[derive(Debug, Args)]
@@ -92,6 +96,36 @@ pub(super) enum PresetsCommand {
     Save(PresetSaveArgs),
     /// Remove a user preset.
     Remove(PresetRemoveArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct RunsArgs {
+    #[command(subcommand)]
+    pub(super) command: RunsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum RunsCommand {
+    /// List recorded apply runs.
+    List {
+        /// Output as human-readable text or JSON.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Debug, Args)]
+pub(super) struct UndoArgs {
+    /// Identifier shown by `dirule runs list` or after `dirule apply`.
+    pub(super) run_id: String,
+
+    /// Skip the interactive confirmation prompt.
+    #[arg(long)]
+    pub(super) yes: bool,
+
+    /// Output as human-readable text or JSON.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    pub(super) format: OutputFormat,
 }
 
 #[derive(Debug, Args)]

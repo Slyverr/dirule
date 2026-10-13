@@ -17,7 +17,14 @@ impl TempProject {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_dirule"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+        #[cfg(target_os = "windows")]
+        command.env("LOCALAPPDATA", self.0.with_extension("local-app-data"));
+        #[cfg(target_os = "macos")]
+        command.env("HOME", self.0.with_extension("home"));
+        #[cfg(all(unix, not(target_os = "macos")))]
+        command.env("XDG_STATE_HOME", self.0.with_extension("state"));
+        command
             .args(args)
             .current_dir(&self.0)
             .output()
@@ -28,6 +35,9 @@ impl TempProject {
 impl Drop for TempProject {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(self.0.with_extension("state"));
+        let _ = fs::remove_dir_all(self.0.with_extension("local-app-data"));
+        let _ = fs::remove_dir_all(self.0.with_extension("home"));
     }
 }
 
@@ -131,6 +141,7 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let apply = project.run(&["apply", "--yes", "--color", "always"]);
     assert!(apply.status.success());
     assert!(String::from_utf8_lossy(&apply.stdout).contains("Applied 3 rename(s)."));
+    assert!(String::from_utf8_lossy(&apply.stdout).contains("Undo with: dirule undo "));
     assert_eq!(text(&project.0.join("my-xml-parser.rs")), "parser");
     assert_eq!(
         text(&project.0.join("http-server/o-auth-token.txt")),
@@ -140,6 +151,92 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let check = project.run(&["check"]);
     assert!(check.status.success());
     assert!(String::from_utf8_lossy(&check.stdout).contains("Check passed"));
+
+    let runs = project.run(&["runs", "list", "--format", "json"]);
+    assert!(runs.status.success());
+    let runs: serde_json::Value = serde_json::from_slice(&runs.stdout).expect("valid runs JSON");
+    let run_id = runs["runs"][0]["id"].as_str().expect("journal run ID");
+    assert_eq!(runs["runs"][0]["status"], "applied");
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(project.0.join("MyXMLParser.rs").is_file());
+    assert!(project.0.join("HTTPServer/OAuthToken.txt").is_file());
+}
+
+#[test]
+fn apply_and_undo_emit_single_json_documents() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("NeedsWork.txt"), "contents").expect("write fixture file");
+
+    let apply = project.run(&["apply", "--yes", "--format", "json"]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("one apply JSON document");
+    assert_eq!(apply["execution"]["status"], "applied");
+    assert_eq!(apply["execution"]["moved"], 1);
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("run identifier");
+
+    let undo = project.run(&["undo", run_id, "--yes", "--format", "json"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    let undo: serde_json::Value =
+        serde_json::from_slice(&undo.stdout).expect("one undo JSON document");
+    assert_eq!(undo["status"], "undone");
+    assert!(project.0.join("NeedsWork.txt").is_file());
+}
+
+#[test]
+fn undo_reports_created_directories_that_cannot_be_removed() {
+    let project = TempProject::new();
+    fs::write(project.0.join("before.txt"), "contents").expect("write source file");
+    fs::write(
+        project.0.join("dirule.toml"),
+        "version = \"1.0\"\ntarget = \".\"\n\n[[rules]]\nname = \"Archive\"\nmatch = \"before.txt\"\nto = \"template:archive/after.txt\"\n",
+    )
+    .expect("write project config");
+
+    let apply = project.run(&["apply", "--yes"]);
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let runs = project.run(&["runs", "list", "--format", "json"]);
+    let runs: serde_json::Value = serde_json::from_slice(&runs.stdout).expect("valid runs JSON");
+    let run_id = runs["runs"][0]["id"].as_str().expect("journal run ID");
+    fs::write(project.0.join("archive/keep.txt"), "user data")
+        .expect("write new file in created directory");
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+
+    assert!(
+        undo.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&undo.stdout),
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&undo.stdout)
+            .contains("Left non-empty directory archive in place.")
+    );
+    assert!(project.0.join("before.txt").is_file());
+    assert!(project.0.join("archive/keep.txt").is_file());
 }
 
 #[test]

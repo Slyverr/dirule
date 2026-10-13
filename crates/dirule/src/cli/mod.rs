@@ -1,10 +1,10 @@
 mod args;
 mod output;
 
-use self::args::{Cli, CliCommand, ColorChoice, ConflictAction, PresetsCommand};
+use self::args::{Cli, CliCommand, ColorChoice, ConflictAction, PresetsCommand, RunsCommand};
 use clap::Parser;
 use dirule_core::{CURRENT_CONFIG_VERSION, Config, Plan, parse_config, plan};
-use dirule_fs::{ConflictPolicy, apply_with_conflict_policy, scan, validate_destinations};
+use dirule_fs::{ConflictPolicy, JournalStore, apply_journaled, scan, validate_destinations};
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -73,14 +73,14 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
             let format = operation.format;
             let (target, result, snapshot) = evaluate(operation)?;
 
-            output::plan(&result, format, color, output::PlanContext::Apply)?;
+            if format == args::OutputFormat::Human {
+                output::plan(&result, format, color, output::PlanContext::Apply)?;
+            }
             if !result.is_conflict_free() && on_conflict == ConflictAction::Abort {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());
             }
             if !result.has_changes() {
-                if format == args::OutputFormat::Human {
-                    output::no_changes(color);
-                }
+                output::apply_result(&result, "no_changes", 0, 0, None, format, color)?;
                 return Ok(());
             }
             if !confirm(
@@ -88,19 +88,24 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 "use --yes to apply without an interactive terminal",
                 yes,
             )? {
-                if format == args::OutputFormat::Human {
-                    output::cancelled("Apply", color);
-                }
+                output::apply_result(&result, "cancelled", 0, 0, None, format, color)?;
                 return Ok(());
             }
             let policy = match on_conflict {
                 ConflictAction::Abort => ConflictPolicy::Abort,
                 ConflictAction::Skip => ConflictPolicy::Skip,
             };
-            let report = apply_with_conflict_policy(&target, &result, &snapshot, policy)?;
-            if format == args::OutputFormat::Human {
-                output::applied(report.moved.len(), report.skipped.len(), color);
-            }
+            let store = JournalStore::new(journal_directory()?);
+            let applied = apply_journaled(&target, &result, &snapshot, policy, &store)?;
+            output::apply_result(
+                &result,
+                "applied",
+                applied.report.moved.len(),
+                applied.report.skipped.len(),
+                applied.run_id.as_deref(),
+                format,
+                color,
+            )?;
             Ok(())
         }
         CliCommand::Presets(args) => match args.command {
@@ -108,6 +113,33 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
             PresetsCommand::Save(options) => save_preset(options, color),
             PresetsCommand::Remove(options) => remove_preset(options, color),
         },
+        CliCommand::Runs(args) => match args.command {
+            RunsCommand::List { format } => {
+                let runs = JournalStore::new(journal_directory()?).list()?;
+                output::runs(&runs, format, color);
+                Ok(())
+            }
+        },
+        CliCommand::Undo(options) => {
+            if !confirm(
+                &format!("Undo apply run {}?", options.run_id),
+                "use --yes to undo without an interactive terminal",
+                options.yes,
+            )? {
+                output::undo_result(&options.run_id, "cancelled", &[], options.format, color)?;
+                return Ok(());
+            }
+            let store = JournalStore::new(journal_directory()?);
+            let report = store.undo(&options.run_id)?;
+            output::undo_result(
+                &options.run_id,
+                "undone",
+                &report.retained_directories,
+                options.format,
+                color,
+            )?;
+            Ok(())
+        }
     }
 }
 
@@ -290,6 +322,22 @@ fn preset_directory() -> Result<PathBuf, Box<dyn Error>> {
 
     let base = base.ok_or("could not determine the user configuration directory")?;
     Ok(base.join("dirule").join("presets"))
+}
+
+fn journal_directory() -> Result<PathBuf, Box<dyn Error>> {
+    #[cfg(target_os = "windows")]
+    let base = env_path("LOCALAPPDATA");
+    #[cfg(target_os = "macos")]
+    let base = env_path("HOME").map(|home| home.join("Library/Application Support"));
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let base = env_path("XDG_STATE_HOME")
+        .filter(|path| path.is_absolute())
+        .or_else(|| env_path("HOME").map(|home| home.join(".local/state")));
+    #[cfg(not(any(unix, target_os = "windows")))]
+    let base = env_path("HOME");
+
+    let base = base.ok_or("could not determine the user state directory")?;
+    Ok(base.join("dirule").join("runs"))
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {

@@ -44,6 +44,17 @@ cargo run -p dirule -- apply
 
 JSON plan paths are target-relative and use `/` separators on every platform.
 
+## Apply history
+
+Each successful apply records its filesystem moves in Dirule's user state directory and prints a run ID. List runs and undo a run with:
+
+```sh
+dirule runs list
+dirule undo RUN_ID
+```
+
+Undo asks for confirmation; use `--yes` in a non-interactive session. Dirule refuses to overwrite a path or undo a file whose recorded identity has changed. Non-empty directories created during apply are kept and reported after undo. The journal stores paths and filesystem metadata, not file contents, so it is recovery history rather than a backup.
+
 ## Presets
 
 Save a project's validated rules as a reusable user preset, then select it for another project:
