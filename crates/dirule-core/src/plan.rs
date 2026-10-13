@@ -3,7 +3,7 @@ use crate::{
     CompiledConfig, Config, DestinationValues, Error, Result, transform, transform_filename,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -77,12 +77,12 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
             .cmp(&depth(&right.path))
             .then_with(|| left.path.cmp(&right.path))
     });
-    let original_paths: BTreeSet<PathBuf> = ordered
+    let original_paths: HashSet<PathBuf> = ordered
         .iter()
         .map(|entry| clean_path(&entry.path))
         .collect::<Result<_>>()?;
 
-    let mut directory_destinations = BTreeMap::<PathBuf, PathBuf>::new();
+    let mut directory_destinations = HashMap::<PathBuf, PathBuf>::new();
     for entry in ordered {
         let source = clean_path(&entry.path)?;
         if entry.kind == EntryKind::Symlink {
@@ -166,7 +166,7 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
     Ok(result)
 }
 
-fn find_conflicts(plan: &mut Plan, original_paths: &BTreeSet<PathBuf>) {
+fn find_conflicts(plan: &mut Plan, original_paths: &HashSet<PathBuf>) {
     let mut destinations = BTreeMap::<PathBuf, Vec<usize>>::new();
     for (index, entry) in plan.entries.iter().enumerate() {
         if entry.source != entry.destination {
@@ -190,7 +190,7 @@ fn find_conflicts(plan: &mut Plan, original_paths: &BTreeSet<PathBuf>) {
             });
         }
     }
-    let mut file_destinations = BTreeMap::<PathBuf, Vec<usize>>::new();
+    let mut file_destinations = HashMap::<PathBuf, Vec<usize>>::new();
     for (index, entry) in plan.entries.iter().enumerate() {
         if entry.kind == EntryKind::File && entry.source != entry.destination {
             file_destinations
@@ -228,7 +228,7 @@ fn find_conflicts(plan: &mut Plan, original_paths: &BTreeSet<PathBuf>) {
     }
 }
 
-fn virtual_parent(path: &Path, destinations: &BTreeMap<PathBuf, PathBuf>) -> PathBuf {
+fn virtual_parent(path: &Path, destinations: &HashMap<PathBuf, PathBuf>) -> PathBuf {
     let mut ancestor = path.parent();
     while let Some(parent) = ancestor {
         if let Some(destination) = destinations.get(parent) {
