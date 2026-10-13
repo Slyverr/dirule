@@ -8,7 +8,7 @@ This specification covers the CLI apply path. It does not add a TUI, MCP integra
 
 ## State location
 
-Run data is stored outside the target tree:
+Run data is stored outside the target tree. The selected base path must be absolute; ignore a relative XDG path and use an absolute home-directory fallback, or fail if no absolute base is available:
 
 - Linux and other Unix systems: `$XDG_STATE_HOME/dirule/runs/`, falling back to `$HOME/.local/state/dirule/runs/`.
 - macOS: `$HOME/Library/Application Support/dirule/runs/`.

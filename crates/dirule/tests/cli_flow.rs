@@ -437,6 +437,52 @@ fn preset_storage_ignores_a_relative_xdg_config_home() {
 }
 
 #[test]
+fn preset_storage_rejects_relative_platform_directories() {
+    let project = TempProject::new();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    #[cfg(target_os = "windows")]
+    command.env("APPDATA", "relative-app-data");
+    #[cfg(target_os = "macos")]
+    command.env("HOME", "relative-home");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    command
+        .env("HOME", "relative-home")
+        .env("XDG_CONFIG_HOME", "");
+
+    let output = command
+        .args(["presets", "list"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run dirule");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("user configuration directory"));
+}
+
+#[test]
+fn journal_storage_rejects_relative_platform_directories() {
+    let project = TempProject::new();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    #[cfg(target_os = "windows")]
+    command.env("LOCALAPPDATA", "relative-local-app-data");
+    #[cfg(target_os = "macos")]
+    command.env("HOME", "relative-home");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    command
+        .env("HOME", "relative-home")
+        .env("XDG_STATE_HOME", "");
+
+    let output = command
+        .args(["runs", "list"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run dirule");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("user state directory"));
+}
+
+#[test]
 fn preset_save_copies_a_valid_config_without_overwriting_existing_presets() {
     let project = TempProject::new();
     let init = project.run(&["init"]);

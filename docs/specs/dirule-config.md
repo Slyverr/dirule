@@ -117,7 +117,7 @@ A preset is a collection of ordinary rules, not a different rule format. A built
 
 Built-in choices must resolve to ordinary editable rule values. They must not rely on hidden matching or transformation behavior that user-authored rules cannot express.
 
-User presets are TOML files named `<name>.toml` in the platform user configuration directory under `dirule/presets/`: `$XDG_CONFIG_HOME` or `$HOME/.config` on Unix, `$HOME/Library/Application Support` on macOS, and `%APPDATA%` on Windows. Names contain only ASCII letters, digits, `_`, or `-`. Preset names must be unique across built-in and user presets; report ambiguity instead of choosing silently. The built-in preset catalog may initially be empty.
+User presets are TOML files named `<name>.toml` in the platform user configuration directory under `dirule/presets/`: `$XDG_CONFIG_HOME` or `$HOME/.config` on Unix, `$HOME/Library/Application Support` on macOS, and `%APPDATA%` on Windows. Configuration base paths must be absolute; ignore a relative XDG path and use an absolute home-directory fallback, or report an error if no absolute base is available. Names contain only ASCII letters, digits, `_`, or `-`. Preset names must be unique across built-in and user presets; report ambiguity instead of choosing silently. The built-in preset catalog may initially be empty.
 
 `dirule presets list` lists the available names. `--format json` emits a versioned JSON document for scripts.
 

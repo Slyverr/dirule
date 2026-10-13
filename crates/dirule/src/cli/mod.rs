@@ -373,15 +373,14 @@ fn valid_preset_name(name: &str) -> bool {
 
 fn preset_directory() -> Result<PathBuf, Box<dyn Error>> {
     #[cfg(target_os = "windows")]
-    let base = env_path("APPDATA");
+    let base = absolute_env_path("APPDATA");
     #[cfg(target_os = "macos")]
-    let base = env_path("HOME").map(|home| home.join("Library/Application Support"));
+    let base = absolute_env_path("HOME").map(|home| home.join("Library/Application Support"));
     #[cfg(all(unix, not(target_os = "macos")))]
-    let base = env_path("XDG_CONFIG_HOME")
-        .filter(|path| path.is_absolute())
-        .or_else(|| env_path("HOME").map(|home| home.join(".config")));
+    let base = absolute_env_path("XDG_CONFIG_HOME")
+        .or_else(|| absolute_env_path("HOME").map(|home| home.join(".config")));
     #[cfg(not(any(unix, target_os = "windows")))]
-    let base = env_path("HOME");
+    let base = absolute_env_path("HOME");
 
     let base = base.ok_or("could not determine the user configuration directory")?;
     Ok(base.join("dirule").join("presets"))
@@ -389,15 +388,14 @@ fn preset_directory() -> Result<PathBuf, Box<dyn Error>> {
 
 fn journal_directory() -> Result<PathBuf, Box<dyn Error>> {
     #[cfg(target_os = "windows")]
-    let base = env_path("LOCALAPPDATA");
+    let base = absolute_env_path("LOCALAPPDATA");
     #[cfg(target_os = "macos")]
-    let base = env_path("HOME").map(|home| home.join("Library/Application Support"));
+    let base = absolute_env_path("HOME").map(|home| home.join("Library/Application Support"));
     #[cfg(all(unix, not(target_os = "macos")))]
-    let base = env_path("XDG_STATE_HOME")
-        .filter(|path| path.is_absolute())
-        .or_else(|| env_path("HOME").map(|home| home.join(".local/state")));
+    let base = absolute_env_path("XDG_STATE_HOME")
+        .or_else(|| absolute_env_path("HOME").map(|home| home.join(".local/state")));
     #[cfg(not(any(unix, target_os = "windows")))]
-    let base = env_path("HOME");
+    let base = absolute_env_path("HOME");
 
     let base = base.ok_or("could not determine the user state directory")?;
     Ok(base.join("dirule").join("runs"))
@@ -407,6 +405,10 @@ fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+fn absolute_env_path(name: &str) -> Option<PathBuf> {
+    env_path(name).filter(|path| path.is_absolute())
 }
 
 fn resolve(base: &Path, path: PathBuf) -> PathBuf {
@@ -439,9 +441,8 @@ fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, Box<dyn Error>>
         return Ok(resolve(base, path));
     };
 
-    let home = home_directory()
-        .filter(|path| path.is_absolute())
-        .ok_or("cannot expand target: user home directory is unavailable")?;
+    let home =
+        home_directory().ok_or("cannot expand target: user home directory is unavailable")?;
     let home_relative = home_relative.trim_start_matches(|separator| {
         #[cfg(windows)]
         {
@@ -459,11 +460,11 @@ fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, Box<dyn Error>>
 fn home_directory() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        env_path("USERPROFILE")
+        absolute_env_path("USERPROFILE")
     }
     #[cfg(not(windows))]
     {
-        env_path("HOME")
+        absolute_env_path("HOME")
     }
 }
 
