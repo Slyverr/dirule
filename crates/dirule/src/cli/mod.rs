@@ -101,6 +101,7 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         }
         CliCommand::Presets(args) => match args.command {
             PresetsCommand::List => list_presets(color),
+            PresetsCommand::Save(options) => save_preset(options, color),
         },
     }
 }
@@ -192,6 +193,49 @@ fn list_presets(color: ColorChoice) -> Result<(), Box<dyn Error>> {
             println!("  {}", output::preset_name(&preset, color));
         }
     }
+    Ok(())
+}
+
+fn save_preset(options: args::PresetSaveArgs, color: ColorChoice) -> Result<(), Box<dyn Error>> {
+    let cwd = std::env::current_dir()?;
+    let source_path = resolve(
+        &cwd,
+        options
+            .config
+            .unwrap_or_else(|| PathBuf::from("dirule.toml")),
+    );
+    let destination = preset_path(&options.name)?;
+    let contents = fs::read_to_string(&source_path)
+        .map_err(|error| format!("cannot read {}: {error}", source_path.display()))?;
+    parse_config(&contents)?;
+
+    let directory = destination
+        .parent()
+        .ok_or("preset path has no parent directory")?;
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                format!(
+                    "preset {:?} already exists at {}",
+                    options.name,
+                    destination.display()
+                )
+            } else {
+                format!("cannot create {}: {error}", destination.display())
+            }
+        })?;
+    if let Err(error) = file.write_all(contents.as_bytes()) {
+        drop(file);
+        let _ = fs::remove_file(&destination);
+        return Err(format!("cannot write {}: {error}", destination.display()).into());
+    }
+
+    output::saved_preset(&options.name, &destination, color);
     Ok(())
 }
 

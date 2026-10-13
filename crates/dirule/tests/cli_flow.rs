@@ -49,6 +49,30 @@ fn copy_tree(source: &Path, destination: &Path) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn preset_config_base(project: &TempProject) -> PathBuf {
+    project.0.join("appdata")
+}
+
+#[cfg(target_os = "macos")]
+fn preset_config_base(project: &TempProject) -> PathBuf {
+    project.0.join("Library/Application Support")
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn preset_config_base(project: &TempProject) -> PathBuf {
+    project.0.join("xdg-config")
+}
+
+fn configure_preset_environment(command: &mut Command, project: &TempProject) {
+    #[cfg(target_os = "windows")]
+    command.env("APPDATA", preset_config_base(project));
+    #[cfg(target_os = "macos")]
+    command.env("HOME", &project.0);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    command.env("XDG_CONFIG_HOME", preset_config_base(project));
+}
+
 #[test]
 fn cli_initializes_checks_plans_applies_and_emits_json() {
     let project = TempProject::new();
@@ -153,6 +177,81 @@ fn preset_listing_uses_the_platform_config_directory() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("downloads"));
+}
+
+#[test]
+fn preset_save_copies_a_valid_config_without_overwriting_existing_presets() {
+    let project = TempProject::new();
+    let init = project.run(&["init"]);
+    assert!(init.status.success());
+    let config = text(&project.0.join("dirule.toml"));
+    let preset = preset_config_base(&project).join("dirule/presets/downloads.toml");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let save = command
+        .args(["presets", "save", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run preset save");
+
+    assert!(
+        save.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&save.stdout),
+        String::from_utf8_lossy(&save.stderr)
+    );
+    assert_eq!(text(&preset), config);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let duplicate = command
+        .args(["presets", "save", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run duplicate preset save");
+
+    assert_eq!(duplicate.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("already exists"));
+    assert_eq!(text(&preset), config);
+
+    let alternate_config = project.0.join("custom-rules.toml");
+    fs::write(&alternate_config, &config).expect("write alternate config");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let save_alternate = command
+        .args(["presets", "save", "custom", "--config", "custom-rules.toml"])
+        .current_dir(&project.0)
+        .output()
+        .expect("save alternate config");
+
+    assert!(save_alternate.status.success());
+    assert_eq!(
+        text(&preset_config_base(&project).join("dirule/presets/custom.toml")),
+        config
+    );
+
+    fs::write(&alternate_config, "version = \"future\"\n").expect("write invalid config");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let save_invalid = command
+        .args([
+            "presets",
+            "save",
+            "invalid",
+            "--config",
+            "custom-rules.toml",
+        ])
+        .current_dir(&project.0)
+        .output()
+        .expect("reject invalid config");
+
+    assert_eq!(save_invalid.status.code(), Some(2));
+    assert!(
+        !preset_config_base(&project)
+            .join("dirule/presets/invalid.toml")
+            .exists()
+    );
 }
 
 #[test]

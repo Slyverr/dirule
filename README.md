@@ -42,6 +42,17 @@ cargo run -p dirule -- apply
 
 `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output.
 
+## Presets
+
+Save a project's validated rules as a reusable user preset, then select it for another project:
+
+```sh
+dirule presets save downloads
+dirule plan --preset downloads
+```
+
+By default, `presets save` reads `dirule.toml` from the current directory. Pass `--config FILE` to save another configuration. Presets are stored in Dirule's platform-specific user configuration directory, and an existing preset is never overwritten.
+
 ## Nix
 
 Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`.

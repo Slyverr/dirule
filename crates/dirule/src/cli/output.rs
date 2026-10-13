@@ -18,6 +18,15 @@ pub(super) fn preset_name(name: &str, color: ColorChoice) -> String {
     paint(name, "36", color)
 }
 
+pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) {
+    println!(
+        "{} Saved preset {} to {}",
+        paint("Done.", "32", color),
+        preset_name(name, color),
+        path.display()
+    );
+}
+
 pub(super) fn error(message: &str, color: ColorChoice) {
     let enabled = color_enabled(color, std::io::stderr().is_terminal());
     if enabled {

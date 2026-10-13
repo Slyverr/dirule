@@ -88,6 +88,18 @@ pub(super) struct PresetsArgs {
 pub(super) enum PresetsCommand {
     /// List available presets.
     List,
+    /// Save a project config as a global preset.
+    Save(PresetSaveArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PresetSaveArgs {
+    /// Name to assign to the preset.
+    pub(super) name: String,
+
+    /// Read rules from this TOML file instead of ./dirule.toml.
+    #[arg(long, value_name = "FILE")]
+    pub(super) config: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
@@ -107,7 +119,7 @@ pub(super) enum ColorChoice {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplyArgs, Cli, CliCommand, ConflictAction, OutputFormat};
+    use super::{ApplyArgs, Cli, CliCommand, ConflictAction, OutputFormat, PresetsCommand};
     use clap::Parser;
 
     #[test]
@@ -180,5 +192,31 @@ mod tests {
             .expect_err("unknown output format");
 
         assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn preset_save_accepts_name_and_optional_config_path() {
+        let cli = Cli::try_parse_from([
+            "dirule",
+            "presets",
+            "save",
+            "downloads",
+            "--config",
+            "rules.toml",
+        ])
+        .expect("valid preset save options");
+
+        let CliCommand::Presets(args) = cli.command else {
+            panic!("expected presets command");
+        };
+        let PresetsCommand::Save(options) = args.command else {
+            panic!("expected preset save command");
+        };
+
+        assert_eq!(options.name, "downloads");
+        assert_eq!(
+            options.config.as_deref(),
+            Some(std::path::Path::new("rules.toml"))
+        );
     }
 }
