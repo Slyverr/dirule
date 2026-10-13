@@ -1,4 +1,4 @@
-# Dirule configuration 1.1
+# Dirule configuration 1.2
 
 ## Purpose and scope
 
@@ -8,16 +8,16 @@ The format must be able to grow through explicit migrations. New matchers, trans
 
 ## Format evolution
 
-Every configuration declares `version` as a quoted `major.minor` string. The reader parses that field first, migrates older documents through a complete sequence of registered one-step migrations, then validates and loads the current schema. Each source version must have at most one registered migration; ambiguous routes are configuration errors. The runtime configuration does not carry format-version branches. The current schema adds an optional rule `kind` selector; older documents migrate with the previous behavior, where rules apply to files and directories.
+Every configuration declares `version` as a quoted `major.minor` string. The reader parses that field first, migrates older documents through a complete sequence of registered one-step migrations, then validates and loads the current schema. Each source version must have at most one registered migration; ambiguous routes are configuration errors. The runtime configuration does not carry format-version branches. Documents without `kind` migrate with `kind = "any"`; documents without `exclude` migrate with an empty list, preserving their prior behavior.
 
 A migration must preserve the document's meaning, update its version, and produce a document accepted by the next migration. Readers reject unknown future versions and any older version without a complete migration path; they never skip versions or guess how to interpret fields. Changes that preserve existing meaning may advance the minor component. Changes that alter existing meaning require a major component change and an explicit migration policy.
 
 ## Configuration shape
 
-`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
+`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. The optional `exclude` list contains path patterns that skip entries from that rule. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
 
 ```toml
-version = "1.1"
+version = "1.2"
 name = "Downloads"
 target = "."
 
@@ -34,10 +34,11 @@ to = "template:Archive/${year}/${vendor}/${title|kebab-case}.pdf"
 name = "Normalize remaining filenames"
 match = "**/*"
 kind = "file"
+exclude = ["**/*.md"]
 to = "builtin:kebab-case"
 ```
 
-Rules are evaluated in declaration order. The first rule matching both the entry's kind and path owns it. A kind mismatch does not claim the entry, so later rules can still match it. The parser splits `to` at its first colon, so colons later in a value remain part of that value. Unknown fields, kinds, namespaces, transformations, malformed patterns, and invalid templates are configuration errors with the relevant field or rule identified.
+Rules are evaluated in declaration order. The first rule matching both the entry's kind and path owns it. A kind mismatch or matching exclusion does not claim the entry, so later rules can still match it. Exclusions use the same path-relative glob syntax as `match` and inspect original paths. They apply only to their containing rule; excluding a directory does not automatically exclude its descendants. The parser splits `to` at its first colon, so colons later in a value remain part of that value. Unknown fields, kinds, namespaces, transformations, malformed patterns, exclusions, and invalid templates are configuration errors with the relevant field or rule identified.
 
 ## Matching
 
@@ -175,6 +176,7 @@ Tests should verify:
 - Migration of a document through a complete sequence of format migrations, including meaning preservation; rejection of unknown future versions and missing migration steps.
 - Root-level and nested glob matching, including `**/` matching zero directories, named captures, and safe template expansion.
 - File and directory kind filters, including later rules matching entries whose kind did not match an earlier rule.
+- Rule exclusions, including fall-through to later rules, unmatched entries remaining unchanged, and rejection of malformed exclusion patterns.
 - All four transformations for ordinary names, uppercase runs, letter/digit transitions, punctuation, Unicode cased letters, scripts without case, dotfiles, and multiple extensions.
 - Acronym behavior for generic uppercase runs such as `HTTPServer`, configured mixed-case spellings such as `iOSGuide`, longest-first tokenization, and non-matching inside a larger token.
 - Identical transformation output from built-in `to` values and equivalent template filters.

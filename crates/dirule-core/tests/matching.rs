@@ -50,6 +50,7 @@ fn tree_globs_match_root_and_nested_paths_case_sensitively() {
         name: "PDF files".into(),
         pattern: "**/*.pdf".into(),
         kind: RuleKind::Any,
+        exclude: Vec::new(),
         to: "builtin:kebab-case".into(),
     };
     let matcher = Matcher::new(&rule.pattern).expect("compiled matcher");

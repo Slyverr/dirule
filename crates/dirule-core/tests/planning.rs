@@ -31,7 +31,7 @@ to = "builtin:kebab-case"
 fn rule_kind_filters_entries_and_mismatches_continue_to_later_rules() {
     let config = parse_config(
         r#"
-version = "1.1"
+version = "1.2"
 
 [[rules]]
 name = "Normalize directories"
@@ -73,6 +73,58 @@ to = "builtin:kebab-case"
         PathBuf::from("my-xml-parser.pdf")
     );
     assert_eq!(planned.entries[1].rule.as_deref(), Some("Normalize files"));
+}
+
+#[test]
+fn rule_exclusions_fall_through_without_claiming_entries() {
+    let config = parse_config(
+        r#"
+version = "1.2"
+
+[[rules]]
+name = "Normalize files"
+match = "**/*"
+kind = "file"
+exclude = ["**/*.md"]
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Move the README"
+match = "README.md"
+kind = "file"
+to = "template:docs/${name}"
+"#,
+    )
+    .expect("valid exclusion rules");
+    let entries = [
+        Entry {
+            path: PathBuf::from("MyXMLParser.pdf"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("README.md"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("guide.md"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("my-xml-parser.pdf")
+    );
+    assert_eq!(planned.entries[0].rule.as_deref(), Some("Normalize files"));
+    assert_eq!(
+        planned.entries[1].destination,
+        PathBuf::from("docs/README.md")
+    );
+    assert_eq!(planned.entries[1].rule.as_deref(), Some("Move the README"));
+    assert_eq!(planned.entries[2].destination, PathBuf::from("guide.md"));
+    assert_eq!(planned.entries[2].rule, None);
 }
 
 #[test]
@@ -307,12 +359,14 @@ fn planning_propagates_directory_names_and_keeps_first_match_on_original_paths()
                 name: "Normalize project folder".into(),
                 pattern: "*".into(),
                 kind: RuleKind::Any,
+                exclude: Vec::new(),
                 to: "builtin:kebab-case".into(),
             },
             Rule {
                 name: "Normalize remaining paths".into(),
                 pattern: "**/*".into(),
                 kind: RuleKind::Any,
+                exclude: Vec::new(),
                 to: "builtin:snake-case".into(),
             },
         ],

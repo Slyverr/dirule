@@ -6,13 +6,20 @@ struct Migration {
     apply: fn(toml::Value, ConfigVersion) -> Result<toml::Value>,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    from: ConfigVersion::new(1, 0),
-    to: ConfigVersion::new(1, 1),
-    apply: migrate_1_0_to_1_1,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: ConfigVersion::new(1, 0),
+        to: ConfigVersion::new(1, 1),
+        apply: advance_version,
+    },
+    Migration {
+        from: ConfigVersion::new(1, 1),
+        to: ConfigVersion::new(1, 2),
+        apply: advance_version,
+    },
+];
 
-fn migrate_1_0_to_1_1(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
+fn advance_version(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
     let document_table = document
         .as_table_mut()
         .ok_or_else(|| Error::Config("configuration document must be a table".into()))?;

@@ -27,6 +27,7 @@ pub(crate) struct CompiledRule {
     pub(crate) name: String,
     pub(crate) matcher: Matcher,
     pub(crate) kind: RuleKind,
+    pub(crate) exclude: Vec<Matcher>,
     pub(crate) destination: CompiledDestination,
 }
 
@@ -55,6 +56,9 @@ pub struct Rule {
 
     #[serde(default)]
     pub kind: RuleKind,
+
+    #[serde(default)]
+    pub exclude: Vec<String>,
 
     pub to: String,
 }
@@ -107,6 +111,26 @@ impl Config {
             let matcher = Matcher::new(&rule.pattern)
                 .map_err(|error| Error::Config(format!("rule {:?}: {error}", rule.name)))?;
 
+            let exclude = rule
+                .exclude
+                .iter()
+                .map(|pattern| {
+                    if pattern.is_empty() {
+                        return Err(Error::Config(format!(
+                            "rule {:?}: exclusion patterns cannot be empty",
+                            rule.name
+                        )));
+                    }
+
+                    Matcher::new(pattern).map_err(|error| {
+                        Error::Config(format!(
+                            "rule {:?}: invalid exclusion pattern {pattern:?}: {error}",
+                            rule.name
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
             let (namespace, value) = rule.to.split_once(':').ok_or_else(|| {
                 Error::Config(format!(
                     "rule {:?}: `to` must use `builtin:` or `template:`",
@@ -142,6 +166,7 @@ impl Config {
                 name: rule.name.clone(),
                 matcher,
                 kind: rule.kind,
+                exclude,
                 destination,
             });
         }

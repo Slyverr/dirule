@@ -4,7 +4,7 @@ use dirule_core::{RuleKind, parse_config};
 fn parses_and_validates_rule_configuration() {
     let config = parse_config(
         r#"
-version = "1.1"
+version = "1.2"
 target = "."
 
 [[rules]]
@@ -39,6 +39,58 @@ to = "builtin:kebab-case"
     .expect("legacy configuration migrates");
 
     assert_eq!(config.rules[0].kind, RuleKind::Any);
+    assert!(config.rules[0].exclude.is_empty());
+}
+
+#[test]
+fn version_1_1_migrates_to_empty_rule_exclusions() {
+    let config = parse_config(
+        r#"
+version = "1.1"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+kind = "file"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("configuration migrates");
+
+    assert_eq!(config.rules[0].kind, RuleKind::File);
+    assert!(config.rules[0].exclude.is_empty());
+}
+
+#[test]
+fn parses_and_validates_rule_exclusion_patterns() {
+    let config = parse_config(
+        r#"
+version = "1.2"
+
+[[rules]]
+name = "Normalize files"
+match = "**/*"
+kind = "file"
+exclude = ["**/*.md", "build/**"]
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid exclusion patterns");
+
+    assert_eq!(config.rules[0].exclude, ["**/*.md", "build/**"]);
+}
+
+#[test]
+fn rejects_empty_and_malformed_rule_exclusion_patterns() {
+    for pattern in ["", "["] {
+        let source = format!(
+            "version = '1.2'\n[[rules]]\nname = 'Normalize files'\nmatch = '**/*'\nexclude = ['{pattern}']\nto = 'builtin:kebab-case'"
+        );
+
+        let error = parse_config(&source).expect_err("invalid exclusion is rejected");
+        assert!(error.to_string().contains("Normalize files"));
+        assert!(error.to_string().contains("exclusion"));
+    }
 }
 
 #[test]

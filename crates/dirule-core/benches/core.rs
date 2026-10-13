@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const CONFIG_SOURCE: &str = r#"
-version = "1.1"
+version = "1.2"
 target = "."
 
 [acronyms]
@@ -82,12 +82,14 @@ fn benchmark_planning(criterion: &mut Criterion) {
                 name: "Normalize invoices".into(),
                 pattern: "Invoices/<year>-<vendor>-<title>.pdf".into(),
                 kind: RuleKind::File,
+                exclude: Vec::new(),
                 to: "template:Archive/${year}/${vendor|kebab-case}/${title|kebab-case}.pdf".into(),
             },
             Rule {
                 name: "Normalize other names".into(),
                 pattern: "**/*".into(),
                 kind: RuleKind::Any,
+                exclude: Vec::new(),
                 to: "builtin:kebab-case".into(),
             },
         ],

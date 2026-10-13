@@ -118,6 +118,15 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
                     Some(captures)
                 }
             };
+
+            if rule
+                .exclude
+                .iter()
+                .any(|pattern| pattern.is_match(&source_text))
+            {
+                continue;
+            }
+
             let basename = source
                 .file_name()
                 .and_then(|name| name.to_str())
