@@ -48,7 +48,7 @@ Use this first-line format:
 type(crate/area): summary
 ```
 
-Name both the crate and the affected area when a change belongs to a crate. For repository-wide documentation, use `docs: summary` without a scope. Examples:
+Use exactly two scope parts for crate changes: the crate and one broad affected area. Do not add nested module or file paths. For repository-wide documentation, use `docs: summary` without a scope. Examples:
 
 ```text
 feat(dirule-core/transform): add kebab-case conversion
