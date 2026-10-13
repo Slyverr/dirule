@@ -180,6 +180,22 @@ fn simulate_interrupted_move(journal: &Path) {
     std::fs::write(journal, format!("{retained}\n")).expect("simulate a crash after move intent");
 }
 
+fn remove_final_status_record(journal: &Path) {
+    let mut records = std::fs::read_to_string(journal)
+        .expect("read journal")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let final_status = records
+        .iter()
+        .rposition(|line| line.contains("\"record\":\"status\""))
+        .expect("final status record");
+    records.remove(final_status);
+
+    std::fs::write(journal, format!("{}\n", records.join("\n")))
+        .expect("simulate a crash before final status");
+}
+
 fn simulate_interrupted_undo(journal: &Path) {
     let mut records = std::fs::read_to_string(journal)
         .expect("read journal")
@@ -228,6 +244,92 @@ fn journaled_apply_can_be_listed_and_undone() {
         b"contents"
     );
     assert!(!target.join("after.txt").exists());
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn journaled_file_swap_can_be_undone() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("first"), "first").expect("write first source");
+    std::fs::write(target.join("second"), "second").expect("write second source");
+    let snapshot = scan(&target).expect("scan project");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("first"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+        ],
+        ..Plan::default()
+    };
+    let store = store(&temp);
+
+    let applied = apply_journaled(&target, &plan, &snapshot, ConflictPolicy::Abort, &store)
+        .expect("apply journaled swap");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+
+    assert_eq!(std::fs::read(target.join("first")).unwrap(), b"second");
+    assert_eq!(std::fs::read(target.join("second")).unwrap(), b"first");
+
+    remove_final_status_record(&temp.0.join(format!("state/runs/{run_id}.jsonl")));
+    store.undo(&run_id).expect("undo journaled swap");
+
+    assert_eq!(std::fs::read(target.join("first")).unwrap(), b"first");
+    assert_eq!(std::fs::read(target.join("second")).unwrap(), b"second");
+    assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn journaled_directory_swap_can_be_undone() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir_all(target.join("first")).expect("create first directory");
+    std::fs::create_dir_all(target.join("second")).expect("create second directory");
+    std::fs::write(target.join("first/file"), "first").expect("write first contents");
+    std::fs::write(target.join("second/file"), "second").expect("write second contents");
+    let snapshot = scan(&target).expect("scan project");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::Directory,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("first"),
+                kind: EntryKind::Directory,
+                rule: Some("swap".into()),
+            },
+        ],
+        ..Plan::default()
+    };
+    let store = store(&temp);
+
+    let applied = apply_journaled(&target, &plan, &snapshot, ConflictPolicy::Abort, &store)
+        .expect("apply journaled directory swap");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+    assert_eq!(std::fs::read(target.join("first/file")).unwrap(), b"second");
+    assert_eq!(std::fs::read(target.join("second/file")).unwrap(), b"first");
+
+    store.undo(&run_id).expect("undo journaled directory swap");
+
+    assert_eq!(std::fs::read(target.join("first/file")).unwrap(), b"first");
+    assert_eq!(
+        std::fs::read(target.join("second/file")).unwrap(),
+        b"second"
+    );
     assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
 }
 

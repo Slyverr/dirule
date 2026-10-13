@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
+#[path = "apply/dependencies.rs"]
+mod dependencies;
 #[path = "apply/path.rs"]
 mod path;
 
@@ -130,6 +132,8 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
             });
         }
     }
+
+    dependencies::add_dependent_move_conflicts(&target, plan);
 
     Ok(())
 }
@@ -400,12 +404,32 @@ fn apply_recorded(
         },
         ..ApplyProgress::default()
     };
+
+    let staged_sources = match dependencies::stage_sources(
+        &target,
+        &entries,
+        &mut progress.moved_operations,
+        recorder,
+    ) {
+        Ok(staged_sources) => staged_sources,
+        Err(operation) => {
+            return Err(rollback_after_failure(
+                operation,
+                &target,
+                &progress.moved_operations,
+                &progress.created_directories,
+                recorder,
+            ));
+        }
+    };
+
     for (object, entry) in entries.into_iter().enumerate() {
         if let Err(operation) = apply_entry(
             &target,
             entry,
             object as u64,
             snapshot,
+            &staged_sources,
             &mut progress,
             recorder,
         ) {
@@ -427,7 +451,7 @@ struct ApplyProgress {
     moved_directories: Vec<(PathBuf, PathBuf)>,
     created_directories: Vec<PathBuf>,
     report: ApplyReport,
-    moved_operations: Vec<(u64, PathBuf, PathBuf, EntryKind)>,
+    moved_operations: Vec<dependencies::MovedOperation>,
 }
 
 fn apply_entry(
@@ -435,6 +459,7 @@ fn apply_entry(
     entry: &PlannedEntry,
     object: u64,
     snapshot: &ScanResult,
+    staged_sources: &dependencies::StagedSources,
     progress: &mut ApplyProgress,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
@@ -444,7 +469,10 @@ fn apply_entry(
         return Ok(());
     }
 
-    let source_relative = remap(&entry.source, &progress.moved_directories);
+    let source_relative = staged_sources
+        .get(&entry.source)
+        .cloned()
+        .unwrap_or_else(|| remap(&entry.source, &progress.moved_directories));
     if source_relative == entry.destination {
         return Ok(());
     }
@@ -499,10 +527,15 @@ fn apply_entry(
             .moved_directories
             .push((entry.source.clone(), entry.destination.clone()));
     }
+    let report_source = if staged_sources.contains_key(&entry.source) {
+        entry.source.clone()
+    } else {
+        source_relative.clone()
+    };
     progress
         .report
         .moved
-        .push((source_relative.clone(), entry.destination.clone()));
+        .push((report_source, entry.destination.clone()));
     progress.moved_operations.push((
         object,
         source_relative,

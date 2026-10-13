@@ -1,5 +1,4 @@
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry, parse_config, plan};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 use dirule_fs::validate_destinations;
 use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
@@ -512,6 +511,69 @@ fn apply_can_skip_conflicting_moves_and_apply_independent_moves() {
 }
 
 #[test]
+fn apply_skips_moves_that_depend_on_a_conflicting_move() {
+    let temp = TempDir::new();
+    for (path, contents) in [
+        ("first", "first"),
+        ("second", "second"),
+        ("final", "keep"),
+        ("independent", "independent"),
+    ] {
+        std::fs::write(temp.0.join(path), contents).expect("write test file");
+    }
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: [
+            ("first", "second"),
+            ("second", "final"),
+            ("independent", "renamed"),
+        ]
+        .into_iter()
+        .map(|(source, destination)| PlannedEntry {
+            source: PathBuf::from(source),
+            destination: PathBuf::from(destination),
+            kind: EntryKind::File,
+            rule: None,
+        })
+        .collect(),
+        ..Plan::default()
+    };
+    let mut validated_plan = plan.clone();
+
+    validate_destinations(&temp.0, &mut validated_plan).expect("validate dependent moves");
+    assert_eq!(
+        validated_plan
+            .conflicts
+            .iter()
+            .map(|conflict| conflict.path.as_path())
+            .collect::<Vec<_>>(),
+        [Path::new("final"), Path::new("second")]
+    );
+
+    let report = apply_with_conflict_policy(&temp.0, &plan, &snapshot, ConflictPolicy::Skip)
+        .expect("apply unrelated move");
+
+    assert_eq!(report.moved.len(), 1);
+    assert_eq!(report.skipped.len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("first")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("second")).unwrap(),
+        "second"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("final")).unwrap(),
+        "keep"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("renamed")).unwrap(),
+        "independent"
+    );
+}
+
+#[test]
 fn apply_skips_descendants_of_conflicted_directories() {
     let temp = TempDir::new();
     std::fs::create_dir(temp.0.join("old")).expect("create source directory");
@@ -590,6 +652,129 @@ fn apply_preflights_all_destinations_before_moving_anything() {
     assert!(temp.0.join("first").is_file());
     assert!(!temp.0.join("first-renamed").exists());
     assert!(temp.0.join("second").is_file());
+}
+
+#[test]
+fn apply_rotates_files_in_a_rename_cycle() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join("first"), "first").expect("write first source");
+    std::fs::write(temp.0.join("second"), "second").expect("write second source");
+    std::fs::write(temp.0.join("third"), "third").expect("write third source");
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("third"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("third"),
+                destination: PathBuf::from("first"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+        ],
+        ..Plan::default()
+    };
+
+    let report = apply(&temp.0, &plan, &snapshot).expect("apply file rotation");
+
+    assert_eq!(report.moved.len(), 3);
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("first")).unwrap(),
+        "third"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("second")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("third")).unwrap(),
+        "second"
+    );
+}
+
+#[test]
+fn apply_moves_sources_along_a_dependency_chain() {
+    let temp = TempDir::new();
+    for (path, contents) in [("first", "first"), ("second", "second"), ("third", "third")] {
+        std::fs::write(temp.0.join(path), contents).expect("write chain source");
+    }
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: [("first", "second"), ("second", "third"), ("third", "final")]
+            .into_iter()
+            .map(|(source, destination)| PlannedEntry {
+                source: PathBuf::from(source),
+                destination: PathBuf::from(destination),
+                kind: EntryKind::File,
+                rule: Some("chain".into()),
+            })
+            .collect(),
+        ..Plan::default()
+    };
+
+    apply(&temp.0, &plan, &snapshot).expect("apply move chain");
+
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("second")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("third")).unwrap(),
+        "second"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("final")).unwrap(),
+        "third"
+    );
+    assert!(!temp.0.join("first").exists());
+}
+
+#[test]
+fn apply_swaps_directories_with_their_contents() {
+    let temp = TempDir::new();
+    std::fs::create_dir(temp.0.join("first")).expect("create first directory");
+    std::fs::create_dir(temp.0.join("second")).expect("create second directory");
+    std::fs::write(temp.0.join("first/file"), "first").expect("write first contents");
+    std::fs::write(temp.0.join("second/file"), "second").expect("write second contents");
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::Directory,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("first"),
+                kind: EntryKind::Directory,
+                rule: Some("swap".into()),
+            },
+        ],
+        ..Plan::default()
+    };
+
+    apply(&temp.0, &plan, &snapshot).expect("apply directory swap");
+
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("first/file")).unwrap(),
+        "second"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("second/file")).unwrap(),
+        "first"
+    );
 }
 
 #[test]
@@ -775,6 +960,47 @@ fn apply_supports_case_only_renames_on_case_insensitive_filesystems() {
     assert_eq!(
         std::fs::read_to_string(temp.0.join("readme")).expect("read renamed file"),
         "project notes"
+    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[test]
+fn apply_stages_case_insensitive_move_dependencies() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join("first"), "first").expect("write first source");
+    std::fs::write(temp.0.join("Second"), "second").expect("write second source");
+    if !temp.0.join("second").exists() {
+        return;
+    }
+
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::File,
+                rule: None,
+            },
+            PlannedEntry {
+                source: PathBuf::from("Second"),
+                destination: PathBuf::from("final"),
+                kind: EntryKind::File,
+                rule: None,
+            },
+        ],
+        ..Plan::default()
+    };
+
+    apply(&temp.0, &plan, &snapshot).expect("apply case-insensitive dependency");
+
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("second")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.0.join("final")).unwrap(),
+        "second"
     );
 }
 
