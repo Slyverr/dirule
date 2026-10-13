@@ -271,6 +271,11 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
     {
         Ok(output) => output,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if has_git_marker(target) {
+                return Err(ScanError::Git(
+                    "Git is required to include tracked paths from this repository".into(),
+                ));
+            }
             return Ok((BTreeSet::new(), Vec::new()));
         }
         Err(error) => {
@@ -334,6 +339,12 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
         }
     }
     Ok((paths, findings))
+}
+
+fn has_git_marker(target: &Path) -> bool {
+    target
+        .ancestors()
+        .any(|ancestor| std::fs::symlink_metadata(ancestor.join(".git")).is_ok())
 }
 
 fn literal_pathspec(path: &Path) -> Option<OsString> {

@@ -1,5 +1,5 @@
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry, parse_config, plan};
-use dirule_fs::{ApplyError, ConflictPolicy, apply, apply_with_conflict_policy, scan};
+use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -126,6 +126,50 @@ fn scan_limits_tracked_git_paths_to_targets_with_literal_characters() {
 
     assert!(paths.contains(&PathBuf::from("kept.txt")));
     assert!(!paths.contains(&PathBuf::from("unrelated.txt")));
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_git_missing_child() {
+    let Some(target) = std::env::var_os("DIRULE_GIT_MISSING_TARGET") else {
+        return;
+    };
+    let result = scan(Path::new(&target));
+
+    assert!(matches!(
+        result,
+        Err(ScanError::Git(message)) if message.contains("Git is required to include tracked paths")
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_fails_when_git_is_unavailable_inside_a_repository() {
+    let temp = TempDir::new();
+    let target = temp.0.join("target");
+    std::fs::create_dir(&target).expect("create scan target");
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&temp.0)
+        .output()
+        .expect("initialize Git fixture");
+    assert!(init.status.success(), "initialize Git fixture");
+
+    let empty_bin = temp.0.join("empty-bin");
+    std::fs::create_dir(&empty_bin).expect("create empty PATH directory");
+    let output = Command::new(std::env::current_exe().expect("test executable path"))
+        .args(["--exact", "scan_git_missing_child", "--nocapture"])
+        .env("DIRULE_GIT_MISSING_TARGET", &target)
+        .env("PATH", empty_bin)
+        .output()
+        .expect("run scanner without Git");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

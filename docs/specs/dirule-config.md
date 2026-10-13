@@ -136,6 +136,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 
 - Scan files and directories below the selected target; do not rename the target directory itself.
 - Apply VCS ignore filters before matching. In Git repositories, respect nested `.gitignore` files, `.git/info/exclude`, and the configured global Git ignore file. Git-tracked paths remain eligible even if ignored; ignore rules exclude untracked paths. Obtain tracked paths from the Git index and combine them with the ignore-aware filesystem walk. Outside Git, support `.ignore` files with the same pattern syntax.
+- If the Git executable is unavailable inside a Git repository, fail planning instead of silently omitting tracked paths.
 - Do not hardcode exclusions such as `node_modules` or `build`. Do not exclude hidden files just for being hidden.
 - Match all rules against original paths in declaration order. The first matching rule owns an entry; later rules cannot claim it based on its planned destination. Unmatched entries retain their paths.
 - Build one virtual plan from all matched entries before changing the filesystem. Do not apply a rule and rescan before evaluating the next rule.
