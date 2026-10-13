@@ -278,6 +278,48 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn acronym_lookup_preserves_longest_unicode_prefixes() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[acronyms]
+entries = ["ÄB", "ÄBC", "Äé"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid Unicode acronym config");
+    let entries = [
+        Entry {
+            path: PathBuf::from("ÄéGuide.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("ÄBCGuide.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    for (source, destination) in [
+        ("ÄBCGuide.txt", "äbc-guide.txt"),
+        ("ÄéGuide.txt", "äé-guide.txt"),
+    ] {
+        let entry = planned
+            .entries
+            .iter()
+            .find(|entry| entry.source == std::path::Path::new(source))
+            .expect("planned Unicode filename");
+        assert_eq!(entry.destination, PathBuf::from(destination));
+    }
+}
+
+#[test]
 fn longer_project_acronyms_take_precedence_at_token_boundaries() {
     let config = parse_config(
         r#"

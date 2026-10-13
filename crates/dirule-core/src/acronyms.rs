@@ -19,6 +19,13 @@ pub struct AcronymLexicon {
 #[derive(Clone, Debug)]
 struct AcronymGroup {
     initial: char,
+    lengths: Vec<AcronymLengthGroup>,
+}
+
+#[derive(Clone, Debug)]
+struct AcronymLengthGroup {
+    characters: usize,
+    bytes: usize,
     range: Range<usize>,
 }
 
@@ -46,20 +53,40 @@ impl AcronymOptions {
             left_initial
                 .cmp(&right_initial)
                 .then_with(|| right.chars().count().cmp(&left.chars().count()))
+                .then_with(|| right.len().cmp(&left.len()))
                 .then_with(|| left.cmp(right))
         });
 
         let mut groups = Vec::new();
         for (index, entry) in entries.iter().enumerate() {
             let initial = entry.chars().next().expect("validated non-empty acronym");
+            let characters = entry.chars().count();
+            let bytes = entry.len();
             match groups.last_mut() {
                 Some(AcronymGroup {
                     initial: previous,
-                    range,
-                }) if *previous == initial => range.end = index + 1,
+                    lengths,
+                }) if *previous == initial => match lengths.last_mut() {
+                    Some(AcronymLengthGroup {
+                        characters: previous_characters,
+                        bytes: previous_bytes,
+                        range,
+                    }) if *previous_characters == characters && *previous_bytes == bytes => {
+                        range.end = index + 1;
+                    }
+                    _ => lengths.push(AcronymLengthGroup {
+                        characters,
+                        bytes,
+                        range: index..index + 1,
+                    }),
+                },
                 _ => groups.push(AcronymGroup {
                     initial,
-                    range: index..index + 1,
+                    lengths: vec![AcronymLengthGroup {
+                        characters,
+                        bytes,
+                        range: index..index + 1,
+                    }],
                 }),
             }
         }
@@ -73,14 +100,27 @@ impl AcronymLexicon {
         self.entries.is_empty()
     }
 
-    pub(crate) fn entries_starting_with(&self, initial: char) -> impl Iterator<Item = &str> {
-        let range = self
+    pub(crate) fn candidates_starting_at<'a>(
+        &'a self,
+        initial: char,
+        value: &'a str,
+        start: usize,
+    ) -> impl Iterator<Item = &'a str> + 'a {
+        let lengths = self
             .groups
             .binary_search_by_key(&initial, |group| group.initial)
             .ok()
-            .map(|index| self.groups[index].range.clone())
-            .unwrap_or_default();
+            .map(|index| self.groups[index].lengths.as_slice())
+            .unwrap_or(&[]);
 
-        self.entries[range].iter().map(String::as_str)
+        lengths.iter().filter_map(move |length| {
+            let end = start.checked_add(length.bytes)?;
+            let candidate = value.get(start..end)?;
+            let entries = &self.entries[length.range.clone()];
+            entries
+                .binary_search_by(|entry| entry.as_str().cmp(candidate))
+                .ok()
+                .map(|index| entries[index].as_str())
+        })
     }
 }

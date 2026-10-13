@@ -103,7 +103,7 @@ fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<Range<usize>> {
 }
 
 fn acronym_at<'a>(
-    value: &str,
+    value: &'a str,
     graphemes: &[(usize, &str)],
     index: usize,
     acronyms: &'a AcronymLexicon,
@@ -115,7 +115,7 @@ fn acronym_at<'a>(
     let start = graphemes[index].0;
 
     acronyms
-        .entries_starting_with(first_char(graphemes[index].1))
+        .candidates_starting_at(first_char(graphemes[index].1), value, start)
         .find_map(|acronym| {
             let end = start + acronym.len();
             if value.get(start..end) != Some(acronym) {
