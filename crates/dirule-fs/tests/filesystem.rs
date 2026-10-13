@@ -1176,7 +1176,7 @@ fn scan_skips_special_files() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn scan_skips_and_reports_non_unicode_paths() {
     use std::os::unix::ffi::OsStringExt;
