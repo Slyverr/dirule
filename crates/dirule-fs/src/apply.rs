@@ -53,6 +53,23 @@ pub enum ApplyError {
         #[source]
         source: Box<ApplyError>,
     },
+    #[error(
+        "apply failed in run {run_id}: {operation}; could not record the final journal status: {journal}"
+    )]
+    RunFinalizationFailed {
+        run_id: String,
+        operation: Box<ApplyError>,
+        #[source]
+        journal: Box<crate::journal::JournalError>,
+    },
+    #[error(
+        "filesystem changes completed in run {run_id}, but recording the final journal status failed: {source}"
+    )]
+    AppliedRunFinalizationFailed {
+        run_id: String,
+        #[source]
+        source: Box<crate::journal::JournalError>,
+    },
     #[error("filesystem operation failed for {path}: {source}")]
     Io {
         path: PathBuf,
@@ -147,12 +164,7 @@ pub fn apply_journaled(
 
     match result {
         Ok(report) => {
-            recorder
-                .finish(JournalStatus::Applied)
-                .map_err(|source| ApplyError::RunFailed {
-                    run_id: run_id.clone(),
-                    source: Box::new(ApplyError::Journal(Box::new(source))),
-                })?;
+            applied_run_result(run_id.clone(), recorder.finish(JournalStatus::Applied))?;
             Ok(JournaledApplyReport {
                 report,
                 run_id: Some(run_id),
@@ -167,20 +179,46 @@ fn finish_failed_apply(
     run_id: String,
     source: ApplyError,
 ) -> ApplyError {
-    let status = if matches!(source, ApplyError::RollbackFailed { .. }) {
+    let status = failed_apply_status(&source);
+    let finalization = recorder.finish(status);
+
+    failed_apply_result(run_id, source, finalization)
+}
+
+fn failed_apply_status(source: &ApplyError) -> JournalStatus {
+    if matches!(source, ApplyError::RollbackFailed { .. }) {
         JournalStatus::PartiallyRecovered
     } else {
         JournalStatus::FailedRolledBack
-    };
-    let source = match recorder.finish(status) {
-        Ok(()) => source,
-        Err(journal_error) => ApplyError::Journal(Box::new(journal_error)),
-    };
+    }
+}
 
-    ApplyError::RunFailed {
+fn failed_apply_result(
+    run_id: String,
+    operation: ApplyError,
+    finalization: Result<(), crate::journal::JournalError>,
+) -> ApplyError {
+    match finalization {
+        Ok(()) => ApplyError::RunFailed {
+            run_id,
+            source: Box::new(operation),
+        },
+        Err(journal) => ApplyError::RunFinalizationFailed {
+            run_id,
+            operation: Box::new(operation),
+            journal: Box::new(journal),
+        },
+    }
+}
+
+fn applied_run_result(
+    run_id: String,
+    finalization: Result<(), crate::journal::JournalError>,
+) -> Result<(), ApplyError> {
+    finalization.map_err(|source| ApplyError::AppliedRunFinalizationFailed {
         run_id,
         source: Box::new(source),
-    }
+    })
 }
 
 pub(crate) trait MutationRecorder {

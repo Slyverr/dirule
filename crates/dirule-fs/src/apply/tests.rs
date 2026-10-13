@@ -1,7 +1,7 @@
 use super::{
     ApplyError, ConflictPolicy, EntryKind, JournalRecorder, JournalStatus, JournalStore,
-    MutationRecorder, NoopRecorder, Plan, PlannedEntry, finish_failed_apply,
-    rollback_after_failure,
+    MutationRecorder, NoopRecorder, Plan, PlannedEntry, applied_run_result, failed_apply_result,
+    finish_failed_apply, rollback_after_failure,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -228,4 +228,53 @@ fn apply_journal_records_a_real_rollback_failure_as_partially_recovered() {
         "external file"
     );
     assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn journal_finalization_errors_preserve_apply_outcomes() {
+    let failed_operation = ApplyError::MissingSource(PathBuf::from("later.txt"));
+    let error = failed_apply_result(
+        "failed-run".into(),
+        failed_operation,
+        Err(crate::journal::JournalError::Io {
+            path: PathBuf::from("failed-run.jsonl"),
+            source: std::io::Error::other("simulated status write failure"),
+        }),
+    );
+
+    match error {
+        ApplyError::RunFinalizationFailed {
+            run_id,
+            operation,
+            journal,
+        } => {
+            assert_eq!(run_id, "failed-run");
+            assert!(operation.to_string().contains("later.txt"));
+            assert!(
+                journal
+                    .to_string()
+                    .contains("simulated status write failure")
+            );
+        }
+        other => panic!("expected both failures to be preserved, got {other}"),
+    }
+
+    let error = applied_run_result(
+        "applied-run".into(),
+        Err(crate::journal::JournalError::Io {
+            path: PathBuf::from("applied-run.jsonl"),
+            source: std::io::Error::other("simulated status sync failure"),
+        }),
+    )
+    .expect_err("failed status write must report the completed filesystem change");
+    let display = error.to_string();
+
+    match error {
+        ApplyError::AppliedRunFinalizationFailed { run_id, source } => {
+            assert_eq!(run_id, "applied-run");
+            assert!(source.to_string().contains("simulated status sync failure"));
+        }
+        other => panic!("expected completed apply to be distinguished, got {other}"),
+    }
+    assert!(display.contains("filesystem changes completed in run applied-run"));
 }
