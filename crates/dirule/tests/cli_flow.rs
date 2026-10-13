@@ -268,6 +268,46 @@ fn preset_save_copies_a_valid_config_without_overwriting_existing_presets() {
 }
 
 #[test]
+fn plan_loads_a_saved_preset_without_a_project_config() {
+    let project = TempProject::new();
+    fs::write(project.0.join("MyXMLParser.pdf"), "document").expect("write fixture file");
+    assert!(project.run(&["init"]).status.success());
+
+    let mut save = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut save, &project);
+    let saved = save
+        .args(["presets", "save", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("save preset");
+    assert!(
+        saved.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&saved.stdout),
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    fs::remove_file(project.0.join("dirule.toml")).expect("remove project config");
+
+    let mut plan = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut plan, &project);
+    let output = plan
+        .args(["plan", "--preset", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("plan with saved preset");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("MyXMLParser.pdf -> my-xml-parser.pdf")
+    );
+}
+
+#[test]
 fn preset_remove_requires_confirmation_without_an_interactive_terminal() {
     let project = TempProject::new();
     let preset = preset_config_base(&project).join("dirule/presets/downloads.toml");
