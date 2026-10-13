@@ -91,6 +91,10 @@ pub(super) fn stage_sources(
             Ok(metadata) if !metadata.file_type().is_symlink() => {
                 match std::fs::canonicalize(&destination) {
                     Ok(canonical) => {
+                        destination_owners
+                            .entry(entry.destination.clone())
+                            .or_default()
+                            .push(index);
                         destination_owners.entry(canonical).or_default().push(index);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -133,11 +137,13 @@ pub(super) fn stage_sources(
                     }));
                 }
             };
-            let owners = destination_owners.get(&canonical)?;
-            owners
-                .iter()
-                .any(|owner| *owner != index)
-                .then_some(Ok((index, entry)))
+            let is_dependency = destination_owners
+                .get(&entry.source)
+                .into_iter()
+                .chain(destination_owners.get(&canonical))
+                .flatten()
+                .any(|owner| *owner != index);
+            is_dependency.then_some(Ok((index, entry)))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let candidate_directories = candidates
