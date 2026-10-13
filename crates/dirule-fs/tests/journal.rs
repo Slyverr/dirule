@@ -206,6 +206,46 @@ fn no_op_apply_does_not_create_a_journal() {
 }
 
 #[test]
+fn unsupported_journal_versions_are_rejected_without_rewriting_the_source() {
+    let temp = TempDir::new();
+    let journal = temp.0.join("state/runs/old-run.jsonl");
+    std::fs::create_dir_all(journal.parent().expect("journal parent"))
+        .expect("create journal directory");
+    let original = b"{\"record\":\"header\",\"version\":\"0.9\"}\n";
+    std::fs::write(&journal, original).expect("write an unsupported journal");
+
+    let error = store(&temp)
+        .list()
+        .expect_err("no migration is registered for this old format");
+
+    assert!(error.to_string().contains("no journal migration path"));
+    assert_eq!(
+        std::fs::read(journal).expect("read unchanged journal"),
+        original
+    );
+}
+
+#[test]
+fn future_journal_versions_are_rejected_without_rewriting_the_source() {
+    let temp = TempDir::new();
+    let journal = temp.0.join("state/runs/future-run.jsonl");
+    std::fs::create_dir_all(journal.parent().expect("journal parent"))
+        .expect("create journal directory");
+    let original = b"{\"record\":\"header\",\"version\":\"99.0\"}\n";
+    std::fs::write(&journal, original).expect("write a future journal");
+
+    let error = store(&temp)
+        .list()
+        .expect_err("future format is not supported");
+
+    assert!(error.to_string().contains("uses newer version 99.0"));
+    assert_eq!(
+        std::fs::read(journal).expect("read unchanged journal"),
+        original
+    );
+}
+
+#[test]
 fn undo_truncates_an_incomplete_final_journal_record_before_appending() {
     let temp = TempDir::new();
     let target = temp.0.join("project");

@@ -10,6 +10,7 @@ use thiserror::Error;
 
 mod history;
 mod identity;
+mod migrations;
 
 use history::{
     JournalHistory, UndoMutation, checked_target_path, preflight_undo, validate_target,
@@ -38,6 +39,8 @@ pub enum JournalError {
     },
     #[error("journal {path} uses unsupported version {version}")]
     UnsupportedVersion { path: PathBuf, version: String },
+    #[error("journal {path} cannot be migrated: {message}")]
+    Migration { path: PathBuf, message: String },
     #[error("run identifier is invalid: {0}")]
     InvalidRunId(String),
     #[error("run {0} cannot be undone: {1}")]
@@ -772,15 +775,46 @@ fn read_records(path: &Path) -> Result<Vec<JournalRecord>, JournalError> {
             }
             break;
         }
-        records.push(parse_record(path, line_number, &line)?);
+        records.push(parse_value(path, line_number, &line)?);
     }
     if records.is_empty() {
         return Err(JournalError::InvalidRunId(path.display().to_string()));
     }
-    Ok(records)
+    let version =
+        migrations::read_version(&records).map_err(|message| JournalError::Migration {
+            path: path.to_path_buf(),
+            message,
+        })?;
+    let records = migrations::upgrade(path, records, &version).map_err(|message| {
+        JournalError::Migration {
+            path: path.to_path_buf(),
+            message,
+        }
+    })?;
+    records
+        .into_iter()
+        .enumerate()
+        .map(|(index, record)| {
+            serde_json::from_value(record).map_err(|source| JournalError::InvalidRecord {
+                path: path.to_path_buf(),
+                line: index + 1,
+                source,
+            })
+        })
+        .collect()
 }
 
 fn parse_record(path: &Path, line: usize, bytes: &[u8]) -> Result<JournalRecord, JournalError> {
+    serde_json::from_value(parse_value(path, line, bytes)?).map_err(|source| {
+        JournalError::InvalidRecord {
+            path: path.to_path_buf(),
+            line,
+            source,
+        }
+    })
+}
+
+fn parse_value(path: &Path, line: usize, bytes: &[u8]) -> Result<serde_json::Value, JournalError> {
     serde_json::from_slice(bytes).map_err(|source| JournalError::InvalidRecord {
         path: path.to_path_buf(),
         line,
