@@ -389,6 +389,39 @@ fn apply_rejects_a_source_changed_after_planning() {
     assert!(!temp.0.join("renamed").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn apply_rejects_a_replaced_target_when_source_identity_is_preserved() {
+    let temp = TempDir::new();
+    let target = temp.0.join("target");
+    let displaced = temp.0.join("displaced");
+    std::fs::create_dir(&target).expect("create target");
+    std::fs::write(target.join("source"), "content").expect("write source");
+    let snapshot = scan(&target).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("source"),
+            destination: PathBuf::from("renamed"),
+            kind: EntryKind::File,
+            rule: None,
+        }],
+        conflicts: Vec::new(),
+        findings: Vec::new(),
+    };
+
+    std::fs::rename(&target, &displaced).expect("displace original target");
+    std::fs::create_dir(&target).expect("create replacement target");
+    std::fs::hard_link(displaced.join("source"), target.join("source"))
+        .expect("preserve source identity in replacement target");
+
+    let result = apply(&target, &plan, &snapshot);
+
+    assert!(matches!(result, Err(ApplyError::ChangedTarget(_))));
+    assert!(target.join("source").is_file());
+    assert!(!target.join("renamed").exists());
+    assert!(displaced.join("source").is_file());
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn apply_rejects_a_replaced_source_with_same_size_and_timestamp() {

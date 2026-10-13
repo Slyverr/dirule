@@ -41,6 +41,8 @@ pub enum ApplyError {
     AtomicRenameUnsupported(PathBuf),
     #[error("source type changed since planning: {0}")]
     ChangedSource(PathBuf),
+    #[error("target directory changed since planning: {0}")]
+    ChangedTarget(PathBuf),
     #[error("journal operation failed: {0}")]
     Journal(#[source] Box<crate::journal::JournalError>),
     #[error("apply failed in run {run_id}: {source}")]
@@ -251,8 +253,25 @@ fn apply_recorded(
     policy: ConflictPolicy,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<ApplyReport, ApplyError> {
+    let target = target.canonicalize().map_err(|source| ApplyError::Io {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    let target_metadata = std::fs::symlink_metadata(&target).map_err(|source| ApplyError::Io {
+        path: target.clone(),
+        source,
+    })?;
+    if !target_metadata.is_dir()
+        || !snapshot
+            .target_identity
+            .as_ref()
+            .is_some_and(|identity| identity.matches_object(&target_metadata, EntryKind::Directory))
+    {
+        return Err(ApplyError::ChangedTarget(target));
+    }
+
     let mut checked_plan = plan.clone();
-    validate_destinations(target, &mut checked_plan)?;
+    validate_destinations(&target, &mut checked_plan)?;
     let plan = &checked_plan;
 
     if policy == ConflictPolicy::Abort && !plan.conflicts.is_empty() {
@@ -274,10 +293,6 @@ fn apply_recorded(
         Vec::new()
     };
 
-    let target = target.canonicalize().map_err(|source| ApplyError::Io {
-        path: target.to_path_buf(),
-        source,
-    })?;
     let mut entries = plan
         .entries
         .iter()

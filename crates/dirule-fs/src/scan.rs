@@ -9,6 +9,7 @@ use thiserror::Error;
 pub struct ScanResult {
     pub entries: Vec<Entry>,
     pub findings: Vec<String>,
+    pub(crate) target_identity: Option<SourceIdentity>,
     pub(crate) identities: BTreeMap<PathBuf, SourceIdentity>,
 }
 
@@ -57,6 +58,12 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
     if !target.is_dir() {
         return Err(ScanError::NotDirectory(target));
     }
+    let target_metadata =
+        std::fs::symlink_metadata(&target).map_err(|source| ScanError::Metadata {
+            path: target.clone(),
+            source,
+        })?;
+    let target_identity = SourceIdentity::from_metadata(&target_metadata, EntryKind::Directory);
     if let (_, Some(source)) = ignore::gitignore::Gitignore::global() {
         return Err(ScanError::Walk {
             path: target.clone(),
@@ -162,6 +169,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
     Ok(ScanResult {
         entries,
         findings,
+        target_identity: Some(target_identity),
         identities,
     })
 }
@@ -219,6 +227,36 @@ impl SourceIdentity {
         #[cfg(not(any(unix, windows)))]
         {
             common
+        }
+    }
+
+    pub(crate) fn matches_object(&self, metadata: &std::fs::Metadata, kind: EntryKind) -> bool {
+        if self.kind != kind {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            self.device == metadata.dev() && self.inode == metadata.ino()
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            match (
+                self.volume_serial_number,
+                self.file_index,
+                metadata.volume_serial_number(),
+                metadata.file_index(),
+            ) {
+                (Some(old_volume), Some(old_index), Some(new_volume), Some(new_index)) => {
+                    old_volume == new_volume && old_index == new_index
+                }
+                _ => self.matches(metadata, kind),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            self.matches(metadata, kind)
         }
     }
 }
