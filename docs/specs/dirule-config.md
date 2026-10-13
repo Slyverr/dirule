@@ -8,7 +8,7 @@ The format must be able to grow through explicit migrations. New matchers, trans
 
 ## Format evolution
 
-Every configuration declares `version` as a quoted `major.minor` string. The reader parses that field first, migrates older documents through a complete sequence of registered one-step migrations, then validates and loads the current schema. The runtime configuration does not carry format-version branches.
+Every configuration declares `version` as a quoted `major.minor` string. The reader parses that field first, migrates older documents through a complete sequence of registered one-step migrations, then validates and loads the current schema. Each source version must have at most one registered migration; ambiguous routes are configuration errors. The runtime configuration does not carry format-version branches.
 
 A migration must preserve the document's meaning, update its version, and produce a document accepted by the next migration. Readers reject unknown future versions and any older version without a complete migration path; they never skip versions or guess how to interpret fields. Changes that preserve existing meaning may advance the minor component. Changes that alter existing meaning require a major component change and an explicit migration policy.
 

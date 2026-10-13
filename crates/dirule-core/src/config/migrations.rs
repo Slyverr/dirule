@@ -25,14 +25,19 @@ fn upgrade_through(
     }
 
     while version < target {
-        let migration = migrations
+        let mut candidates = migrations
             .iter()
-            .find(|migration| migration.from == version)
-            .ok_or_else(|| {
-                Error::Config(format!(
-                    "no configuration migration path from {version} to {target}"
-                ))
-            })?;
+            .filter(|migration| migration.from == version);
+        let migration = candidates.next().ok_or_else(|| {
+            Error::Config(format!(
+                "no configuration migration path from {version} to {target}"
+            ))
+        })?;
+        if candidates.next().is_some() {
+            return Err(Error::Config(format!(
+                "multiple configuration migrations start at version {version}"
+            )));
+        }
         if !migration.to.immediately_follows(migration.from) {
             return Err(Error::Config(format!(
                 "migration step from {} to {} must advance exactly one version",
@@ -92,7 +97,9 @@ mod tests {
                 apply: advance_major,
             },
         ];
-        let document = toml::from_str("version = '1.0'").expect("valid document");
+        let document =
+            toml::from_str("version = '1.0'\nname = 'Directory rules'\n[options]\nenabled = true")
+                .expect("valid document");
         let upgraded = upgrade_through(
             document,
             ConfigVersion::new(1, 0),
@@ -102,6 +109,8 @@ mod tests {
         .expect("complete migration path");
 
         assert_eq!(upgraded["version"].as_str(), Some("2.0"));
+        assert_eq!(upgraded["name"].as_str(), Some("Directory rules"));
+        assert_eq!(upgraded["options"]["enabled"].as_bool(), Some(true));
     }
 
     #[test]
@@ -142,6 +151,36 @@ mod tests {
             error
                 .to_string()
                 .contains("must advance exactly one version")
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_migration_routes() {
+        let migrations = [
+            Migration {
+                from: ConfigVersion::new(1, 0),
+                to: ConfigVersion::new(1, 1),
+                apply: advance_version,
+            },
+            Migration {
+                from: ConfigVersion::new(1, 0),
+                to: ConfigVersion::new(1, 1),
+                apply: advance_version,
+            },
+        ];
+        let document = toml::from_str("version = '1.0'").expect("valid document");
+        let error = upgrade_through(
+            document,
+            ConfigVersion::new(1, 0),
+            ConfigVersion::new(1, 1),
+            &migrations,
+        )
+        .expect_err("reject ambiguous migration registry");
+
+        assert!(
+            error
+                .to_string()
+                .contains("multiple configuration migrations")
         );
     }
 }
