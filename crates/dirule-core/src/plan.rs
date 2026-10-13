@@ -68,7 +68,7 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
                 entry.path.display()
             ));
         } else {
-            ordered.push(entry.clone());
+            ordered.push(entry);
         }
     }
 
