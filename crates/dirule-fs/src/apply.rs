@@ -37,6 +37,12 @@ pub enum ApplyError {
         #[source]
         source: std::io::Error,
     },
+    #[error("{operation}; rollback also failed: {failures}")]
+    RollbackFailed {
+        #[source]
+        operation: Box<ApplyError>,
+        failures: String,
+    },
 }
 
 pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), ApplyError> {
@@ -181,74 +187,179 @@ pub fn apply_with_conflict_policy(
         },
         ..ApplyReport::default()
     };
+    let mut created_directories = Vec::new();
+
     for entry in entries {
-        ensure_relative(&entry.source)?;
-        ensure_relative(&entry.destination)?;
-        if inherited_move(entry, &moved_directories) {
-            continue;
+        if let Err(operation) = apply_entry(
+            &target,
+            entry,
+            snapshot,
+            &mut moved_directories,
+            &mut created_directories,
+            &mut report,
+        ) {
+            return Err(rollback_after_failure(
+                operation,
+                &target,
+                &report.moved,
+                &created_directories,
+            ));
         }
-        let source_relative = remap(&entry.source, &moved_directories);
-        if source_relative == entry.destination {
-            continue;
-        }
-        let source = target.join(&source_relative);
-        let destination = target.join(&entry.destination);
-        ensure_parent_safe(&target, source.parent().unwrap_or(&target))?;
-        ensure_parent_safe(&target, destination.parent().unwrap_or(&target))?;
-        let metadata = std::fs::symlink_metadata(&source).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                ApplyError::MissingSource(source.clone())
-            } else {
-                ApplyError::Io {
-                    path: source.clone(),
-                    source: error,
-                }
-            }
-        })?;
-        let source_kind_matches = match entry.kind {
-            EntryKind::File => metadata.is_file(),
-            EntryKind::Directory => metadata.is_dir(),
-            EntryKind::Symlink => false,
-        };
-        if !source_kind_matches {
-            return Err(ApplyError::ChangedSource(source));
-        }
-        let identity_matches = snapshot
-            .identities
-            .get(&entry.source)
-            .is_some_and(|identity| identity.matches(&metadata, entry.kind));
-        if !identity_matches {
-            return Err(ApplyError::ChangedSource(source));
-        }
-
-        if destination_exists(&destination)? {
-            return Err(ApplyError::ExistingDestination(destination));
-        }
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| ApplyError::Io {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-
-        renamore::rename_exclusive(&source, &destination).map_err(|source_error| {
-            if source_error.kind() == std::io::ErrorKind::AlreadyExists {
-                ApplyError::ExistingDestination(destination.clone())
-            } else {
-                ApplyError::Io {
-                    path: source.clone(),
-                    source: source_error,
-                }
-            }
-        })?;
-        if entry.kind == EntryKind::Directory {
-            moved_directories.push((entry.source.clone(), entry.destination.clone()));
-        }
-        report
-            .moved
-            .push((source_relative, entry.destination.clone()));
     }
+
     Ok(report)
+}
+
+fn apply_entry(
+    target: &Path,
+    entry: &PlannedEntry,
+    snapshot: &ScanResult,
+    moved_directories: &mut Vec<(PathBuf, PathBuf)>,
+    created_directories: &mut Vec<PathBuf>,
+    report: &mut ApplyReport,
+) -> Result<(), ApplyError> {
+    ensure_relative(&entry.source)?;
+    ensure_relative(&entry.destination)?;
+    if inherited_move(entry, moved_directories) {
+        return Ok(());
+    }
+
+    let source_relative = remap(&entry.source, moved_directories);
+    if source_relative == entry.destination {
+        return Ok(());
+    }
+
+    let source = target.join(&source_relative);
+    let destination = target.join(&entry.destination);
+    ensure_parent_safe(target, source.parent().unwrap_or(target))?;
+    ensure_parent_safe(target, destination.parent().unwrap_or(target))?;
+    let metadata = std::fs::symlink_metadata(&source).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ApplyError::MissingSource(source.clone())
+        } else {
+            ApplyError::Io {
+                path: source.clone(),
+                source: error,
+            }
+        }
+    })?;
+    let source_kind_matches = match entry.kind {
+        EntryKind::File => metadata.is_file(),
+        EntryKind::Directory => metadata.is_dir(),
+        EntryKind::Symlink => false,
+    };
+    let identity_matches = snapshot
+        .identities
+        .get(&entry.source)
+        .is_some_and(|identity| identity.matches(&metadata, entry.kind));
+    if !source_kind_matches || !identity_matches {
+        return Err(ApplyError::ChangedSource(source));
+    }
+
+    if destination_exists(&destination)? {
+        return Err(ApplyError::ExistingDestination(destination));
+    }
+    if let Some(parent) = destination.parent() {
+        create_parent_directories(target, parent, created_directories)?;
+    }
+
+    renamore::rename_exclusive(&source, &destination).map_err(|source_error| {
+        if source_error.kind() == std::io::ErrorKind::AlreadyExists {
+            ApplyError::ExistingDestination(destination.clone())
+        } else {
+            ApplyError::Io {
+                path: source.clone(),
+                source: source_error,
+            }
+        }
+    })?;
+    if entry.kind == EntryKind::Directory {
+        moved_directories.push((entry.source.clone(), entry.destination.clone()));
+    }
+    report
+        .moved
+        .push((source_relative, entry.destination.clone()));
+
+    Ok(())
+}
+
+fn create_parent_directories(
+    root: &Path,
+    parent: &Path,
+    created_directories: &mut Vec<PathBuf>,
+) -> Result<(), ApplyError> {
+    let relative = parent
+        .strip_prefix(root)
+        .map_err(|_| ApplyError::UnsafePath(parent.to_path_buf()))?;
+    let mut current = root.to_path_buf();
+
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err(ApplyError::UnsafePath(current)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::create_dir(&current) {
+                    Ok(()) => created_directories.push(current.clone()),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        ensure_parent_safe(root, &current)?;
+                    }
+                    Err(source) => {
+                        return Err(ApplyError::Io {
+                            path: current,
+                            source,
+                        });
+                    }
+                }
+            }
+            Err(source) => {
+                return Err(ApplyError::Io {
+                    path: current,
+                    source,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn rollback_after_failure(
+    operation: ApplyError,
+    target: &Path,
+    moved: &[(PathBuf, PathBuf)],
+    created_directories: &[PathBuf],
+) -> ApplyError {
+    let mut failures = Vec::new();
+
+    for (source, destination) in moved.iter().rev() {
+        let current = target.join(destination);
+        let original = target.join(source);
+        if let Err(error) = renamore::rename_exclusive(&current, &original) {
+            failures.push(format!(
+                "{} -> {}: {error}",
+                destination.display(),
+                source.display()
+            ));
+        }
+    }
+
+    for directory in created_directories.iter().rev() {
+        match std::fs::remove_dir(directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("{}: {error}", directory.display())),
+        }
+    }
+
+    if failures.is_empty() {
+        operation
+    } else {
+        ApplyError::RollbackFailed {
+            operation: Box::new(operation),
+            failures: failures.join("; "),
+        }
+    }
 }
 
 fn validate_sources(

@@ -379,6 +379,54 @@ fn apply_checks_every_source_before_moving_anything() {
     assert!(!temp.0.join("second-renamed").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn apply_rolls_back_prior_moves_when_a_later_move_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join("first"), "first").expect("write first source");
+    std::fs::write(temp.0.join("second"), "second").expect("write second source");
+    std::fs::create_dir(temp.0.join("blocked")).expect("create blocked destination parent");
+    let snapshot = scan(&temp.0).expect("capture apply snapshot");
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("first-renamed"),
+                kind: EntryKind::File,
+                rule: None,
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("blocked/second-renamed"),
+                kind: EntryKind::File,
+                rule: None,
+            },
+        ],
+        conflicts: Vec::new(),
+        findings: Vec::new(),
+    };
+    std::fs::set_permissions(
+        temp.0.join("blocked"),
+        std::fs::Permissions::from_mode(0o555),
+    )
+    .expect("make destination parent read-only");
+
+    let result = apply(&temp.0, &plan, &snapshot);
+
+    std::fs::set_permissions(
+        temp.0.join("blocked"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .expect("restore destination parent permissions");
+    assert!(result.is_err(), "later move should fail");
+    assert!(temp.0.join("first").is_file());
+    assert!(!temp.0.join("first-renamed").exists());
+    assert!(temp.0.join("second").is_file());
+    assert!(!temp.0.join("blocked/second-renamed").exists());
+}
+
 #[test]
 fn scan_requires_directory_target() {
     assert!(scan(Path::new("Cargo.toml")).is_err());

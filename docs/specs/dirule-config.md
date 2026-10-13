@@ -138,6 +138,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 - `plan` and `check` are read-only. `plan` reports proposed operations, findings, and conflicts. `check` succeeds only when every final planned path equals its original path and the plan has no conflicts. Informational findings alone, such as a skipped symlink, do not fail it. `apply` executes the same validated plan with apply-time revalidation.
 - Never overwrite an existing path. Existing destinations, duplicate planned destinations, stale sources, and failed dependencies are conflicts. Apply aborts on conflicts by default. `--on-conflict skip` may apply independent operations and reports skipped conflicts. If a directory move is skipped, skip dependent descendant operations. If multiple entries claim one destination, skip every conflicting claim.
 - Revalidate source identity and destination availability during apply.
+- If a filesystem operation fails after apply has moved any entries, roll completed moves back in reverse order and remove destination directories created by that apply. If rollback cannot restore the original state, report each rollback failure alongside the original operation error.
 - Skip symlinks and never follow them. Report skipped links; explicit symlink operations need a separate design.
 - Skip and report entries whose names cannot be represented as valid Unicode config paths; never create a lossy destination.
 - If an ignore file cannot be read or parsed, fail planning with its path and error instead of using a partial file list.
@@ -162,6 +163,7 @@ Tests should verify:
 - Identical transformation output from built-in `to` values and equivalent template filters.
 - First-match ownership against original paths and one combined plan detecting collisions across rules before any filesystem change.
 - Directory rename propagation, explicit child destinations, missing destination-parent dependencies, and conflict abort/skip behavior.
+- Runtime failure after an earlier move restores completed moves and removes directories created by apply; incomplete rollback is reported with its failed paths.
 - Git ignore behavior for nested rules, tracked paths, global excludes, `.ignore` outside Git, and hidden files; unreadable or malformed ignore files must stop planning.
 - Explicit target override, configured target, current-directory default, exact config/preset selection, and no parent-directory config search.
 - `check` succeeds when paths satisfy the rules and fails for a proposed path change or conflict without changing the filesystem.
