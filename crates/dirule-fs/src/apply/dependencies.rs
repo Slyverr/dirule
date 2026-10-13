@@ -1,10 +1,13 @@
-use super::{ApplyError, MutationRecorder, path, rename_path_exclusive, temporary_sibling};
+use super::{
+    ApplyError, MoveIdentity, MutationRecorder, path, rename_path_exclusive, temporary_sibling,
+};
+use crate::scan::SourceIdentity;
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 pub(super) type StagedSources = HashMap<PathBuf, PathBuf>;
-pub(super) type MovedOperation = (u64, PathBuf, PathBuf, EntryKind);
+pub(super) type MovedOperation = (u64, PathBuf, PathBuf, EntryKind, SourceIdentity);
 
 pub(super) fn add_dependent_move_conflicts(target: &Path, plan: &mut Plan) {
     if plan.conflicts.is_empty() {
@@ -73,6 +76,7 @@ fn dependency_keys(target: &Path, path: &Path) -> Vec<PathBuf> {
 pub(super) fn stage_sources(
     target_guard: &path::TargetGuard<'_>,
     entries: &[&PlannedEntry],
+    identities: &std::collections::BTreeMap<PathBuf, SourceIdentity>,
     moved_operations: &mut Vec<MovedOperation>,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<StagedSources, ApplyError> {
@@ -195,13 +199,19 @@ pub(super) fn stage_sources(
             }
         };
         path::ensure_relative(&temporary_relative)?;
+        let identity = identities
+            .get(&entry.source)
+            .ok_or_else(|| ApplyError::ChangedSource(entry.source.clone()))?;
         rename_path_exclusive(
             target_guard,
             &source,
             &temporary,
             false,
-            *object as u64,
-            entry.kind,
+            MoveIdentity {
+                object: *object as u64,
+                kind: entry.kind,
+                expected_source: identity,
+            },
             recorder,
         )?;
         staged_sources.insert(entry.source.clone(), temporary_relative.clone());
@@ -210,6 +220,7 @@ pub(super) fn stage_sources(
             entry.source.clone(),
             temporary_relative,
             entry.kind,
+            identity.clone(),
         ));
     }
 

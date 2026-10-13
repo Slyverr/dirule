@@ -86,15 +86,56 @@ impl MutationRecorder for FailSecondStaging {
 }
 
 #[cfg(unix)]
-struct ReplaceSourceParent<'a> {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ReplaceDuring {
+    Intent,
+    Completion,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum ReplaceTarget {
+    Parent,
+    Source,
+}
+
+#[cfg(unix)]
+struct JournalPathInterference<'a> {
     recorder: JournalRecorder<'a>,
     target: PathBuf,
     outside: PathBuf,
+    replace_during: ReplaceDuring,
+    replace_target: ReplaceTarget,
     replaced: bool,
 }
 
 #[cfg(unix)]
-impl MutationRecorder for ReplaceSourceParent<'_> {
+impl JournalPathInterference<'_> {
+    fn replace_path(&mut self) {
+        match self.replace_target {
+            ReplaceTarget::Parent => {
+                std::fs::rename(self.target.join("nested"), self.target.join("nested.saved"))
+                    .expect("move the original source parent");
+                std::os::unix::fs::symlink(&self.outside, self.target.join("nested"))
+                    .expect("replace the source parent with a symlink");
+            }
+            ReplaceTarget::Source => {
+                std::fs::rename(
+                    self.target.join("nested/file.txt"),
+                    self.target.join("nested/original.saved"),
+                )
+                .expect("move the original source file");
+                std::fs::write(self.target.join("nested/file.txt"), "replacement")
+                    .expect("replace the original source file");
+            }
+        }
+
+        self.replaced = true;
+    }
+}
+
+#[cfg(unix)]
+impl MutationRecorder for JournalPathInterference<'_> {
     fn move_intent(
         &mut self,
         object: u64,
@@ -105,12 +146,8 @@ impl MutationRecorder for ReplaceSourceParent<'_> {
         let sequence = self
             .recorder
             .move_intent(object, source, destination, kind)?;
-        if !self.replaced {
-            std::fs::rename(self.target.join("nested"), self.target.join("nested.saved"))
-                .expect("move the original source parent");
-            std::os::unix::fs::symlink(&self.outside, self.target.join("nested"))
-                .expect("replace the source parent with a symlink");
-            self.replaced = true;
+        if self.replace_during == ReplaceDuring::Intent && !self.replaced {
+            self.replace_path();
         }
 
         Ok(sequence)
@@ -122,6 +159,15 @@ impl MutationRecorder for ReplaceSourceParent<'_> {
         destination: &std::path::Path,
         kind: EntryKind,
     ) -> Result<(), ApplyError> {
+        if self.replace_during == ReplaceDuring::Completion && !self.replaced {
+            self.replace_path();
+
+            return Err(ApplyError::Io {
+                path: destination.to_path_buf(),
+                source: std::io::Error::other("simulated journal completion failure"),
+            });
+        }
+
         self.recorder.move_completed(sequence, destination, kind)
     }
 
@@ -170,10 +216,12 @@ fn apply_rejects_a_symlinked_parent_installed_during_journal_intent() {
     };
     let snapshot = crate::scan(&target).expect("scan project");
     let store = JournalStore::new(temp.0.join("state/runs"));
-    let mut recorder = ReplaceSourceParent {
+    let mut recorder = JournalPathInterference {
         recorder: JournalRecorder::new(&store, &target, &plan),
         target: target.clone(),
         outside: outside.clone(),
+        replace_during: ReplaceDuring::Intent,
+        replace_target: ReplaceTarget::Parent,
         replaced: false,
     };
 
@@ -213,6 +261,152 @@ fn apply_rejects_a_symlinked_parent_installed_during_journal_intent() {
     assert_eq!(std::fs::read(outside.join("file.txt")).unwrap(), b"outside");
     assert_eq!(
         std::fs::read(target.join("nested.saved/file.txt")).unwrap(),
+        b"inside"
+    );
+    assert!(!target.join("renamed.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_does_not_follow_a_replaced_parent_during_journal_completion_rollback() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    let outside = temp.0.join("outside");
+    std::fs::create_dir_all(target.join("nested")).expect("create source parent");
+    std::fs::create_dir(&outside).expect("create outside directory");
+    std::fs::write(target.join("nested/file.txt"), "inside").expect("write source");
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("nested/file.txt"),
+            destination: PathBuf::from("renamed.txt"),
+            kind: EntryKind::File,
+            rule: Some("test".into()),
+        }],
+        ..Plan::default()
+    };
+    let snapshot = crate::scan(&target).expect("scan project");
+    let store = JournalStore::new(temp.0.join("state/runs"));
+    let mut recorder = JournalPathInterference {
+        recorder: JournalRecorder::new(&store, &target, &plan),
+        target: target.clone(),
+        outside: outside.clone(),
+        replace_during: ReplaceDuring::Completion,
+        replace_target: ReplaceTarget::Parent,
+        replaced: false,
+    };
+
+    let error = super::apply_recorded(
+        &target,
+        &plan,
+        &snapshot,
+        ConflictPolicy::Abort,
+        &mut recorder,
+    )
+    .expect_err("journal completion failure must stop the apply");
+
+    assert!(matches!(&error, ApplyError::RollbackFailed { .. }));
+
+    let run_id = recorder
+        .recorder
+        .id()
+        .expect("move intent starts a journal run")
+        .to_owned();
+    let error = finish_failed_apply(&mut recorder.recorder, run_id.clone(), error);
+    drop(recorder);
+
+    let runs = store.list().expect("list partially recovered run");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, JournalStatus::PartiallyRecovered);
+    let details = store.get(&run_id).expect("read unresolved run details");
+    assert_eq!(details.operations.len(), 1);
+    assert!(
+        store.undo(&run_id).is_err(),
+        "undo must reject the operation whose source parent is now a symlink"
+    );
+    assert!(matches!(
+        &error,
+        ApplyError::RunFailed { source, .. }
+            if matches!(source.as_ref(), ApplyError::RollbackFailed { .. })
+    ));
+
+    assert!(!outside.join("file.txt").exists());
+    assert_eq!(
+        std::fs::read(target.join("renamed.txt")).unwrap(),
+        b"inside"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_rejects_a_replaced_source_after_journal_intent() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    let outside = temp.0.join("outside");
+    std::fs::create_dir_all(target.join("nested")).expect("create source parent");
+    std::fs::create_dir(&outside).expect("create outside directory");
+    std::fs::write(target.join("nested/file.txt"), "inside").expect("write source");
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("nested/file.txt"),
+            destination: PathBuf::from("renamed.txt"),
+            kind: EntryKind::File,
+            rule: Some("test".into()),
+        }],
+        ..Plan::default()
+    };
+    let snapshot = crate::scan(&target).expect("scan project");
+    let store = JournalStore::new(temp.0.join("state/runs"));
+    let mut recorder = JournalPathInterference {
+        recorder: JournalRecorder::new(&store, &target, &plan),
+        target: target.clone(),
+        outside,
+        replace_during: ReplaceDuring::Intent,
+        replace_target: ReplaceTarget::Source,
+        replaced: false,
+    };
+
+    let error = super::apply_recorded(
+        &target,
+        &plan,
+        &snapshot,
+        ConflictPolicy::Abort,
+        &mut recorder,
+    )
+    .expect_err("apply must reject a replaced source file");
+
+    assert!(matches!(
+        &error,
+        ApplyError::UnresolvedOperation(operation)
+            if matches!(operation.as_ref(), ApplyError::ChangedSource(_))
+    ));
+
+    let run_id = recorder
+        .recorder
+        .id()
+        .expect("move intent starts a journal run")
+        .to_owned();
+    let error = finish_failed_apply(&mut recorder.recorder, run_id.clone(), error);
+    drop(recorder);
+
+    let runs = store.list().expect("list partially recovered run");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, JournalStatus::PartiallyRecovered);
+    assert_eq!(
+        store
+            .get(&run_id)
+            .expect("read unresolved run details")
+            .operations
+            .len(),
+        1
+    );
+    assert!(store.undo(&run_id).is_err());
+    assert!(matches!(&error, ApplyError::RunFailed { .. }));
+    assert_eq!(
+        std::fs::read(target.join("nested/file.txt")).unwrap(),
+        b"replacement"
+    );
+    assert_eq!(
+        std::fs::read(target.join("nested/original.saved")).unwrap(),
         b"inside"
     );
     assert!(!target.join("renamed.txt").exists());
@@ -270,17 +464,22 @@ fn rollback_failure_preserves_the_operation_error_and_occupied_paths() {
         .expect("write new file at original path");
     std::fs::write(temp.0.join("renamed.txt"), "moved file")
         .expect("write moved file at destination");
+    let snapshot = crate::scan(&temp.0).expect("scan rollback target");
     let moved = [(
         0,
         PathBuf::from("original.txt"),
         PathBuf::from("renamed.txt"),
         EntryKind::File,
+        snapshot
+            .identities
+            .get(std::path::Path::new("renamed.txt"))
+            .expect("identity of moved file")
+            .clone(),
     )];
     let operation = ApplyError::Io {
         path: PathBuf::from("later.txt"),
         source: std::io::Error::other("simulated later operation failure"),
     };
-    let snapshot = crate::scan(&temp.0).expect("scan rollback target");
     let target_guard = super::path::TargetGuard::new(
         &temp.0,
         snapshot.target_identity.as_ref().expect("target identity"),

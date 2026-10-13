@@ -1,5 +1,6 @@
 use crate::ScanResult;
 use crate::journal::{JournalRecorder, JournalStatus, JournalStore};
+use crate::scan::SourceIdentity;
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -416,6 +417,7 @@ fn apply_recorded(
     let staged_sources = match dependencies::stage_sources(
         &target_guard,
         &entries,
+        &snapshot.identities,
         &mut progress.moved_operations,
         recorder,
     ) {
@@ -462,6 +464,13 @@ struct ApplyProgress {
     moved_operations: Vec<dependencies::MovedOperation>,
 }
 
+#[derive(Clone, Copy)]
+struct MoveIdentity<'a> {
+    object: u64,
+    kind: EntryKind,
+    expected_source: &'a SourceIdentity,
+}
+
 fn apply_entry(
     target_guard: &path::TargetGuard<'_>,
     entry: &PlannedEntry,
@@ -488,6 +497,10 @@ fn apply_entry(
 
     let source = target.join(&source_relative);
     let destination = target.join(&entry.destination);
+    let source_identity = snapshot
+        .identities
+        .get(&entry.source)
+        .ok_or_else(|| ApplyError::ChangedSource(source.clone()))?;
     path::ensure_parent_safe(target, source.parent().unwrap_or(target))?;
     path::ensure_parent_safe(target, destination.parent().unwrap_or(target))?;
     let metadata = std::fs::symlink_metadata(&source).map_err(|error| {
@@ -533,8 +546,11 @@ fn apply_entry(
         &source,
         &destination,
         destination_is_source,
-        object,
-        entry.kind,
+        MoveIdentity {
+            object,
+            kind: entry.kind,
+            expected_source: source_identity,
+        },
         recorder,
     )?;
     if entry.kind == EntryKind::Directory {
@@ -556,6 +572,7 @@ fn apply_entry(
         source_relative,
         entry.destination.clone(),
         entry.kind,
+        source_identity.clone(),
     ));
 
     Ok(())
@@ -617,14 +634,14 @@ fn create_parent_directories(
 fn rollback_after_failure(
     operation: ApplyError,
     target_guard: &path::TargetGuard<'_>,
-    moved: &[(u64, PathBuf, PathBuf, EntryKind)],
+    moved: &[(u64, PathBuf, PathBuf, EntryKind, SourceIdentity)],
     created_directories: &[PathBuf],
     recorder: &mut dyn MutationRecorder,
 ) -> ApplyError {
     let target = target_guard.root();
     let mut failures = Vec::new();
 
-    for (object, source, destination, kind) in moved.iter().rev() {
+    for (object, source, destination, kind, identity) in moved.iter().rev() {
         let current = target.join(destination);
         let original = target.join(source);
         if let Err(error) = rename_path_exclusive(
@@ -632,8 +649,11 @@ fn rollback_after_failure(
             &current,
             &original,
             path::same_existing_path(&current, &original),
-            *object,
-            *kind,
+            MoveIdentity {
+                object: *object,
+                kind: *kind,
+                expected_source: identity,
+            },
             recorder,
         ) {
             failures.push(format!(
@@ -761,38 +781,28 @@ fn rename_path_exclusive(
     source: &Path,
     destination: &Path,
     same_path: bool,
-    object: u64,
-    kind: EntryKind,
+    identity: MoveIdentity<'_>,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
     if !same_path {
-        return recorded_rename(target_guard, source, destination, object, kind, recorder);
+        return recorded_rename(target_guard, source, destination, identity, recorder);
     }
 
     let temporary = temporary_sibling(source)?;
-    recorded_rename(target_guard, source, &temporary, object, kind, recorder)?;
-    match recorded_rename(
-        target_guard,
-        &temporary,
-        destination,
-        object,
-        kind,
-        recorder,
-    ) {
+    recorded_rename(target_guard, source, &temporary, identity, recorder)?;
+    match recorded_rename(target_guard, &temporary, destination, identity, recorder) {
         Ok(()) => Ok(()),
-        Err(error) => {
-            match recorded_rename(target_guard, &temporary, source, object, kind, recorder) {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(ApplyError::RollbackFailed {
-                    operation: Box::new(error),
-                    failures: format!(
-                        "{} -> {}: {rollback}",
-                        temporary.display(),
-                        source.display()
-                    ),
-                }),
-            }
-        }
+        Err(error) => match recorded_rename(target_guard, &temporary, source, identity, recorder) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(ApplyError::RollbackFailed {
+                operation: Box::new(error),
+                failures: format!(
+                    "{} -> {}: {rollback}",
+                    temporary.display(),
+                    source.display()
+                ),
+            }),
+        },
     }
 }
 
@@ -800,22 +810,35 @@ fn recorded_rename(
     target_guard: &path::TargetGuard<'_>,
     source: &Path,
     destination: &Path,
-    object: u64,
-    kind: EntryKind,
+    identity: MoveIdentity<'_>,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
     let target = target_guard.root();
-    let sequence = recorder.move_intent(object, source, destination, kind)?;
+    let sequence = recorder.move_intent(identity.object, source, destination, identity.kind)?;
     target_guard
-        .ensure_safe(source.parent().unwrap_or(target))
+        .ensure_source_safe(source, identity.expected_source, identity.kind)
         .map_err(unresolved_operation)?;
     target_guard
         .ensure_safe(destination.parent().unwrap_or(target))
         .map_err(unresolved_operation)?;
     renamore::rename_exclusive(source, destination)
         .map_err(|error| rename_error(source, destination, error))?;
-    if let Err(operation) = recorder.move_completed(sequence, destination, kind) {
-        return match renamore::rename_exclusive(destination, source) {
+    if let Err(operation) = recorder.move_completed(sequence, destination, identity.kind) {
+        let rollback = target_guard
+            .ensure_safe(destination.parent().unwrap_or(target))
+            .and_then(|()| {
+                target_guard.ensure_source_safe(
+                    destination,
+                    identity.expected_source,
+                    identity.kind,
+                )
+            })
+            .and_then(|()| target_guard.ensure_safe(source.parent().unwrap_or(target)))
+            .and_then(|()| {
+                renamore::rename_exclusive(destination, source)
+                    .map_err(|error| rename_error(destination, source, error))
+            });
+        return match rollback {
             Ok(()) => Err(operation),
             Err(error) => Err(ApplyError::RollbackFailed {
                 operation: Box::new(operation),

@@ -35,6 +35,36 @@ impl<'a> TargetGuard<'a> {
 
         ensure_parent_safe(self.root, path)
     }
+
+    pub(super) fn ensure_source_safe(
+        self,
+        path: &Path,
+        identity: &SourceIdentity,
+        kind: EntryKind,
+    ) -> Result<(), ApplyError> {
+        self.ensure_safe(path.parent().unwrap_or(self.root))?;
+
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ApplyError::MissingSource(path.to_path_buf())
+            } else {
+                ApplyError::Io {
+                    path: path.to_path_buf(),
+                    source: error,
+                }
+            }
+        })?;
+        let identity_matches = if kind == EntryKind::Directory {
+            identity.matches_object(&metadata, kind, path)
+        } else {
+            identity.matches(&metadata, kind, path)
+        };
+        if !identity_matches {
+            return Err(ApplyError::ChangedSource(path.to_path_buf()));
+        }
+
+        Ok(())
+    }
 }
 
 pub(super) struct VacatedPaths<'plan> {
