@@ -6,4 +6,5 @@ edition.workspace = true
 [dependencies]
 dirule-core = { version = "0.1.0", path = "../dirule-core" }
 ignore = "0.4"
+renamore = "0.3"
 thiserror = "2"
