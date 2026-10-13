@@ -26,6 +26,110 @@ impl Drop for TempDir {
     }
 }
 
+struct FailSecondStaging {
+    intents: usize,
+}
+
+impl MutationRecorder for FailSecondStaging {
+    fn move_intent(
+        &mut self,
+        _object: u64,
+        source: &std::path::Path,
+        _destination: &std::path::Path,
+        _kind: EntryKind,
+    ) -> Result<Option<u64>, ApplyError> {
+        self.intents += 1;
+        if self.intents == 2 {
+            return Err(ApplyError::Io {
+                path: source.to_path_buf(),
+                source: std::io::Error::other("simulated second staging failure"),
+            });
+        }
+
+        Ok(None)
+    }
+
+    fn move_completed(
+        &mut self,
+        _sequence: Option<u64>,
+        _destination: &std::path::Path,
+        _kind: EntryKind,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn directory_intent(
+        &mut self,
+        _directory: &std::path::Path,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn directory_created(
+        &mut self,
+        _sequence: Option<u64>,
+        _directory: &std::path::Path,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn directory_remove_intent(
+        &mut self,
+        _directory: &std::path::Path,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn directory_removed(&mut self, _sequence: Option<u64>) -> Result<(), ApplyError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn partial_cycle_staging_rolls_back_before_apply_returns() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join("first"), "first").expect("write first source");
+    std::fs::write(temp.0.join("second"), "second").expect("write second source");
+    let target = temp.0.clone();
+    let plan = Plan {
+        entries: vec![
+            PlannedEntry {
+                source: PathBuf::from("first"),
+                destination: PathBuf::from("second"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+            PlannedEntry {
+                source: PathBuf::from("second"),
+                destination: PathBuf::from("first"),
+                kind: EntryKind::File,
+                rule: Some("swap".into()),
+            },
+        ],
+        ..Plan::default()
+    };
+    let snapshot = crate::scan(&target).expect("scan project");
+    let mut recorder = FailSecondStaging { intents: 0 };
+
+    let error = super::apply_recorded(
+        &target,
+        &plan,
+        &snapshot,
+        ConflictPolicy::Abort,
+        &mut recorder,
+    )
+    .expect_err("second staging operation should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("simulated second staging failure")
+    );
+    assert_eq!(std::fs::read(target.join("first")).unwrap(), b"first");
+    assert_eq!(std::fs::read(target.join("second")).unwrap(), b"second");
+    assert_eq!(std::fs::read_dir(target).unwrap().count(), 2);
+}
+
 #[test]
 fn rollback_failure_preserves_the_operation_error_and_occupied_paths() {
     let temp = TempDir::new();
