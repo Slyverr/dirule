@@ -56,6 +56,27 @@ Targets equal to `~` or beginning with `~/` expand against the user's home direc
 
 JSON plans include the canonical target path; their source and destination paths are target-relative and use `/` separators on every platform.
 
+## Rules
+
+`dirule init` creates a starter `dirule.toml`. Put project-specific rules before its general `**/*` rule: rules run in order, and the first match owns each original path.
+
+```toml
+version = "1.0"
+target = "."
+
+[[rules]]
+name = "Archive invoices"
+match = "Invoices/<year>-<vendor>-<title>.pdf"
+to = "template:Archive/${year}/${vendor|kebab-case}/${title|kebab-case}.pdf"
+
+[[rules]]
+name = "Normalize other names"
+match = "**/*"
+to = "builtin:kebab-case"
+```
+
+`<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `builtin:` applies a built-in case transformation to the entry name. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
+
 ## Apply history
 
 Each successful apply records its filesystem moves in Dirule's user state directory and prints a run ID. List runs and undo a run with:
