@@ -39,7 +39,13 @@ nix run github:Slyverr/dirule -- --help
 nix profile install github:Slyverr/dirule
 ```
 
-The shell installer does not support NixOS; use the flake there. Releases also include archives for manual installation.
+The shell installer does not support NixOS; use the flake there. The generated shell and PowerShell installers do not verify checksums. Releases also include archives and SHA-256 checksum files for manual installation. After downloading an archive and its matching `.sha256` file into the same directory, verify it with:
+
+```sh
+sha256sum -c dirule-x86_64-unknown-linux-gnu.tar.xz.sha256
+```
+
+On Windows, compare the archive's checksum with the value in its `.sha256` file using `Get-FileHash -Algorithm SHA256`.
 
 ## Quick start
 
