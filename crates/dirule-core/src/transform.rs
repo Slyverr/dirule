@@ -1,4 +1,5 @@
 use crate::{AcronymLexicon, Error, Result};
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Transform {
@@ -73,13 +74,13 @@ fn split_extension(value: &str) -> (&str, Option<&str>) {
 }
 
 fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<String> {
-    let chars: Vec<char> = value.chars().collect();
+    let graphemes: Vec<(usize, &str)> = value.grapheme_indices(true).collect();
     let mut result = Vec::new();
     let mut start = 0;
     let mut index = 0;
-    while index < chars.len() {
-        if let Some((acronym, length)) = acronym_at(&chars, index, acronyms) {
-            result.extend(tokenize_generic(&chars[start..index]));
+    while index < graphemes.len() {
+        if let Some((acronym, length)) = acronym_at(value, &graphemes, index, acronyms) {
+            result.extend(tokenize_generic(&graphemes[start..index]));
             result.push(acronym.to_owned());
             index += length;
             start = index;
@@ -87,46 +88,59 @@ fn tokenize(value: &str, acronyms: &AcronymLexicon) -> Vec<String> {
             index += 1;
         }
     }
-    result.extend(tokenize_generic(&chars[start..]));
+    result.extend(tokenize_generic(&graphemes[start..]));
     result
 }
 
 fn acronym_at<'a>(
-    chars: &[char],
+    value: &str,
+    graphemes: &[(usize, &str)],
     index: usize,
     acronyms: &'a AcronymLexicon,
 ) -> Option<(&'a str, usize)> {
-    if !is_token_boundary(chars, index) {
+    if !is_token_boundary(graphemes, index) {
         return None;
     }
 
+    let start = graphemes[index].0;
+
     acronyms
-        .entries_starting_with(chars[index])
+        .entries_starting_with(first_char(graphemes[index].1))
         .find_map(|acronym| {
-            let mut end = index;
-            let mut length = 0;
-            for expected in acronym.chars() {
-                if chars.get(end).copied() != Some(expected) {
-                    return None;
-                }
-                end += 1;
-                length += 1;
+            let end = start + acronym.len();
+            if value.get(start..end) != Some(acronym) {
+                return None;
             }
-            let next = chars.get(end).copied();
+
+            let end_index = if end == value.len() {
+                graphemes.len()
+            } else {
+                graphemes
+                    .binary_search_by_key(&end, |(offset, _)| *offset)
+                    .ok()?
+            };
+            let next = graphemes
+                .get(end_index)
+                .map(|(_, cluster)| first_char(cluster));
             if next.is_some_and(|ch| ch.is_alphabetic() && !ch.is_uppercase()) {
                 return None;
             }
+
+            let length = end_index - index;
             Some((acronym, length))
         })
 }
 
-fn is_token_boundary(chars: &[char], index: usize) -> bool {
+fn is_token_boundary(graphemes: &[(usize, &str)], index: usize) -> bool {
     if index == 0 {
         return true;
     }
-    let previous = chars[index - 1];
-    let current = chars[index];
-    let next = chars.get(index + 1).copied();
+    let previous = first_char(graphemes[index - 1].1);
+    let current = first_char(graphemes[index].1);
+    let next = graphemes
+        .get(index + 1)
+        .map(|(_, cluster)| first_char(cluster));
+
     !previous.is_alphanumeric()
         || (previous.is_lowercase() && current.is_uppercase())
         || (previous.is_alphabetic() && current.is_numeric())
@@ -136,13 +150,15 @@ fn is_token_boundary(chars: &[char], index: usize) -> bool {
             && next.is_some_and(char::is_lowercase))
 }
 
-fn tokenize_generic(chars: &[char]) -> Vec<String> {
+fn tokenize_generic(graphemes: &[(usize, &str)]) -> Vec<String> {
     let mut ranges = Vec::new();
     let mut start = 0;
-    for index in 1..chars.len() {
-        let previous = chars[index - 1];
-        let current = chars[index];
-        let next = chars.get(index + 1).copied();
+    for index in 1..graphemes.len() {
+        let previous = first_char(graphemes[index - 1].1);
+        let current = first_char(graphemes[index].1);
+        let next = graphemes
+            .get(index + 1)
+            .map(|(_, cluster)| first_char(cluster));
         let boundary = (!previous.is_alphanumeric() || !current.is_alphanumeric())
             || (previous.is_lowercase() && current.is_uppercase())
             || (previous.is_alphabetic() && current.is_numeric())
@@ -151,16 +167,33 @@ fn tokenize_generic(chars: &[char]) -> Vec<String> {
                 && current.is_uppercase()
                 && next.is_some_and(char::is_lowercase));
         if boundary {
-            if start < index && chars[start..index].iter().any(|ch| ch.is_alphanumeric()) {
-                ranges.push(chars[start..index].iter().collect::<String>());
+            let word = &graphemes[start..index];
+            if word
+                .iter()
+                .any(|(_, cluster)| first_char(cluster).is_alphanumeric())
+            {
+                ranges.push(word.iter().map(|(_, cluster)| *cluster).collect());
             }
+
             start = index;
         }
     }
-    if start < chars.len() && chars[start..].iter().any(|ch| ch.is_alphanumeric()) {
-        ranges.push(chars[start..].iter().collect());
+    let word = &graphemes[start..];
+    if word
+        .iter()
+        .any(|(_, cluster)| first_char(cluster).is_alphanumeric())
+    {
+        ranges.push(word.iter().map(|(_, cluster)| *cluster).collect());
     }
+
     ranges
+}
+
+fn first_char(grapheme: &str) -> char {
+    grapheme
+        .chars()
+        .next()
+        .expect("grapheme clusters are never empty")
 }
 
 fn title_case(value: &str) -> String {

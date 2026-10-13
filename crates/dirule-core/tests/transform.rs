@@ -59,3 +59,17 @@ fn handles_digits_punctuation_unicode_and_multiple_extensions() {
         ".json-data"
     );
 }
+
+#[test]
+fn preserves_combining_marks_in_decomposed_unicode_names() {
+    let acronyms = AcronymLexicon::default();
+
+    assert_eq!(
+        transform("Cafe\u{301}Guide", Transform::KebabCase, &acronyms),
+        "cafe\u{301}-guide"
+    );
+    assert_eq!(
+        transform_filename("Cafe\u{301}Guide.pdf", Transform::KebabCase, &acronyms),
+        "cafe\u{301}-guide.pdf"
+    );
+}
