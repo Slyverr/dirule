@@ -1,3 +1,5 @@
+mod json;
+
 use super::args::{ColorChoice, OutputFormat};
 use dirule_core::Plan;
 use dirule_fs::{JournalDetails, JournalRun, JournalStatus};
@@ -151,10 +153,8 @@ pub(super) fn plan(
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&plan_value(target, plan))?
-        );
+        json::write_plan(target, plan)?;
+
         return Ok(());
     }
 
@@ -244,17 +244,8 @@ pub(super) fn apply_result(
     color: ColorChoice,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
-        let value = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "plan": plan_value(target, plan),
-            "execution": {
-                "status": summary.status.as_str(),
-                "moved": summary.moved,
-                "skipped": summary.skipped,
-                "run_id": summary.run_id,
-            }
-        });
-        println!("{}", serde_json::to_string_pretty(&value)?);
+        json::write_apply(target, plan, &summary)?;
+
         return Ok(());
     }
 
@@ -294,24 +285,6 @@ impl ApplyStatus {
             Self::Cancelled => "cancelled",
         }
     }
-}
-
-fn plan_value(target: &Path, plan: &Plan) -> serde_json::Value {
-    serde_json::json!({
-        "schema_version": CURRENT_OUTPUT_VERSION,
-        "target": target,
-        "entries": plan.entries.iter().map(|entry| serde_json::json!({
-            "source": portable_path(&entry.source),
-            "destination": portable_path(&entry.destination),
-            "kind": entry.kind,
-            "rule": entry.rule,
-        })).collect::<Vec<_>>(),
-        "conflicts": plan.conflicts.iter().map(|conflict| serde_json::json!({
-            "path": portable_path(&conflict.path),
-            "reason": conflict.reason,
-        })).collect::<Vec<_>>(),
-        "findings": plan.findings,
-    })
 }
 
 pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice) {

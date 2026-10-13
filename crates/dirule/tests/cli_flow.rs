@@ -807,6 +807,26 @@ fn target_preserves_backslashes_in_unix_home_relative_paths() {
 }
 
 #[test]
+fn plan_json_reports_conflicts_without_mutating_the_target() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("A__B.txt"), "first").expect("write first conflict source");
+    fs::write(project.0.join("A--B.txt"), "second").expect("write second conflict source");
+
+    let output = project.run(&["plan", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+    let conflicts = value["conflicts"].as_array().expect("conflicts array");
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0]["path"], "a-b.txt");
+    assert!(conflicts[0]["reason"].is_string());
+    assert!(project.0.join("A__B.txt").is_file());
+    assert!(project.0.join("A--B.txt").is_file());
+    assert!(!project.journal_directory().exists());
+}
+
+#[test]
 fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     let project = TempProject::new();
     fs::write(project.0.join("MyFile.txt"), "content").expect("write source file");
