@@ -119,21 +119,39 @@ fn init_preserves_an_existing_config() {
 }
 
 #[test]
-fn preset_listing_uses_home_config_when_xdg_config_home_is_empty() {
+fn preset_listing_uses_the_platform_config_directory() {
     let project = TempProject::new();
-    let presets = project.0.join(".config/dirule/presets");
+    #[cfg(target_os = "windows")]
+    let config_directory = project.0.join("appdata");
+    #[cfg(target_os = "macos")]
+    let config_directory = project.0.join("Library/Application Support");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let config_directory = project.0.join(".config");
+
+    let presets = config_directory.join("dirule/presets");
     fs::create_dir_all(&presets).expect("create user preset directory");
     fs::write(presets.join("downloads.toml"), "preset").expect("write preset fixture");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_dirule"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    #[cfg(target_os = "windows")]
+    command.env("APPDATA", &config_directory);
+    #[cfg(target_os = "macos")]
+    command.env("HOME", &project.0);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    command.env("HOME", &project.0).env("XDG_CONFIG_HOME", "");
+
+    let output = command
         .args(["presets", "list"])
         .current_dir(&project.0)
-        .env("HOME", &project.0)
-        .env("XDG_CONFIG_HOME", "")
         .output()
         .expect("run dirule");
 
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(String::from_utf8_lossy(&output.stdout).contains("downloads"));
 }
 
@@ -186,9 +204,10 @@ fn cli_checks_a_real_project_config_without_mutating_it() {
 
     let check = project.run(&["check"]);
     assert_eq!(check.status.code(), Some(2));
+    let output = String::from_utf8_lossy(&check.stdout).replace('\\', "/");
     assert!(
-        String::from_utf8_lossy(&check.stdout)
-            .contains("Invoices/2026-Acme-Quarter 1.pdf -> Archive/2026/acme/quarter-1.pdf")
+        output.contains("Invoices/2026-Acme-Quarter 1.pdf -> Archive/2026/acme/quarter-1.pdf"),
+        "unexpected check output: {output}"
     );
     assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
     assert_eq!(
