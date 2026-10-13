@@ -118,26 +118,34 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
 
     let (tracked, tracked_findings) = tracked_paths(&target)?;
     findings.extend(tracked_findings);
+    let mut identities = BTreeMap::new();
     for tracked in tracked {
-        let absolute = target.join(&tracked);
-        let metadata = match std::fs::symlink_metadata(&absolute) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(source) => {
-                return Err(ScanError::Metadata {
-                    path: absolute,
-                    source,
-                });
-            }
-        };
-        let Some(kind) = entry_kind(Some(metadata.file_type())) else {
-            findings.push(format!(
-                "skipped non-regular filesystem entry: {}",
-                tracked.display()
-            ));
-            continue;
-        };
-        paths.insert(tracked.clone(), kind);
+        if !paths.contains_key(&tracked) {
+            let absolute = target.join(&tracked);
+            let metadata = match std::fs::symlink_metadata(&absolute) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(source) => {
+                    return Err(ScanError::Metadata {
+                        path: absolute,
+                        source,
+                    });
+                }
+            };
+            let Some(kind) = entry_kind(Some(metadata.file_type())) else {
+                findings.push(format!(
+                    "skipped non-regular filesystem entry: {}",
+                    tracked.display()
+                ));
+                continue;
+            };
+            identities.insert(
+                tracked.clone(),
+                SourceIdentity::from_metadata(&metadata, kind),
+            );
+            paths.insert(tracked.clone(), kind);
+        }
+
         let mut parent = tracked.parent();
         while let Some(path) = parent {
             if !path.as_os_str().is_empty() {
@@ -153,8 +161,11 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .into_iter()
         .map(|(path, kind)| Entry { path, kind })
         .collect::<Vec<_>>();
-    let mut identities = BTreeMap::new();
     for entry in &entries {
+        if identities.contains_key(&entry.path) {
+            continue;
+        }
+
         let absolute = target.join(&entry.path);
         let metadata =
             std::fs::symlink_metadata(&absolute).map_err(|source| ScanError::Metadata {
