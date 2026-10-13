@@ -2,11 +2,11 @@ use crate::config::CompiledDestination;
 use crate::{
     CompiledConfig, Config, DestinationValues, Error, Result, transform, transform_filename,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     File,

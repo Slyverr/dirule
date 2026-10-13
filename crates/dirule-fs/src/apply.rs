@@ -1,4 +1,5 @@
 use crate::ScanResult;
+use crate::journal::{JournalRecorder, JournalStatus, JournalStore};
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
 use std::path::Component;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,12 @@ static NEXT_TEMPORARY_RENAME: AtomicU64 = AtomicU64::new(0);
 pub struct ApplyReport {
     pub moved: Vec<(PathBuf, PathBuf)>,
     pub skipped: Vec<Conflict>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct JournaledApplyReport {
+    pub report: ApplyReport,
+    pub run_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -34,6 +41,14 @@ pub enum ApplyError {
     AtomicRenameUnsupported(PathBuf),
     #[error("source type changed since planning: {0}")]
     ChangedSource(PathBuf),
+    #[error("journal operation failed: {0}")]
+    Journal(#[source] Box<crate::journal::JournalError>),
+    #[error("apply failed in run {run_id}: {source}")]
+    RunFailed {
+        run_id: String,
+        #[source]
+        source: Box<ApplyError>,
+    },
     #[error("filesystem operation failed for {path}: {source}")]
     Io {
         path: PathBuf,
@@ -105,6 +120,136 @@ pub fn apply_with_conflict_policy(
     plan: &Plan,
     snapshot: &ScanResult,
     policy: ConflictPolicy,
+) -> Result<ApplyReport, ApplyError> {
+    let mut recorder = NoopRecorder;
+    apply_recorded(target, plan, snapshot, policy, &mut recorder)
+}
+
+pub fn apply_journaled(
+    target: &Path,
+    plan: &Plan,
+    snapshot: &ScanResult,
+    policy: ConflictPolicy,
+    journal_store: &JournalStore,
+) -> Result<JournaledApplyReport, ApplyError> {
+    let mut recorder = JournalRecorder::new(journal_store, target, plan);
+    let result = apply_recorded(target, plan, snapshot, policy, &mut recorder);
+    let Some(run_id) = recorder.id().map(str::to_owned) else {
+        return result.map(|report| JournaledApplyReport {
+            report,
+            run_id: None,
+        });
+    };
+
+    match result {
+        Ok(report) => {
+            recorder
+                .finish(JournalStatus::Applied)
+                .map_err(|source| ApplyError::RunFailed {
+                    run_id: run_id.clone(),
+                    source: Box::new(ApplyError::Journal(Box::new(source))),
+                })?;
+            Ok(JournaledApplyReport {
+                report,
+                run_id: Some(run_id),
+            })
+        }
+        Err(source) => {
+            let status = if matches!(source, ApplyError::RollbackFailed { .. }) {
+                JournalStatus::PartiallyRecovered
+            } else {
+                JournalStatus::FailedRolledBack
+            };
+            let source = match recorder.finish(status) {
+                Ok(()) => source,
+                Err(journal_error) => ApplyError::Journal(Box::new(journal_error)),
+            };
+            Err(ApplyError::RunFailed {
+                run_id,
+                source: Box::new(source),
+            })
+        }
+    }
+}
+
+pub(crate) trait MutationRecorder {
+    fn move_intent(
+        &mut self,
+        object: u64,
+        source: &Path,
+        destination: &Path,
+        kind: EntryKind,
+    ) -> Result<Option<u64>, ApplyError>;
+
+    fn move_completed(
+        &mut self,
+        sequence: Option<u64>,
+        destination: &Path,
+        kind: EntryKind,
+    ) -> Result<(), ApplyError>;
+
+    fn directory_intent(&mut self, directory: &Path) -> Result<Option<u64>, ApplyError>;
+
+    fn directory_created(
+        &mut self,
+        sequence: Option<u64>,
+        directory: &Path,
+    ) -> Result<(), ApplyError>;
+
+    fn directory_remove_intent(&mut self, directory: &Path) -> Result<Option<u64>, ApplyError>;
+
+    fn directory_removed(&mut self, sequence: Option<u64>) -> Result<(), ApplyError>;
+}
+
+struct NoopRecorder;
+
+impl MutationRecorder for NoopRecorder {
+    fn move_intent(
+        &mut self,
+        _object: u64,
+        _source: &Path,
+        _destination: &Path,
+        _kind: EntryKind,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn move_completed(
+        &mut self,
+        _sequence: Option<u64>,
+        _destination: &Path,
+        _kind: EntryKind,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn directory_intent(&mut self, _directory: &Path) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn directory_created(
+        &mut self,
+        _sequence: Option<u64>,
+        _directory: &Path,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn directory_remove_intent(&mut self, _directory: &Path) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn directory_removed(&mut self, _sequence: Option<u64>) -> Result<(), ApplyError> {
+        Ok(())
+    }
+}
+
+fn apply_recorded(
+    target: &Path,
+    plan: &Plan,
+    snapshot: &ScanResult,
+    policy: ConflictPolicy,
+    recorder: &mut dyn MutationRecorder,
 ) -> Result<ApplyReport, ApplyError> {
     let mut checked_plan = plan.clone();
     validate_destinations(target, &mut checked_plan)?;
@@ -181,53 +326,62 @@ pub fn apply_with_conflict_policy(
     }
 
     validate_sources(&target, &entries, snapshot)?;
-    let mut moved_directories = Vec::<(PathBuf, PathBuf)>::new();
-    let mut report = ApplyReport {
-        skipped: if policy == ConflictPolicy::Skip {
-            plan.conflicts.clone()
-        } else {
-            Vec::new()
+    let mut progress = ApplyProgress {
+        report: ApplyReport {
+            skipped: if policy == ConflictPolicy::Skip {
+                plan.conflicts.clone()
+            } else {
+                Vec::new()
+            },
+            ..ApplyReport::default()
         },
-        ..ApplyReport::default()
+        ..ApplyProgress::default()
     };
-    let mut created_directories = Vec::new();
-
-    for entry in entries {
+    for (object, entry) in entries.into_iter().enumerate() {
         if let Err(operation) = apply_entry(
             &target,
             entry,
+            object as u64,
             snapshot,
-            &mut moved_directories,
-            &mut created_directories,
-            &mut report,
+            &mut progress,
+            recorder,
         ) {
             return Err(rollback_after_failure(
                 operation,
                 &target,
-                &report.moved,
-                &created_directories,
+                &progress.moved_operations,
+                &progress.created_directories,
+                recorder,
             ));
         }
     }
 
-    Ok(report)
+    Ok(progress.report)
+}
+
+#[derive(Default)]
+struct ApplyProgress {
+    moved_directories: Vec<(PathBuf, PathBuf)>,
+    created_directories: Vec<PathBuf>,
+    report: ApplyReport,
+    moved_operations: Vec<(u64, PathBuf, PathBuf, EntryKind)>,
 }
 
 fn apply_entry(
     target: &Path,
     entry: &PlannedEntry,
+    object: u64,
     snapshot: &ScanResult,
-    moved_directories: &mut Vec<(PathBuf, PathBuf)>,
-    created_directories: &mut Vec<PathBuf>,
-    report: &mut ApplyReport,
+    progress: &mut ApplyProgress,
+    recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
     ensure_relative(&entry.source)?;
     ensure_relative(&entry.destination)?;
-    if inherited_move(entry, moved_directories) {
+    if inherited_move(entry, &progress.moved_directories) {
         return Ok(());
     }
 
-    let source_relative = remap(&entry.source, moved_directories);
+    let source_relative = remap(&entry.source, &progress.moved_directories);
     if source_relative == entry.destination {
         return Ok(());
     }
@@ -265,16 +419,32 @@ fn apply_entry(
         return Err(ApplyError::ExistingDestination(destination));
     }
     if !destination_is_source && let Some(parent) = destination.parent() {
-        create_parent_directories(target, parent, created_directories)?;
+        create_parent_directories(target, parent, &mut progress.created_directories, recorder)?;
     }
 
-    rename_path_exclusive(&source, &destination, destination_is_source)?;
+    rename_path_exclusive(
+        &source,
+        &destination,
+        destination_is_source,
+        object,
+        entry.kind,
+        recorder,
+    )?;
     if entry.kind == EntryKind::Directory {
-        moved_directories.push((entry.source.clone(), entry.destination.clone()));
+        progress
+            .moved_directories
+            .push((entry.source.clone(), entry.destination.clone()));
     }
-    report
+    progress
+        .report
         .moved
-        .push((source_relative, entry.destination.clone()));
+        .push((source_relative.clone(), entry.destination.clone()));
+    progress.moved_operations.push((
+        object,
+        source_relative,
+        entry.destination.clone(),
+        entry.kind,
+    ));
 
     Ok(())
 }
@@ -283,6 +453,7 @@ fn create_parent_directories(
     root: &Path,
     parent: &Path,
     created_directories: &mut Vec<PathBuf>,
+    recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
     let relative = parent
         .strip_prefix(root)
@@ -295,8 +466,12 @@ fn create_parent_directories(
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => return Err(ApplyError::UnsafePath(current)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let sequence = recorder.directory_intent(&current)?;
                 match std::fs::create_dir(&current) {
-                    Ok(()) => created_directories.push(current.clone()),
+                    Ok(()) => {
+                        created_directories.push(current.clone());
+                        recorder.directory_created(sequence, &current)?;
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                         ensure_parent_safe(root, &current)?;
                     }
@@ -323,17 +498,23 @@ fn create_parent_directories(
 fn rollback_after_failure(
     operation: ApplyError,
     target: &Path,
-    moved: &[(PathBuf, PathBuf)],
+    moved: &[(u64, PathBuf, PathBuf, EntryKind)],
     created_directories: &[PathBuf],
+    recorder: &mut dyn MutationRecorder,
 ) -> ApplyError {
     let mut failures = Vec::new();
 
-    for (source, destination) in moved.iter().rev() {
+    for (object, source, destination, kind) in moved.iter().rev() {
         let current = target.join(destination);
         let original = target.join(source);
-        if let Err(error) =
-            rename_path_exclusive(&current, &original, same_existing_path(&current, &original))
-        {
+        if let Err(error) = rename_path_exclusive(
+            &current,
+            &original,
+            same_existing_path(&current, &original),
+            *object,
+            *kind,
+            recorder,
+        ) {
             failures.push(format!(
                 "{} -> {}: {error}",
                 destination.display(),
@@ -343,10 +524,26 @@ fn rollback_after_failure(
     }
 
     for directory in created_directories.iter().rev() {
-        match std::fs::remove_dir(directory) {
-            Ok(()) => {}
+        match std::fs::symlink_metadata(directory) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => failures.push(format!("{}: {error}", directory.display())),
+            Ok(_) => {
+                let sequence = match recorder.directory_remove_intent(directory) {
+                    Ok(sequence) => sequence,
+                    Err(error) => {
+                        failures.push(format!("{}: {error}", directory.display()));
+                        continue;
+                    }
+                };
+                match std::fs::remove_dir(directory) {
+                    Ok(()) => {
+                        if let Err(error) = recorder.directory_removed(sequence) {
+                            failures.push(format!("{}: {error}", directory.display()));
+                        }
+                    }
+                    Err(error) => failures.push(format!("{}: {error}", directory.display())),
+                }
+            }
         }
     }
 
@@ -539,28 +736,52 @@ fn rename_path_exclusive(
     source: &Path,
     destination: &Path,
     same_path: bool,
+    object: u64,
+    kind: EntryKind,
+    recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
     if !same_path {
-        return renamore::rename_exclusive(source, destination)
-            .map_err(|error| rename_error(source, destination, error));
+        return recorded_rename(source, destination, object, kind, recorder);
     }
 
     let temporary = temporary_sibling(source)?;
-    renamore::rename_exclusive(source, &temporary)
-        .map_err(|error| rename_error(source, &temporary, error))?;
-    match renamore::rename_exclusive(&temporary, destination) {
+    recorded_rename(source, &temporary, object, kind, recorder)?;
+    match recorded_rename(&temporary, destination, object, kind, recorder) {
         Ok(()) => Ok(()),
-        Err(error) => {
-            let operation = rename_error(source, destination, error);
-            match renamore::rename_exclusive(&temporary, source) {
-                Ok(()) => Err(operation),
-                Err(error) => Err(ApplyError::RollbackFailed {
-                    operation: Box::new(operation),
-                    failures: format!("{} -> {}: {error}", temporary.display(), source.display()),
-                }),
-            }
-        }
+        Err(error) => match recorded_rename(&temporary, source, object, kind, recorder) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(ApplyError::RollbackFailed {
+                operation: Box::new(error),
+                failures: format!(
+                    "{} -> {}: {rollback}",
+                    temporary.display(),
+                    source.display()
+                ),
+            }),
+        },
     }
+}
+
+fn recorded_rename(
+    source: &Path,
+    destination: &Path,
+    object: u64,
+    kind: EntryKind,
+    recorder: &mut dyn MutationRecorder,
+) -> Result<(), ApplyError> {
+    let sequence = recorder.move_intent(object, source, destination, kind)?;
+    renamore::rename_exclusive(source, destination)
+        .map_err(|error| rename_error(source, destination, error))?;
+    if let Err(operation) = recorder.move_completed(sequence, destination, kind) {
+        return match renamore::rename_exclusive(destination, source) {
+            Ok(()) => Err(operation),
+            Err(error) => Err(ApplyError::RollbackFailed {
+                operation: Box::new(operation),
+                failures: format!("{} -> {}: {error}", destination.display(), source.display()),
+            }),
+        };
+    }
+    Ok(())
 }
 
 fn rename_error(source: &Path, destination: &Path, error: std::io::Error) -> ApplyError {
