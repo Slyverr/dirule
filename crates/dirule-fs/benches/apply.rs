@@ -1,6 +1,6 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dirule_core::{EntryKind, Plan, PlannedEntry};
-use dirule_fs::validate_destinations;
+use dirule_fs::{apply, scan, validate_destinations};
 use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -27,6 +27,35 @@ fn benchmark_destination_validation(criterion: &mut Criterion) {
                         validate_destinations(black_box(target.path()), black_box(&mut plan))
                             .unwrap();
                         black_box(plan)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn benchmark_file_rename_cycles(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("apply_file_rename_cycle");
+
+    for count in [100, 500, 1_000] {
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_function(
+            BenchmarkId::new("existing_destinations", count),
+            |bencher| {
+                bencher.iter_batched(
+                    || {
+                        let target = cycle_fixture(count);
+                        let snapshot = scan(target.path()).unwrap();
+                        let plan = rename_cycle(count);
+
+                        (target, snapshot, plan)
+                    },
+                    |(target, snapshot, plan)| {
+                        black_box(apply(target.path(), &plan, &snapshot).unwrap());
+                        target
                     },
                     BatchSize::SmallInput,
                 );
@@ -69,6 +98,6 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
         .sample_size(20);
-    targets = benchmark_destination_validation
+    targets = benchmark_destination_validation, benchmark_file_rename_cycles
 }
 criterion_main!(benches);
