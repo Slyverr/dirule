@@ -23,6 +23,7 @@ jobs:
 
       - run: nix build --no-link .#dirule
       - run: nix run .#dirule -- --version
+      - run: nix run .#dirule -- check --color never
 
   msrv:
     name: Verify (Rust 1.88)
@@ -47,6 +48,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
+      - run: cargo run -p dirule -- check --color never
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   verify:
