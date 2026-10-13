@@ -2,10 +2,62 @@ use super::args::{ColorChoice, OutputFormat};
 use dirule_core::Plan;
 use dirule_fs::{JournalDetails, JournalRun, JournalStatus};
 use std::ffi::OsStr;
+use std::fmt;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 const CURRENT_OUTPUT_VERSION: &str = "1.0";
+
+#[derive(Clone, Copy)]
+struct Colorizer {
+    enabled: bool,
+}
+
+struct Styled<T> {
+    value: T,
+    ansi_code: &'static str,
+    enabled: bool,
+}
+
+impl Colorizer {
+    fn stdout(choice: ColorChoice) -> Self {
+        Self::new(choice, std::io::stdout().is_terminal())
+    }
+
+    fn stderr(choice: ColorChoice) -> Self {
+        Self::new(choice, std::io::stderr().is_terminal())
+    }
+
+    fn new(choice: ColorChoice, is_terminal: bool) -> Self {
+        Self {
+            enabled: color_enabled(choice, is_terminal),
+        }
+    }
+
+    fn style<T: fmt::Display>(self, value: T, ansi_code: &'static str) -> Styled<T> {
+        Styled {
+            value,
+            ansi_code,
+            enabled: self.enabled,
+        }
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for Styled<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.enabled {
+            write!(formatter, "\x1b[{}m", self.ansi_code)?;
+        }
+
+        write!(formatter, "{}", self.value)?;
+
+        if self.enabled {
+            formatter.write_str("\x1b[0m")?;
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum PlanContext {
@@ -29,11 +81,13 @@ pub(super) struct ApplySummary<'a> {
 }
 
 pub(super) fn created_config(path: &Path, color: ColorChoice) {
-    println!("{} {}", paint("Created", "32", color), path.display());
+    let styles = Colorizer::stdout(color);
+
+    println!("{} {}", styles.style("Created", "32"), path.display());
 }
 
-pub(super) fn preset_name(name: &str, color: ColorChoice) -> String {
-    paint(name, "36", color)
+fn preset_name(name: &str, styles: Colorizer) -> Styled<&str> {
+    styles.style(name, "36")
 }
 
 pub(super) fn presets(names: &[String], format: OutputFormat, color: ColorChoice) {
@@ -49,40 +103,43 @@ pub(super) fn presets(names: &[String], format: OutputFormat, color: ColorChoice
         return;
     }
 
+    let styles = Colorizer::stdout(color);
+
     println!("Presets");
     if names.is_empty() {
         println!("  No user presets found.");
     } else {
         for name in names {
-            println!("  {}", preset_name(name, color));
+            println!("  {}", preset_name(name, styles));
         }
     }
 }
 
 pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) {
+    let styles = Colorizer::stdout(color);
+
     println!(
         "{} Saved preset {} to {}",
-        paint("Done.", "32", color),
-        preset_name(name, color),
+        styles.style("Done.", "32"),
+        preset_name(name, styles),
         path.display()
     );
 }
 
 pub(super) fn removed_preset(name: &str, color: ColorChoice) {
+    let styles = Colorizer::stdout(color);
+
     println!(
         "{} Removed preset {}",
-        paint("Done.", "32", color),
-        preset_name(name, color)
+        styles.style("Done.", "32"),
+        preset_name(name, styles)
     );
 }
 
 pub(super) fn error(message: &str, color: ColorChoice) {
-    let enabled = color_enabled(color, std::io::stderr().is_terminal());
-    if enabled {
-        eprintln!("\x1b[31mdirule\x1b[0m: {message}");
-    } else {
-        eprintln!("dirule: {message}");
-    }
+    let styles = Colorizer::stderr(color);
+
+    eprintln!("{}: {message}", styles.style("dirule", "31"));
 }
 
 pub(super) fn plan(
@@ -101,6 +158,7 @@ pub(super) fn plan(
         return Ok(());
     }
 
+    let styles = Colorizer::stdout(color);
     let changes = plan
         .entries
         .iter()
@@ -112,11 +170,11 @@ pub(super) fn plan(
         PlanContext::Check => ("Check failed", "31"),
         PlanContext::Apply => ("Apply preview", "36"),
     };
-    println!("{}", paint(label, heading_color, color));
+    println!("{}", styles.style(label, heading_color));
     println!(
         "  {} {}",
-        paint("Target:", "36", color),
-        paint(&target.display().to_string(), "36", color)
+        styles.style("Target:", "36"),
+        styles.style(target.display(), "36")
     );
     println!(
         "  {} rename(s), {} conflict(s), {} finding(s)",
@@ -135,15 +193,15 @@ pub(super) fn plan(
                         .as_deref()
                         .map(|rule| format!("rule: {rule}"))
                         .unwrap_or_else(|| "inherited from directory rename".to_owned());
-                    format!(" [{}]", paint(&detail, "36", color))
+                    format!(" [{}]", styles.style(&detail, "36"))
                 } else {
                     String::new()
                 };
 
                 println!(
                     "  {} -> {}{}",
-                    paint(&entry.source.display().to_string(), "31", color),
-                    paint(&entry.destination.display().to_string(), "32", color),
+                    styles.style(entry.source.display(), "31"),
+                    styles.style(entry.destination.display(), "32"),
                     attribution
                 );
             }
@@ -157,7 +215,7 @@ pub(super) fn plan(
         for conflict in &plan.conflicts {
             println!(
                 "  {} {} ({})",
-                paint("!", "31", color),
+                styles.style("!", "31"),
                 conflict.path.display(),
                 conflict.reason
             );
@@ -167,7 +225,7 @@ pub(super) fn plan(
     if !plan.findings.is_empty() {
         println!("\nFindings:");
         for finding in &plan.findings {
-            println!("  {} {finding}", paint("i", "36", color));
+            println!("  {} {finding}", styles.style("i", "36"));
         }
     }
 
@@ -200,18 +258,20 @@ pub(super) fn apply_result(
         return Ok(());
     }
 
+    let styles = Colorizer::stdout(color);
+
     match summary.status {
         ApplyStatus::Applied => {
             if summary.skipped == 0 {
                 println!(
                     "{} Applied {} rename(s).",
-                    paint("Done.", "32", color),
+                    styles.style("Done.", "32"),
                     summary.moved
                 );
             } else {
                 println!(
                     "{} Applied {} rename(s); skipped {} conflict(s).",
-                    paint("Done.", "32", color),
+                    styles.style("Done.", "32"),
                     summary.moved,
                     summary.skipped
                 );
@@ -277,11 +337,14 @@ pub(super) fn runs(runs: &[JournalRun], format: OutputFormat, color: ColorChoice
         println!("No apply runs found.");
         return;
     }
+
+    let styles = Colorizer::stdout(color);
+
     println!("Apply runs");
     for run in runs {
         println!(
             "  {}  {}  {} rename(s)  started {}  {}",
-            paint(&run.id, "36", color),
+            styles.style(&run.id, "36"),
             status_name(run.status),
             run.operations,
             run.started_at,
@@ -315,7 +378,9 @@ pub(super) fn run_details(
         return Ok(());
     }
 
-    println!("Apply run {}", paint(&details.run.id, "36", color));
+    let styles = Colorizer::stdout(color);
+
+    println!("Apply run {}", styles.style(&details.run.id, "36"));
     println!("  Status: {}", status_name(details.run.status));
     println!("  Target: {}", details.run.target.display());
     println!("  Renames: {}", details.run.operations);
@@ -326,8 +391,8 @@ pub(super) fn run_details(
         for operation in &details.operations {
             println!(
                 "  {} -> {} ({})",
-                paint(&portable_path(&operation.source), "31", color),
-                paint(&portable_path(&operation.destination), "32", color),
+                styles.style(portable_path(&operation.source), "31"),
+                styles.style(portable_path(&operation.destination), "32"),
                 operation_kind(operation.kind)
             );
         }
@@ -363,15 +428,17 @@ pub(super) fn undo_result(
         });
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else if status == "undone" {
+        let styles = Colorizer::stdout(color);
+
         println!(
             "{} Undid run {}.",
-            paint("Done.", "32", color),
-            paint(run_id, "36", color)
+            styles.style("Done.", "32"),
+            styles.style(run_id, "36")
         );
         for directory in retained_directories {
             println!(
                 "{} Left non-empty directory {} in place.",
-                paint("Note:", "33", color),
+                styles.style("Note:", "33"),
                 directory.display()
             );
         }
@@ -401,20 +468,16 @@ fn portable_path(path: &Path) -> String {
 }
 
 pub(super) fn no_changes(color: ColorChoice) {
-    println!("{}", paint("No changes to apply.", "32", color));
+    let styles = Colorizer::stdout(color);
+
+    println!("{}", styles.style("No changes to apply.", "32"));
 }
 
 pub(super) fn cancelled(action: &str, color: ColorChoice) {
-    println!("{}.", paint(&format!("{action} cancelled"), "33", color));
-}
+    let styles = Colorizer::stdout(color);
+    let message = format!("{action} cancelled");
 
-fn paint(text: &str, ansi_code: &str, choice: ColorChoice) -> String {
-    let enabled = color_enabled(choice, std::io::stdout().is_terminal());
-    if enabled {
-        format!("\x1b[{ansi_code}m{text}\x1b[0m")
-    } else {
-        text.to_owned()
-    }
+    println!("{}.", styles.style(message, "33"));
 }
 
 fn color_enabled(choice: ColorChoice, is_terminal: bool) -> bool {
@@ -448,7 +511,7 @@ fn color_enabled_for(
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorChoice, color_enabled_for};
+    use super::{ColorChoice, Colorizer, color_enabled_for};
     use std::ffi::OsStr;
 
     #[test]
@@ -484,5 +547,17 @@ mod tests {
             Some(OsStr::new("dumb"))
         ));
         assert!(!color_enabled_for(ColorChoice::Never, true, None, None));
+    }
+
+    #[test]
+    fn styles_values_without_changing_the_plain_representation() {
+        let color = Colorizer { enabled: true };
+        let plain = Colorizer { enabled: false };
+
+        assert_eq!(
+            format!("{}", color.style("source.txt", "31")),
+            "\x1b[31msource.txt\x1b[0m"
+        );
+        assert_eq!(format!("{}", plain.style("source.txt", "31")), "source.txt");
     }
 }
