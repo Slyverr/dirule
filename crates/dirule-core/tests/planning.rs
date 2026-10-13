@@ -74,6 +74,35 @@ to = "builtin:kebab-case"
     );
 }
 
+#[test]
+fn project_acronyms_do_not_match_inside_a_larger_token() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[acronyms]
+entries = ["API"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid acronym config");
+    let entries = [Entry {
+        path: PathBuf::from("XAPIClient.txt"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("xapi-client.txt")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn planning_skips_and_reports_non_unicode_paths() {
