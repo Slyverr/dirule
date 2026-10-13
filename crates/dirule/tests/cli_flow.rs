@@ -308,6 +308,37 @@ fn preset_listing_uses_the_platform_config_directory() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("downloads"));
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn preset_storage_ignores_a_relative_xdg_config_home() {
+    let project = TempProject::new();
+    let fallback_presets = project.0.join(".config/dirule/presets");
+    fs::create_dir_all(&fallback_presets).expect("create fallback preset directory");
+    fs::write(fallback_presets.join("downloads.toml"), "preset").expect("write fallback preset");
+
+    let relative_presets = project.0.join("relative-config/dirule/presets");
+    fs::create_dir_all(&relative_presets).expect("create relative preset directory");
+    fs::write(relative_presets.join("unexpected.toml"), "preset").expect("write relative preset");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dirule"))
+        .env("HOME", &project.0)
+        .env("XDG_CONFIG_HOME", "relative-config")
+        .args(["presets", "list"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run dirule");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = String::from_utf8_lossy(&output.stdout);
+    assert!(output.contains("downloads"));
+    assert!(!output.contains("unexpected"));
+}
+
 #[test]
 fn preset_save_copies_a_valid_config_without_overwriting_existing_presets() {
     let project = TempProject::new();

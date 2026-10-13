@@ -315,8 +315,9 @@ fn preset_directory() -> Result<PathBuf, Box<dyn Error>> {
     #[cfg(target_os = "macos")]
     let base = env_path("HOME").map(|home| home.join("Library/Application Support"));
     #[cfg(all(unix, not(target_os = "macos")))]
-    let base =
-        env_path("XDG_CONFIG_HOME").or_else(|| env_path("HOME").map(|home| home.join(".config")));
+    let base = env_path("XDG_CONFIG_HOME")
+        .filter(|path| path.is_absolute())
+        .or_else(|| env_path("HOME").map(|home| home.join(".config")));
     #[cfg(not(any(unix, target_os = "windows")))]
     let base = env_path("HOME");
 
