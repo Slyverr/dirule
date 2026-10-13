@@ -405,12 +405,7 @@ impl JournalStore {
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(JournalError::TargetPath(target));
         }
-        fs::create_dir_all(&self.directory)
-            .map_err(|source| JournalError::io(&self.directory, source))?;
-        set_private_directory(&self.directory)?;
-        if let Some(parent) = self.directory.parent() {
-            set_private_directory(parent)?;
-        }
+        prepare_state_directory(&self.directory)?;
 
         loop {
             let id = next_run_id();
@@ -998,14 +993,87 @@ fn create_private_file(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-fn set_private_directory(_path: &Path) -> Result<(), JournalError> {
+fn prepare_state_directory(path: &Path) -> Result<(), JournalError> {
+    if !path.is_absolute() {
+        return Err(JournalError::io(
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "journal state directory must be absolute",
+            ),
+        ));
+    }
+
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(_path, fs::Permissions::from_mode(0o700))
-            .map_err(|source| JournalError::io(_path, source))?;
+        if path == Path::new("/") {
+            return Err(JournalError::io(
+                path,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "journal state directory must not be the filesystem root",
+                ),
+            ));
+        }
+
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("/"))
+        {
+            if let Some(ancestor) = parent
+                .parent()
+                .filter(|ancestor| !ancestor.as_os_str().is_empty())
+            {
+                fs::create_dir_all(ancestor)
+                    .map_err(|source| JournalError::io(ancestor, source))?;
+            }
+
+            create_private_directory(parent)?;
+        }
+
+        create_private_directory(path)?;
     }
+
+    #[cfg(not(unix))]
+    fs::create_dir_all(path).map_err(|source| JournalError::io(path, source))?;
+
     Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_directory(path: &Path) -> Result<(), JournalError> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+
+    match builder.create(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let metadata =
+                fs::symlink_metadata(path).map_err(|source| JournalError::io(path, source))?;
+            if !metadata.file_type().is_dir() {
+                return Err(JournalError::io(
+                    path,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "journal state path must be a directory and not a symlink",
+                    ),
+                ));
+            }
+
+            set_private_directory(path)
+        }
+        Err(source) => Err(JournalError::io(path, source)),
+    }
+}
+
+#[cfg(unix)]
+fn set_private_directory(path: &Path) -> Result<(), JournalError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .map_err(|source| JournalError::io(path, source))
 }
 
 fn sync_directory(_path: &Path) -> Result<(), JournalError> {

@@ -104,6 +104,40 @@ fn journal_state_uses_owner_only_permissions() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn journal_state_rejects_symlinked_private_directories_before_mutation() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    let state = temp.0.join("state");
+    let outside = temp.0.join("outside");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    std::fs::create_dir(&state).expect("create state base");
+    std::fs::create_dir(&outside).expect("create external directory");
+    symlink(&outside, state.join("dirule")).expect("link private state directory");
+
+    let snapshot = scan(&target).expect("scan project");
+    let store = JournalStore::new(state.join("dirule/runs"));
+    let result = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        std::fs::read(target.join("before.txt")).expect("read original file"),
+        b"contents"
+    );
+    assert!(!target.join("after.txt").exists());
+    assert!(!outside.join("runs").exists());
+}
+
 fn journaled_run(files: &[(&str, &str)]) -> (TempDir, PathBuf, JournalStore, String, PathBuf) {
     let temp = TempDir::new();
     let target = temp.0.join("project");
