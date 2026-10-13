@@ -135,6 +135,22 @@ By default, `presets save` reads `dirule.toml` from the current directory. Pass 
 
 Generate a completion script from the current CLI definition with `dirule completions SHELL`. Supported shells are Bash, Elvish, Fish, PowerShell, and Zsh. Redirect the output to the completion location used by your shell.
 
+For Bash with `bash-completion`, install it for your user with:
+
+```sh
+mkdir -p ~/.local/share/bash-completion/completions
+dirule completions bash > ~/.local/share/bash-completion/completions/dirule.bash
+```
+
+For Fish, use:
+
+```sh
+mkdir -p ~/.config/fish/completions
+dirule completions fish > ~/.config/fish/completions/dirule.fish
+```
+
+If you set `XDG_DATA_HOME` or `XDG_CONFIG_HOME`, use the corresponding directory under that location instead.
+
 ## Nix
 
 Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`. The GitHub flake commands in [Install](#install) fetch the source from the public repository.
