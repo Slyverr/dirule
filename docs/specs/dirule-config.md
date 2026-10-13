@@ -124,6 +124,8 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 
 `dirule presets save NAME` validates the current directory's `dirule.toml` and saves its contents as a user preset. `--config FILE` selects a different source file, resolved from the current working directory when relative. Saving does not modify the source configuration and must fail if a preset with that name already exists; users must choose another name rather than silently replacing a preset. A saved preset is loaded with `--preset NAME`.
 
+`dirule presets export NAME` validates a saved user preset and writes its original TOML document to stdout without other output. Users can redirect that output to share or back up the preset, then save it on another machine with `dirule presets save NAME --config FILE`. Exporting an invalid or missing preset fails without writing TOML to stdout.
+
 `dirule presets remove NAME` removes a user preset after an interactive confirmation. In a non-interactive run, require `--yes`. It must not remove built-in presets.
 
 ## Target and config selection

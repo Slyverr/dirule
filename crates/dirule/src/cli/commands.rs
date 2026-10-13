@@ -148,6 +148,7 @@ pub(super) fn run(
         args::CliCommand::Presets(options) => match options.command {
             args::PresetsCommand::List { format } => presets::list(format, color),
             args::PresetsCommand::Save(options) => presets::save(options, color),
+            args::PresetsCommand::Export { name } => presets::export(name),
             args::PresetsCommand::Remove(options) => presets::remove(options, color),
         },
         args::CliCommand::Runs(options) => match options.command {

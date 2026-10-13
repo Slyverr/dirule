@@ -121,6 +121,11 @@ pub(super) enum PresetsCommand {
     },
     /// Save a project config as a global preset.
     Save(PresetSaveArgs),
+    /// Export a saved preset as TOML.
+    Export {
+        /// Name of the preset to export.
+        name: String,
+    },
     /// Remove a user preset.
     Remove(PresetRemoveArgs),
 }

@@ -80,6 +80,18 @@ pub(super) fn save(
     Ok(())
 }
 
+pub(super) fn export(name: String) -> Result<(), Box<dyn Error>> {
+    let preset_path = path(&name)?;
+    if !preset_path.is_file() {
+        return Err(format!("user preset {name:?} does not exist").into());
+    }
+
+    let (_, contents) = config::load_config(&preset_path)?;
+    io::stdout().lock().write_all(contents.as_bytes())?;
+
+    Ok(())
+}
+
 pub(super) fn remove(
     options: args::PresetRemoveArgs,
     color: args::ColorChoice,

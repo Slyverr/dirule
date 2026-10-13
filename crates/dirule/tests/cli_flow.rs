@@ -741,6 +741,78 @@ fn preset_save_copies_a_valid_config_without_overwriting_existing_presets() {
 }
 
 #[test]
+fn preset_export_preserves_config_for_transfer_and_save() {
+    let project = TempProject::new();
+    let initialized = project.run(&["init"]);
+    assert!(initialized.status.success());
+    let config = text(&project.0.join("dirule.toml"));
+
+    let mut save = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut save, &project);
+    let saved = save
+        .args(["presets", "save", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("save preset");
+    assert!(saved.status.success());
+
+    let mut export = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut export, &project);
+    let exported = export
+        .args(["--color", "always", "presets", "export", "downloads"])
+        .current_dir(&project.0)
+        .output()
+        .expect("export preset");
+
+    assert!(
+        exported.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&exported.stdout),
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    assert_eq!(exported.stdout, config.as_bytes());
+    assert!(exported.stderr.is_empty());
+
+    let portable_config = project.0.join("portable.toml");
+    fs::write(&portable_config, exported.stdout).expect("write exported config");
+
+    let mut import = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut import, &project);
+    let imported = import
+        .args(["presets", "save", "imported", "--config", "portable.toml"])
+        .current_dir(&project.0)
+        .output()
+        .expect("save exported config as another preset");
+
+    assert!(imported.status.success());
+    assert_eq!(
+        text(&preset_config_base(&project).join("dirule/presets/imported.toml")),
+        config
+    );
+}
+
+#[test]
+fn preset_export_rejects_invalid_config_without_writing_stdout() {
+    let project = TempProject::new();
+    let presets = preset_config_base(&project).join("dirule/presets");
+    fs::create_dir_all(&presets).expect("create user preset directory");
+    fs::write(presets.join("invalid.toml"), "version = \"future\"\n")
+        .expect("write invalid preset");
+
+    let mut export = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut export, &project);
+    let output = export
+        .args(["presets", "export", "invalid"])
+        .current_dir(&project.0)
+        .output()
+        .expect("export invalid preset");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid configuration"));
+}
+
+#[test]
 fn plan_loads_a_saved_preset_without_a_project_config() {
     let project = TempProject::new();
     fs::write(project.0.join("MyXMLParser.pdf"), "document").expect("write fixture file");
