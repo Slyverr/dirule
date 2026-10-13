@@ -1,10 +1,12 @@
 use crate::ScanResult;
 use crate::journal::{JournalRecorder, JournalStatus, JournalStore};
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
-use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
+
+#[path = "apply/path.rs"]
+mod path;
 
 static NEXT_TEMPORARY_RENAME: AtomicU64 = AtomicU64::new(0);
 
@@ -71,16 +73,16 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
         source,
     })?;
     for entry in &plan.entries {
-        ensure_relative(&entry.source)?;
-        ensure_relative(&entry.destination)?;
+        path::ensure_relative(&entry.source)?;
+        path::ensure_relative(&entry.destination)?;
         if entry.source == entry.destination {
             continue;
         }
         let destination = target.join(&entry.destination);
-        match ensure_parent_safe(&target, destination.parent().unwrap_or(&target)) {
+        match path::ensure_parent_safe(&target, destination.parent().unwrap_or(&target)) {
             Ok(()) => {}
-            Err(ApplyError::ExistingDestination(path)) if will_be_vacated(&target, &path, plan) => {
-            }
+            Err(ApplyError::ExistingDestination(path))
+                if path::will_be_vacated(&target, &path, plan) => {}
             Err(error @ (ApplyError::ExistingDestination(_) | ApplyError::UnsafePath(_))) => {
                 if !plan
                     .conflicts
@@ -96,8 +98,8 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
             }
             Err(error) => return Err(error),
         }
-        if destination_exists(&destination)?
-            && !will_be_vacated(&target, &destination, plan)
+        if path::destination_exists(&destination)?
+            && !path::will_be_vacated(&target, &destination, plan)
             && !plan
                 .conflicts
                 .iter()
@@ -322,7 +324,7 @@ fn apply_recorded(
         }
 
         let destination = target.join(&entry.destination);
-        let parent = nearest_existing_directory(&target, &destination)?;
+        let parent = path::nearest_existing_directory(&target, &destination)?;
         match renamore::rename_exclusive_is_atomic(parent) {
             Ok(true) => {}
             Ok(false) => {
@@ -389,8 +391,8 @@ fn apply_entry(
     progress: &mut ApplyProgress,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<(), ApplyError> {
-    ensure_relative(&entry.source)?;
-    ensure_relative(&entry.destination)?;
+    path::ensure_relative(&entry.source)?;
+    path::ensure_relative(&entry.destination)?;
     if inherited_move(entry, &progress.moved_directories) {
         return Ok(());
     }
@@ -402,8 +404,8 @@ fn apply_entry(
 
     let source = target.join(&source_relative);
     let destination = target.join(&entry.destination);
-    ensure_parent_safe(target, source.parent().unwrap_or(target))?;
-    ensure_parent_safe(target, destination.parent().unwrap_or(target))?;
+    path::ensure_parent_safe(target, source.parent().unwrap_or(target))?;
+    path::ensure_parent_safe(target, destination.parent().unwrap_or(target))?;
     let metadata = std::fs::symlink_metadata(&source).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ApplyError::MissingSource(source.clone())
@@ -427,8 +429,9 @@ fn apply_entry(
         return Err(ApplyError::ChangedSource(source));
     }
 
-    let destination_exists = destination_exists(&destination)?;
-    let destination_is_source = destination_exists && same_existing_path(&source, &destination);
+    let destination_exists = path::destination_exists(&destination)?;
+    let destination_is_source =
+        destination_exists && path::same_existing_path(&source, &destination);
     if destination_exists && !destination_is_source {
         return Err(ApplyError::ExistingDestination(destination));
     }
@@ -487,7 +490,7 @@ fn create_parent_directories(
                         recorder.directory_created(sequence, &current)?;
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                        ensure_parent_safe(root, &current)?;
+                        path::ensure_parent_safe(root, &current)?;
                     }
                     Err(source) => {
                         return Err(ApplyError::Io {
@@ -524,7 +527,7 @@ fn rollback_after_failure(
         if let Err(error) = rename_path_exclusive(
             &current,
             &original,
-            same_existing_path(&current, &original),
+            path::same_existing_path(&current, &original),
             *object,
             *kind,
             recorder,
@@ -577,8 +580,8 @@ fn validate_sources(
     snapshot: &ScanResult,
 ) -> Result<(), ApplyError> {
     for entry in entries {
-        ensure_relative(&entry.source)?;
-        ensure_relative(&entry.destination)?;
+        path::ensure_relative(&entry.source)?;
+        path::ensure_relative(&entry.destination)?;
         let moved_parent = entries.iter().any(|parent| {
             parent.kind == EntryKind::Directory
                 && parent.source != parent.destination
@@ -589,7 +592,7 @@ fn validate_sources(
             continue;
         }
         let source = target.join(&entry.source);
-        ensure_parent_safe(target, source.parent().unwrap_or(target))?;
+        path::ensure_parent_safe(target, source.parent().unwrap_or(target))?;
         let metadata = std::fs::symlink_metadata(&source).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 ApplyError::MissingSource(source.clone())
@@ -643,157 +646,6 @@ fn remap(path: &Path, moves: &[(PathBuf, PathBuf)]) -> PathBuf {
 
 fn depth(path: &Path) -> usize {
     path.components().count()
-}
-
-fn ensure_relative(path: &Path) -> Result<(), ApplyError> {
-    if path.as_os_str().is_empty()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(ApplyError::UnsafePath(path.to_path_buf()));
-    }
-
-    #[cfg(windows)]
-    if path.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_none_or(invalid_windows_component)
-    }) {
-        return Err(ApplyError::UnsafePath(path.to_path_buf()));
-    }
-
-    Ok(())
-}
-
-#[cfg(windows)]
-fn invalid_windows_component(value: &str) -> bool {
-    if value.ends_with(' ') || value.ends_with('.') {
-        return true;
-    }
-
-    if value.chars().any(|character| {
-        character <= '\u{001f}'
-            || matches!(
-                character,
-                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
-            )
-    }) {
-        return true;
-    }
-
-    let device_name = value
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches(' ')
-        .to_ascii_uppercase();
-    if matches!(device_name.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
-        return true;
-    }
-
-    ["COM", "LPT"].iter().any(|prefix| {
-        device_name
-            .strip_prefix(prefix)
-            .and_then(|suffix| {
-                let mut characters = suffix.chars();
-                let digit = characters.next()?;
-                (characters.next().is_none() && matches!(digit, '1'..='9' | '¹' | '²' | '³'))
-                    .then_some(())
-            })
-            .is_some()
-    })
-}
-
-fn ensure_parent_safe(root: &Path, path: &Path) -> Result<(), ApplyError> {
-    let relative = path
-        .strip_prefix(root)
-        .map_err(|_| ApplyError::UnsafePath(path.to_path_buf()))?;
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(ApplyError::UnsafePath(current));
-            }
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(ApplyError::ExistingDestination(current));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(source) => {
-                return Err(ApplyError::Io {
-                    path: current,
-                    source,
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn destination_exists(path: &Path) -> Result<bool, ApplyError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(ApplyError::Io {
-            path: path.to_path_buf(),
-            source,
-        }),
-    }
-}
-
-fn nearest_existing_directory(root: &Path, destination: &Path) -> Result<PathBuf, ApplyError> {
-    let mut current = destination.parent().unwrap_or(root).to_path_buf();
-    loop {
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                return Ok(current);
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(ApplyError::Io {
-                    path: current,
-                    source,
-                });
-            }
-        }
-        if current == root || !current.pop() {
-            return Err(ApplyError::UnsafePath(destination.to_path_buf()));
-        }
-    }
-}
-
-fn will_be_vacated(target: &Path, path: &Path, plan: &Plan) -> bool {
-    let Ok(relative) = path.strip_prefix(target) else {
-        return false;
-    };
-
-    plan.entries.iter().any(|entry| {
-        entry.source != entry.destination
-            && (entry.source == relative
-                || (entry.kind == EntryKind::Directory && relative.starts_with(&entry.source))
-                || same_existing_path(&target.join(&entry.source), path))
-    })
-}
-
-fn same_existing_path(left: &Path, right: &Path) -> bool {
-    let Ok(left_metadata) = std::fs::symlink_metadata(left) else {
-        return false;
-    };
-    let Ok(right_metadata) = std::fs::symlink_metadata(right) else {
-        return false;
-    };
-    if left_metadata.file_type().is_symlink() || right_metadata.file_type().is_symlink() {
-        return false;
-    }
-
-    matches!(
-        (std::fs::canonicalize(left), std::fs::canonicalize(right)),
-        (Ok(left), Ok(right)) if left == right
-    )
 }
 
 fn rename_path_exclusive(
