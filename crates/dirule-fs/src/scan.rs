@@ -1,6 +1,7 @@
 use dirule_core::{Entry, EntryKind};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 use thiserror::Error;
@@ -298,10 +299,15 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
             "target is outside its reported Git worktree: {error}"
         ))
     })?;
-    let output = Command::new("git")
-        .arg("-C")
+    let mut command = Command::new("git");
+    command
+        .args(["--literal-pathspecs", "-C"])
         .arg(&root)
-        .args(["ls-files", "-z"])
+        .args(["ls-files", "-z"]);
+    if let Some(pathspec) = literal_pathspec(target_from_root) {
+        command.arg("--").arg(pathspec);
+    }
+    let output = command
         .output()
         .map_err(|error| ScanError::Git(format!("failed to run git ls-files: {error}")))?;
     if !output.status.success() {
@@ -328,6 +334,20 @@ fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), Scan
         }
     }
     Ok((paths, findings))
+}
+
+fn literal_pathspec(path: &Path) -> Option<OsString> {
+    let mut pathspec = OsString::new();
+    for component in path.components() {
+        let Component::Normal(component) = component else {
+            return None;
+        };
+        if !pathspec.is_empty() {
+            pathspec.push("/");
+        }
+        pathspec.push(component);
+    }
+    (!pathspec.is_empty()).then_some(pathspec)
 }
 
 fn relative_unicode(root: &Path, path: &Path) -> Option<PathBuf> {

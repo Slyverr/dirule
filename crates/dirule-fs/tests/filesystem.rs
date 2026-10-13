@@ -85,6 +85,50 @@ fn scan_global_gitignore_child() {
 }
 
 #[test]
+fn scan_limits_tracked_git_paths_to_targets_with_literal_characters() {
+    let temp = TempDir::new();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&temp.0)
+        .output();
+    let Ok(init) = init else {
+        return;
+    };
+    assert!(init.status.success(), "initialize Git fixture");
+
+    let target = temp.0.join("dir[1]");
+    std::fs::create_dir_all(&target).expect("create target directory");
+    std::fs::write(target.join(".gitignore"), "kept.txt\n").expect("write target ignore rule");
+    std::fs::write(target.join("kept.txt"), "tracked and ignored").expect("write target file");
+    std::fs::create_dir(temp.0.join("dir1")).expect("create glob-like sibling");
+    std::fs::write(temp.0.join("dir1/unrelated.txt"), "outside target")
+        .expect("write unrelated file");
+
+    let add_rules = Command::new("git")
+        .args(["add", "--", "dir[1]/.gitignore"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("stage target ignore rules");
+    assert!(add_rules.success(), "stage target ignore rules");
+    let add_ignored = Command::new("git")
+        .args(["add", "-f", "--", "dir[1]/kept.txt"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("force-stage ignored target file");
+    assert!(add_ignored.success(), "force-stage ignored target file");
+
+    let result = scan(&target).expect("scan nested target with pathspec characters");
+    let paths = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+
+    assert!(paths.contains(&PathBuf::from("kept.txt")));
+    assert!(!paths.contains(&PathBuf::from("unrelated.txt")));
+}
+
+#[test]
 fn scan_includes_git_tracked_paths_even_when_ignored() {
     let temp = TempDir::new();
     let init = Command::new("git")
