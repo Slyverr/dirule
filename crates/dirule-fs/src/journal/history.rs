@@ -717,13 +717,13 @@ pub(super) fn preflight_undo(
                 }
                 let destination_path = checked_target_path(target, source)?;
                 if path_exists(&destination_path)?
-                    && !was_released(&released, source)?
+                    && !was_released(&released, &destination_path)?
                     && !same_existing_object_alias(&source_path, &destination_path, identity)?
                 {
                     return Err(JournalError::ExistingDestination(destination_path));
                 }
                 current_locations.insert(*object, (source.clone(), identity.clone()));
-                released.push((destination.clone(), identity.clone()));
+                released.push((source_path, identity.clone()));
             }
             UndoMutation::Directory {
                 path,
@@ -740,7 +740,7 @@ pub(super) fn preflight_undo(
                             path: absolute,
                         });
                     }
-                } else if path_exists(&absolute)? && !was_released(&released, path)? {
+                } else if path_exists(&absolute)? && !was_released(&released, &absolute)? {
                     return Err(JournalError::ExistingDestination(absolute));
                 }
             }
