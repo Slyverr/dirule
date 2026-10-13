@@ -158,21 +158,28 @@ pub fn apply_journaled(
                 run_id: Some(run_id),
             })
         }
-        Err(source) => {
-            let status = if matches!(source, ApplyError::RollbackFailed { .. }) {
-                JournalStatus::PartiallyRecovered
-            } else {
-                JournalStatus::FailedRolledBack
-            };
-            let source = match recorder.finish(status) {
-                Ok(()) => source,
-                Err(journal_error) => ApplyError::Journal(Box::new(journal_error)),
-            };
-            Err(ApplyError::RunFailed {
-                run_id,
-                source: Box::new(source),
-            })
-        }
+        Err(source) => Err(finish_failed_apply(&mut recorder, run_id, source)),
+    }
+}
+
+fn finish_failed_apply(
+    recorder: &mut JournalRecorder<'_>,
+    run_id: String,
+    source: ApplyError,
+) -> ApplyError {
+    let status = if matches!(source, ApplyError::RollbackFailed { .. }) {
+        JournalStatus::PartiallyRecovered
+    } else {
+        JournalStatus::FailedRolledBack
+    };
+    let source = match recorder.finish(status) {
+        Ok(()) => source,
+        Err(journal_error) => ApplyError::Journal(Box::new(journal_error)),
+    };
+
+    ApplyError::RunFailed {
+        run_id,
+        source: Box::new(source),
     }
 }
 
