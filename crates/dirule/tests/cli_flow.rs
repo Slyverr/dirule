@@ -892,6 +892,24 @@ fn plan_json_reports_conflicts_without_mutating_the_target() {
 }
 
 #[test]
+fn check_reports_conflicts_without_mutating_the_target() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("A__B.txt"), "first").expect("write first conflict source");
+    fs::write(project.0.join("A--B.txt"), "second").expect("write second conflict source");
+
+    let check = project.run(&["check"]);
+
+    assert_eq!(check.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("1 conflict(s)"));
+    assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
+    assert_eq!(text(&project.0.join("A__B.txt")), "first");
+    assert_eq!(text(&project.0.join("A--B.txt")), "second");
+    assert!(!project.0.join("a-b.txt").exists());
+    assert!(!project.journal_directory().exists());
+}
+
+#[test]
 fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     let project = TempProject::new();
     fs::write(project.0.join("MyFile.txt"), "content").expect("write source file");
