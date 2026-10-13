@@ -13,6 +13,20 @@ pub(super) enum PlanContext {
     Apply,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ApplyStatus {
+    Applied,
+    NoChanges,
+    Cancelled,
+}
+
+pub(super) struct ApplySummary<'a> {
+    pub(super) status: ApplyStatus,
+    pub(super) moved: usize,
+    pub(super) skipped: usize,
+    pub(super) run_id: Option<&'a str>,
+}
+
 pub(super) fn created_config(path: &Path, color: ColorChoice) {
     println!("{} {}", paint("Created", "32", color), path.display());
 }
@@ -48,13 +62,17 @@ pub(super) fn error(message: &str, color: ColorChoice) {
 }
 
 pub(super) fn plan(
+    target: &Path,
     plan: &Plan,
     format: OutputFormat,
     color: ColorChoice,
     context: PlanContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
-        println!("{}", serde_json::to_string_pretty(&plan_value(plan))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&plan_value(target, plan))?
+        );
         return Ok(());
     }
 
@@ -70,6 +88,11 @@ pub(super) fn plan(
         PlanContext::Apply => ("Apply preview", "36"),
     };
     println!("{}", paint(label, heading_color, color));
+    println!(
+        "  {} {}",
+        paint("Target:", "36", color),
+        paint(&target.display().to_string(), "36", color)
+    );
     println!(
         "  {} rename(s), {} conflict(s), {} finding(s)",
         changes,
@@ -119,53 +142,67 @@ pub(super) fn plan(
 }
 
 pub(super) fn apply_result(
+    target: &Path,
     plan: &Plan,
-    status: &str,
-    moved: usize,
-    skipped: usize,
-    run_id: Option<&str>,
+    summary: ApplySummary<'_>,
     format: OutputFormat,
     color: ColorChoice,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if format == OutputFormat::Json {
         let value = serde_json::json!({
             "schema_version": CURRENT_OUTPUT_VERSION,
-            "plan": plan_value(plan),
+            "plan": plan_value(target, plan),
             "execution": {
-                "status": status,
-                "moved": moved,
-                "skipped": skipped,
-                "run_id": run_id,
+                "status": summary.status.as_str(),
+                "moved": summary.moved,
+                "skipped": summary.skipped,
+                "run_id": summary.run_id,
             }
         });
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
     }
 
-    match status {
-        "applied" => {
-            if skipped == 0 {
-                println!("{} Applied {moved} rename(s).", paint("Done.", "32", color));
+    match summary.status {
+        ApplyStatus::Applied => {
+            if summary.skipped == 0 {
+                println!(
+                    "{} Applied {} rename(s).",
+                    paint("Done.", "32", color),
+                    summary.moved
+                );
             } else {
                 println!(
-                    "{} Applied {moved} rename(s); skipped {skipped} conflict(s).",
-                    paint("Done.", "32", color)
+                    "{} Applied {} rename(s); skipped {} conflict(s).",
+                    paint("Done.", "32", color),
+                    summary.moved,
+                    summary.skipped
                 );
             }
-            if let Some(run_id) = run_id {
+            if let Some(run_id) = summary.run_id {
                 println!("Undo with: dirule undo {run_id}");
             }
         }
-        "no_changes" => no_changes(color),
-        "cancelled" => cancelled("Apply", color),
-        _ => println!("Apply status: {status}"),
+        ApplyStatus::NoChanges => no_changes(color),
+        ApplyStatus::Cancelled => cancelled("Apply", color),
     }
     Ok(())
 }
 
-fn plan_value(plan: &Plan) -> serde_json::Value {
+impl ApplyStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::NoChanges => "no_changes",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+fn plan_value(target: &Path, plan: &Plan) -> serde_json::Value {
     serde_json::json!({
         "schema_version": CURRENT_OUTPUT_VERSION,
+        "target": target,
         "entries": plan.entries.iter().map(|entry| serde_json::json!({
             "source": portable_path(&entry.source),
             "destination": portable_path(&entry.destination),

@@ -50,7 +50,7 @@ cargo run -p dirule -- apply
 
 `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`. Use `--format json` for structured output.
 
-JSON plan paths are target-relative and use `/` separators on every platform.
+JSON plans include the canonical target path; their source and destination paths are target-relative and use `/` separators on every platform.
 
 ## Apply history
 

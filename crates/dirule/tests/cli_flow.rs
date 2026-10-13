@@ -106,7 +106,9 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
 
     let plain = project.run(&["plan", "--color", "never"]);
     assert!(plain.status.success());
-    assert!(!String::from_utf8_lossy(&plain.stdout).contains('\u{1b}'));
+    let plain_output = String::from_utf8_lossy(&plain.stdout);
+    assert!(plain_output.contains(&format!("Target: {}", project.0.display())));
+    assert!(!plain_output.contains('\u{1b}'));
 
     let check = project.run(&["check"]);
     assert_eq!(check.status.code(), Some(2));
@@ -116,6 +118,7 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
     let json = project.run(&["plan", "--format", "json"]);
     assert!(json.status.success());
     let value: serde_json::Value = serde_json::from_slice(&json.stdout).expect("valid JSON plan");
+    assert_eq!(value["target"], project.0.to_string_lossy().as_ref());
     let entries = value["entries"].as_array().expect("plan entries");
     let changes = entries
         .iter()
@@ -183,6 +186,10 @@ fn apply_and_undo_emit_single_json_documents() {
     let apply: serde_json::Value =
         serde_json::from_slice(&apply.stdout).expect("one apply JSON document");
     assert_eq!(apply["execution"]["status"], "applied");
+    assert_eq!(
+        apply["plan"]["target"],
+        project.0.to_string_lossy().as_ref()
+    );
     assert_eq!(apply["execution"]["moved"], 1);
     let run_id = apply["execution"]["run_id"]
         .as_str()
@@ -510,6 +517,7 @@ fn explicit_target_overrides_the_configured_target() {
 
     assert!(plan.status.success());
     let output = String::from_utf8_lossy(&plan.stdout);
+    assert!(output.contains(&format!("Target: {}", override_target.display())));
     assert!(output.contains("MyXMLParser.txt -> my-xml-parser.txt"));
     assert!(!output.contains("OtherFile.txt"));
 }

@@ -45,9 +45,9 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         CliCommand::Init => initialize(color),
         CliCommand::Check(options) => {
             let format = options.format;
-            let (_, result, _) = evaluate(options)?;
+            let (target, result, _) = evaluate(options)?;
 
-            output::plan(&result, format, color, output::PlanContext::Check)?;
+            output::plan(&target, &result, format, color, output::PlanContext::Check)?;
             if result.has_changes() || !result.is_conflict_free() {
                 return Err("target does not satisfy the configured rules".into());
             }
@@ -56,9 +56,15 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
         }
         CliCommand::Plan(options) => {
             let format = options.format;
-            let (_, result, _) = evaluate(options)?;
+            let (target, result, _) = evaluate(options)?;
 
-            output::plan(&result, format, color, output::PlanContext::Preview)?;
+            output::plan(
+                &target,
+                &result,
+                format,
+                color,
+                output::PlanContext::Preview,
+            )?;
             if !result.is_conflict_free() {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());
             }
@@ -74,13 +80,24 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
             let (target, result, snapshot) = evaluate(operation)?;
 
             if format == args::OutputFormat::Human {
-                output::plan(&result, format, color, output::PlanContext::Apply)?;
+                output::plan(&target, &result, format, color, output::PlanContext::Apply)?;
             }
             if !result.is_conflict_free() && on_conflict == ConflictAction::Abort {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());
             }
             if !result.has_changes() {
-                output::apply_result(&result, "no_changes", 0, 0, None, format, color)?;
+                output::apply_result(
+                    &target,
+                    &result,
+                    output::ApplySummary {
+                        status: output::ApplyStatus::NoChanges,
+                        moved: 0,
+                        skipped: 0,
+                        run_id: None,
+                    },
+                    format,
+                    color,
+                )?;
                 return Ok(());
             }
             if !confirm(
@@ -88,7 +105,18 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
                 "use --yes to apply without an interactive terminal",
                 yes,
             )? {
-                output::apply_result(&result, "cancelled", 0, 0, None, format, color)?;
+                output::apply_result(
+                    &target,
+                    &result,
+                    output::ApplySummary {
+                        status: output::ApplyStatus::Cancelled,
+                        moved: 0,
+                        skipped: 0,
+                        run_id: None,
+                    },
+                    format,
+                    color,
+                )?;
                 return Ok(());
             }
             let policy = match on_conflict {
@@ -98,11 +126,14 @@ fn run_command(command: CliCommand, color: ColorChoice) -> Result<(), Box<dyn Er
             let store = JournalStore::new(journal_directory()?);
             let applied = apply_journaled(&target, &result, &snapshot, policy, &store)?;
             output::apply_result(
+                &target,
                 &result,
-                "applied",
-                applied.report.moved.len(),
-                applied.report.skipped.len(),
-                applied.run_id.as_deref(),
+                output::ApplySummary {
+                    status: output::ApplyStatus::Applied,
+                    moved: applied.report.moved.len(),
+                    skipped: applied.report.skipped.len(),
+                    run_id: applied.run_id.as_deref(),
+                },
                 format,
                 color,
             )?;
@@ -191,6 +222,10 @@ fn evaluate(
         .map(|path| resolve(&cwd, path))
         .or_else(|| config.target.clone().map(|path| resolve(&cwd, path)))
         .unwrap_or(cwd);
+    let target = target
+        .canonicalize()
+        .map_err(|error| format!("cannot access target {}: {error}", target.display()))?;
+
     let mut scan = scan(&target)?;
     let mut plan = plan(&config, &scan.entries)?;
     validate_destinations(&target, &mut plan)?;
