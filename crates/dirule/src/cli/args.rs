@@ -34,6 +34,8 @@ pub(super) enum CliCommand {
     Sort(SortArgs),
     /// Rename entry names with a built-in transformation.
     Rename(RenameArgs),
+    /// List the effective built-in and user-defined categories.
+    Categories(CategoriesArgs),
     /// Manage global presets.
     Presets(PresetsArgs),
     /// Inspect saved apply runs.
@@ -56,6 +58,9 @@ impl CliCommand {
             Self::Apply(options) => options.operation.format,
             Self::Sort(options) => options.operation.format,
             Self::Rename(options) => options.operation.format,
+            Self::Categories(options) => match &options.command {
+                CategoriesCommand::List { format } => *format,
+            },
             Self::Presets(options) => match &options.command {
                 PresetsCommand::List { format } => *format,
                 PresetsCommand::Save(_)
@@ -224,6 +229,22 @@ pub(super) struct PresetsArgs {
     pub(super) command: PresetsCommand,
 }
 
+#[derive(Debug, Args)]
+pub(super) struct CategoriesArgs {
+    #[command(subcommand)]
+    pub(super) command: CategoriesCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum CategoriesCommand {
+    /// List effective built-in and user-defined categories.
+    List {
+        /// Output as human-readable text or JSON.
+        #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
+        format: OutputFormat,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub(super) enum PresetsCommand {
     /// List available presets.
@@ -320,7 +341,8 @@ pub(super) enum ColorChoice {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplyArgs, Cli, CliCommand, ConflictAction, OutputFormat, PresetsCommand, ValidateArgs,
+        ApplyArgs, CategoriesCommand, Cli, CliCommand, ConflictAction, OutputFormat,
+        PresetsCommand, ValidateArgs,
     };
     use clap::Parser;
 
@@ -417,6 +439,22 @@ mod tests {
             Some(std::path::Path::new("rules.toml"))
         );
         assert_eq!(format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn category_listing_parses_json_output() {
+        let cli = Cli::try_parse_from(["dirule", "categories", "list", "--format", "json"])
+            .expect("valid category listing options");
+
+        assert_eq!(cli.command.output_format(), OutputFormat::Json);
+        assert!(matches!(
+            cli.command,
+            CliCommand::Categories(super::CategoriesArgs {
+                command: CategoriesCommand::List {
+                    format: OutputFormat::Json
+                }
+            })
+        ));
     }
 
     #[test]

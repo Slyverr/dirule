@@ -8,6 +8,8 @@ Successful JSON results are written to stdout as one document with a `schema_ver
 
 Commands without an output-format option use human error output. `presets export` writes TOML to stdout and reports failures as human text on stderr.
 
+`categories list --format json` writes a versioned object containing the effective categories in name order. Each category includes its name, normalized extensions, and target-relative destination. The command reads user category configuration but does not modify it.
+
 ## Errors
 
 An error document has this shape:

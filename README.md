@@ -69,6 +69,8 @@ Without `--config` or `--preset`, Dirule looks for `dirule.toml` directly inside
 Sort files or rename entries without creating a configuration. These commands preview changes by default; pass `--apply` to request changes and `--yes` only when a non-interactive run should skip confirmation.
 
 ```sh
+dirule categories list
+dirule categories list --format json
 dirule sort pdf --target ~/Downloads
 dirule sort images videos pdf --target ~/Downloads
 dirule sort pdf --target ~/Downloads --apply
@@ -77,6 +79,8 @@ dirule rename kebab-case --target src/
 ```
 
 `sort` accepts multiple extensions or categories and matches extensions without regard to case. Built-in categories include `images`, `videos`, `audio`, and `documents`; recursive sorting collects nested files under their selected destinations. Duplicate destination names and overlapping category selectors are reported before changes. Users can add categories or customize the built-ins in `categories.toml` under Dirule's platform-specific user config directory. `rename` uses the built-in case transformations. Dirule changes paths only and does not update references inside files. See the [quick operations specification](docs/specs/quick-operations.md) for the full behavior and category format.
+
+Use `dirule categories list` to inspect the effective built-in and user-defined categories, their extensions, and destinations.
 
 ## CI and automation
 

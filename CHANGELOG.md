@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- List the effective built-in and user-defined sort categories with `dirule categories list`.
+
 ### Fixed
 
 - Reject category extensions with multiple leading dots instead of silently normalizing them.

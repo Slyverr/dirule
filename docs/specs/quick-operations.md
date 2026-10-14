@@ -5,6 +5,7 @@ Quick operations provide a preview-first path for common sorting and naming task
 ## Commands
 
 ```text
+dirule categories list [--format human|json]
 dirule sort SELECTOR... [--target PATH] [--recursive] [--apply] [--yes]
 dirule sort --by extension [--target PATH] [--recursive] [--apply] [--yes]
 dirule rename TRANSFORM [--target PATH] [--recursive] [--apply] [--yes]
@@ -33,6 +34,8 @@ destination = "reading/books"
 ```
 
 Category names start with a lowercase letter and contain lowercase letters, digits, or hyphens. Extensions are ASCII letters or digits; an optional leading dot is accepted. Destinations are relative paths under the selected target and use `/`. Defining a category with a built-in name replaces that built-in's extensions and destination. Other definitions add categories. The optional catalog is versioned independently from project `dirule.toml` files. An absent file uses built-in categories; malformed, unknown-version, or unsafe definitions are errors. If the selected categories or extensions overlap but route the same extension to different destinations, Dirule reports an error before scanning.
+
+`dirule categories list` displays the effective catalog after user categories have been loaded and built-ins overridden. It is read-only and accepts `--format human|json`.
 
 ## Scope and preview
 

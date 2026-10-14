@@ -1,4 +1,4 @@
-use super::{args, config, journal, output, presets};
+use super::{args, categories, config, journal, output, presets};
 use clap::CommandFactory;
 use std::error::Error;
 use std::fmt;
@@ -85,6 +85,9 @@ pub(super) fn run(
         }
         args::CliCommand::Sort(options) => super::quick::sort(options, color),
         args::CliCommand::Rename(options) => super::quick::rename(options, color),
+        args::CliCommand::Categories(options) => match options.command {
+            args::CategoriesCommand::List { format } => categories::list(format, color),
+        },
         args::CliCommand::Presets(options) => match options.command {
             args::PresetsCommand::List { format } => presets::list(format, color),
             args::PresetsCommand::Save(options) => presets::save(options, color),
