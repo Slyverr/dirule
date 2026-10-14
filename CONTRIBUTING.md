@@ -30,7 +30,9 @@ cargo deny check
 
 For changes to rule behavior, cover the behavior and its edge cases. For filesystem changes, also cover conflicts, ignored paths, and failure paths. State which checks ran when reporting the change.
 
-Put integration tests for public behavior in the crate's `tests/` directory and group larger suites by behavior. For a multi-file suite, use one integration-test entry point with sibling modules, such as `tests/cli_flow.rs` and `tests/cli_flow/`; keep shared fixtures in that suite's `common.rs`. Exercise public APIs or invoke the real CLI in an isolated temporary project. Keep unit tests that need private implementation details beside the code they test in a `#[cfg(test)]` module. Avoid collecting crate-wide behavior tests in `lib.rs`.
+Put integration tests for public behavior in the crate's `tests/` directory and group larger suites by behavior. For a multi-file suite, use one integration-test entry point with sibling modules, such as `tests/cli_flow.rs` and `tests/cli_flow/`; keep shared fixtures in that suite's `common.rs`. Exercise public APIs as a downstream caller would, or invoke the real CLI in an isolated temporary project. Keep focused unit tests beside the implementation only when they need private behavior that cannot be covered meaningfully through the public API; do not expose internals just to test them. Avoid duplicating the same behavior at both levels or collecting crate-wide behavior tests in `lib.rs`.
+
+Prefer real deterministic logic over mocks. Use mocks or fakes at genuine external boundaries when they make a test more reliable; use temporary directories for filesystem behavior and invoke the CLI for end-to-end command behavior.
 
 ## Benchmarks
 
