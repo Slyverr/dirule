@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Preserve comments and formatting when editing an existing TOML configuration.
+
 ### Improved
 
 - Reduce scan overhead when no Git-ignored tracked paths need recovery.
