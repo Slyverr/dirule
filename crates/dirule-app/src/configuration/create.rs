@@ -1,9 +1,9 @@
+use super::file::write_new;
 use dirule_core::{CURRENT_CONFIG_VERSION, parse_config};
 use std::error::Error;
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum ConfigCreationError {
@@ -21,26 +21,10 @@ pub fn create_starter(path: impl Into<PathBuf>) -> Result<(), ConfigCreationErro
     let contents = starter_document();
     parse_config(&contents).map_err(ConfigCreationError::InvalidStarter)?;
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|source| ConfigCreationError::Io {
-            path: path.clone(),
-            source,
-        })?;
-
-    if let Err(source) = file.write_all(contents.as_bytes()) {
-        remove_partial(&path, file);
-
-        return Err(ConfigCreationError::Io { path, source });
-    }
-
-    if let Err(source) = file.sync_all() {
-        remove_partial(&path, file);
-
-        return Err(ConfigCreationError::Io { path, source });
-    }
+    write_new(&path, contents.as_bytes()).map_err(|source| ConfigCreationError::Io {
+        path: path.clone(),
+        source,
+    })?;
 
     Ok(())
 }
@@ -49,11 +33,6 @@ fn starter_document() -> String {
     format!(
         "version = \"{CURRENT_CONFIG_VERSION}\"\nname = \"Local rules\"\ntarget = \".\"\n\n[[rules]]\nname = \"Normalize file names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n"
     )
-}
-
-fn remove_partial(path: &Path, file: fs::File) {
-    drop(file);
-    let _ = fs::remove_file(path);
 }
 
 impl fmt::Display for ConfigCreationError {

@@ -1,8 +1,9 @@
+use crate::configuration::file::write_new;
 use dirule_core::{Config, parse_config};
 use std::error::Error;
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -189,31 +190,17 @@ impl PresetStore {
             path: self.directory.clone(),
             source,
         })?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&destination)
-            .map_err(|source| {
-                if source.kind() == io::ErrorKind::AlreadyExists {
-                    PresetError::AlreadyExists(destination.clone())
-                } else {
-                    PresetError::Io {
-                        action: "create",
-                        path: destination.clone(),
-                        source,
-                    }
+        write_new(&destination, contents.as_bytes()).map_err(|source| {
+            if source.kind() == io::ErrorKind::AlreadyExists {
+                PresetError::AlreadyExists(destination.clone())
+            } else {
+                PresetError::Io {
+                    action: "create",
+                    path: destination.clone(),
+                    source,
                 }
-            })?;
-        if let Err(source) = file.write_all(contents.as_bytes()) {
-            drop(file);
-            let _ = fs::remove_file(&destination);
-
-            return Err(PresetError::Io {
-                action: "write",
-                path: destination,
-                source,
-            });
-        }
+            }
+        })?;
 
         Ok(destination)
     }

@@ -8,6 +8,7 @@ use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, TomlError};
 
 mod create;
+pub(crate) mod file;
 mod loader;
 mod selection;
 mod source;
