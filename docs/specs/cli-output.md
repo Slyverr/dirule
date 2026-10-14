@@ -31,3 +31,5 @@ The stable error codes are:
 The `message` is for display and may change between releases. Consumers should branch on `code` and `exit_code`, not parse the message. A successful command exits with status `0`.
 
 When `check --format json` finds violations, stdout contains the versioned plan result and stderr contains the `check_failed` document. These are separate streams; Dirule never concatenates multiple JSON documents into one stream.
+
+Plan arrays have deterministic ordering for the same target and configuration. Entries follow planner order, conflicts follow planner order, and findings preserve planner order followed by scanner findings sorted lexically.

@@ -1147,34 +1147,23 @@ fn scan_requires_directory_target() {
 
 #[cfg(unix)]
 #[test]
-fn scan_skips_special_files() {
+fn scan_sorts_findings_for_skipped_special_files() {
     use std::os::unix::net::UnixListener;
 
     let temp = TempDir::new();
-    let socket_path = temp.0.join("service.sock");
-    let _listener = match UnixListener::bind(&socket_path) {
-        Ok(listener) => listener,
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-            eprintln!("skipping Unix socket fixture: {error}");
-            return;
-        }
-        Err(error) => panic!("bind Unix socket: {error}"),
-    };
+    let _listeners = ["z.sock", "m.sock", "a.sock"]
+        .map(|name| UnixListener::bind(temp.0.join(name)).expect("bind Unix socket fixture"));
 
     let result = scan(&temp.0).expect("scan target");
 
-    assert!(
-        result
-            .entries
-            .iter()
-            .all(|entry| entry.path.as_path() != Path::new("service.sock"))
-    );
-    assert!(
-        result
-            .findings
-            .iter()
-            .any(|finding| finding.contains("non-regular filesystem entry"))
-    );
+    assert!(result.entries.iter().all(|entry| {
+        entry
+            .path
+            .extension()
+            .is_none_or(|extension| extension != "sock")
+    }));
+    assert_eq!(result.findings.len(), 3);
+    assert!(result.findings.is_sorted());
 }
 
 #[cfg(target_os = "linux")]

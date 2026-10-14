@@ -229,6 +229,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         });
     }
     entries.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+    findings.sort_unstable();
 
     Ok(ScanResult {
         entries,
