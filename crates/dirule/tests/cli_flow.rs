@@ -2438,6 +2438,34 @@ fn cli_reports_a_skipped_symlink_once() {
 
 #[cfg(unix)]
 #[test]
+fn check_passes_when_only_skipped_symlinks_are_found() {
+    use std::os::unix::fs::symlink;
+
+    let project = TempProject::new();
+    fs::write(project.0.join("target.txt"), "target").expect("write target file");
+    symlink("target.txt", project.0.join("link")).expect("create symlink");
+    assert!(project.run(&["init"]).status.success());
+
+    let output = project.run(&["check", "--format", "json"]);
+    assert!(output.status.success());
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid check JSON");
+
+    assert_eq!(value["diagnostics"][0]["kind"], "skipped_symlink");
+    assert_eq!(value["diagnostics"][0]["path"], "link");
+    assert!(
+        project
+            .0
+            .join("link")
+            .symlink_metadata()
+            .expect("inspect symlink")
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn plan_json_keeps_finding_messages_and_exposes_structured_diagnostics() {
     use std::os::unix::fs::symlink;
 
