@@ -1,24 +1,13 @@
 use super::{args, output};
 use dirule_app::configuration::{self, ConfigurationLoadError, ConfigurationSource};
 use dirule_app::presets::PresetStore;
-use dirule_core::CURRENT_CONFIG_VERSION;
 use std::error::Error;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 pub(super) fn initialize(color: args::ColorChoice) -> Result<(), Box<dyn Error>> {
     let path = std::env::current_dir()?.join("dirule.toml");
-    let content = format!(
-        "version = \"{CURRENT_CONFIG_VERSION}\"\nname = \"Local rules\"\ntarget = \".\"\n\n[[rules]]\nname = \"Normalize file names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n"
-    );
+    dirule_app::configuration::create_starter(&path)?;
 
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
-    file.write_all(content.as_bytes())?;
     output::created_config(&path, color)?;
     Ok(())
 }

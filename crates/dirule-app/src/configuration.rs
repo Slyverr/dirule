@@ -7,10 +7,12 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, TomlError};
 
+mod create;
 mod loader;
 mod selection;
 mod source;
 
+pub use create::{ConfigCreationError, create_starter};
 pub use loader::{ConfigurationLoadError, LoadedConfiguration, load, load_source};
 pub use selection::{ConfigurationSelectionError, discover_source};
 pub use source::{ConfigurationSource, ConfigurationSourceKind};

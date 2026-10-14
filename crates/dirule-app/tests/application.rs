@@ -57,6 +57,44 @@ fn config_with_target(target: Option<&Path>) -> String {
 }
 
 #[test]
+fn starter_configuration_is_created_and_loads_through_the_public_api() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+
+    dirule_app::configuration::create_starter(&path).expect("create starter config");
+
+    let loaded = dirule_app::configuration::load(&path).expect("load starter config");
+    assert_eq!(loaded.config().name.as_deref(), Some("Local rules"));
+    assert_eq!(loaded.config().target.as_deref(), Some(Path::new(".")));
+    assert_eq!(loaded.config().rules.len(), 1);
+    assert_eq!(loaded.config().rules[0].name, "Normalize file names");
+}
+
+#[test]
+fn starter_configuration_does_not_replace_an_existing_file() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    fs::write(&path, "existing configuration").expect("write existing config");
+
+    let error = dirule_app::configuration::create_starter(&path)
+        .expect_err("starter creation must not overwrite an existing file");
+
+    assert!(error.to_string().contains("cannot create"));
+    assert_eq!(fs::read_to_string(path).unwrap(), "existing configuration");
+}
+
+#[test]
+fn starter_configuration_requires_an_absolute_path() {
+    let error = dirule_app::configuration::create_starter("dirule.toml")
+        .expect_err("starter creation must not depend on the process current directory");
+
+    assert!(matches!(
+        error,
+        dirule_app::configuration::ConfigCreationError::RelativePath(_)
+    ));
+}
+
+#[test]
 fn preview_and_authorized_apply_share_the_operation_api() {
     let target = TempTarget::new();
     let source = target.join("MyFile.txt");
