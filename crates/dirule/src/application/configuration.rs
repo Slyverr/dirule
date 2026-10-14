@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, TomlError};
 
+mod loader;
+
+pub use loader::{ConfigurationLoadError, LoadedConfiguration, load};
+
 pub struct ConfigEditor {
     path: PathBuf,
     original: String,

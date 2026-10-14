@@ -159,6 +159,38 @@ fn application_path_resolution_keeps_absolute_paths_and_anchors_relative_paths()
 }
 
 #[test]
+fn configuration_loader_exposes_validated_config_and_source_path() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "# project rules\nversion = \"{}\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, &contents).expect("write project config");
+
+    let loaded = dirule::application::configuration::load(&path).expect("load project config");
+
+    assert_eq!(loaded.path(), path);
+    assert_eq!(loaded.config().rules.len(), 1);
+    assert_eq!(loaded.config().rules[0].name, "Normalize names");
+}
+
+#[test]
+fn configuration_loader_errors_include_the_source_path() {
+    let target = TempTarget::new();
+    let path = target.join("broken.toml");
+    fs::write(&path, "version = [").expect("write invalid config");
+
+    let error = dirule::application::configuration::load(&path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        dirule::application::configuration::ConfigurationLoadError::Invalid { .. }
+    ));
+    assert!(error.to_string().contains(&path.display().to_string()));
+}
+
+#[test]
 fn config_editor_preserves_comments_and_file_permissions() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

@@ -1,6 +1,7 @@
 use super::{args, output};
+use crate::application::configuration;
 use crate::application::presets::PresetStore;
-use dirule_core::{CURRENT_CONFIG_VERSION, Config, parse_config};
+use dirule_core::CURRENT_CONFIG_VERSION;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
@@ -30,11 +31,11 @@ pub(super) fn validate(
     let source = config_source(&cwd, options.rules)?;
     ensure_config_exists(&source)?;
 
-    let (config, _) = load_config(&source.path)?;
+    let loaded = configuration::load(&source.path)?;
     output::validated_config(
         source.kind,
         &source.name,
-        config.rules.len(),
+        loaded.config().rules.len(),
         options.format,
         color,
     )?;
@@ -49,7 +50,8 @@ pub(super) fn evaluate(
     let source = config_source(&cwd, options.rules)?;
     ensure_config_exists(&source)?;
 
-    let (config, _) = load_config(&source.path)?;
+    let loaded = configuration::load(&source.path)?;
+    let config = loaded.config();
     let target = options
         .target
         .map(|path| crate::application::paths::resolve_target(&cwd, path))
@@ -61,7 +63,7 @@ pub(super) fn evaluate(
         })
         .transpose()?
         .unwrap_or(cwd);
-    Ok(crate::application::preview(&config, &target)?)
+    Ok(crate::application::preview(config, &target)?)
 }
 
 struct ConfigSource {
@@ -111,13 +113,4 @@ fn ensure_config_exists(source: &ConfigSource) -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
-}
-
-pub(super) fn load_config(path: &Path) -> Result<(Config, String), Box<dyn Error>> {
-    let contents = fs::read_to_string(path)
-        .map_err(|error| format!("cannot read configuration {}: {error}", path.display()))?;
-    let config = parse_config(&contents)
-        .map_err(|error| format!("invalid configuration {}: {error}", path.display()))?;
-
-    Ok((config, contents))
 }
