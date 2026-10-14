@@ -112,6 +112,15 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
     let mut builder = ignore::WalkBuilder::new(&target);
     let ignore_root = target.clone();
     let ignore_patterns = ignores.clone();
+    let mut dirule_ignore_matchers = {
+        let mut builder = ignore::WalkBuilder::new(&target);
+        builder
+            .standard_filters(false)
+            .parents(true)
+            .require_git(false)
+            .add_custom_ignore_filename(".diruleignore");
+        builder.build_matchers()
+    };
     builder
         .hidden(false)
         .ignore(true)
@@ -120,6 +129,7 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
         .git_exclude(true)
         .parents(true)
         .require_git(false)
+        .add_custom_ignore_filename(".diruleignore")
         .follow_links(false)
         .filter_entry(move |entry| {
             (entry.depth() == 0 || entry.file_name() != OsStr::new(".git"))
@@ -217,6 +227,21 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
                 ));
                 continue;
             };
+            let matched = dirule_ignore_matchers
+                .first_mut()
+                .map(|matcher| matcher.matched_with_errors(&tracked, kind == EntryKind::Directory));
+            if let Some((matched, error)) = matched {
+                if let Some(source) = error {
+                    return Err(ScanError::Walk {
+                        path: target.join(&tracked),
+                        source,
+                    });
+                }
+                if matched.is_ignore() {
+                    continue;
+                }
+            }
+
             paths.insert(
                 tracked.clone(),
                 ScannedEntry {
@@ -300,7 +325,7 @@ fn slash_path(path: &Path) -> Option<String> {
 }
 
 fn validate_ignore_files(directory: &Path) -> Result<(), ScanError> {
-    for name in [".ignore", ".gitignore"] {
+    for name in [".ignore", ".gitignore", ".diruleignore"] {
         validate_ignore_file(&directory.join(name))?;
     }
 

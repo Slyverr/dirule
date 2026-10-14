@@ -1,6 +1,11 @@
-use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry, parse_config, plan};
+use dirule_core::{
+    Conflict, ConflictKind, EntryKind, Matcher, Plan, PlannedEntry, parse_config, plan,
+};
 use dirule_fs::validate_destinations;
-use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
+use dirule_fs::{
+    ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan,
+    scan_with_ignores,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -47,6 +52,88 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
     assert!(paths.contains(&PathBuf::from(".hidden")));
     assert!(!paths.iter().any(|path| path.starts_with("ignored")));
     assert!(!paths.iter().any(|path| path.starts_with("nested/ignored")));
+}
+
+#[test]
+fn scan_applies_diruleignore_outside_git() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join(".diruleignore"), "generated/\n")
+        .expect("write Dirule ignore rules");
+    std::fs::create_dir(temp.0.join("generated")).expect("create excluded directory");
+    std::fs::write(temp.0.join("generated/api.rs"), "generated").expect("write excluded file");
+    std::fs::write(temp.0.join("source.rs"), "source").expect("write visible file");
+
+    let result = scan(&temp.0).expect("scan target");
+    let paths = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+
+    assert!(!paths.iter().any(|path| path.starts_with("generated")));
+    assert!(paths.contains(&PathBuf::from("source.rs")));
+}
+
+#[test]
+fn scan_diruleignore_excludes_and_reincludes_paths() {
+    let temp = TempDir::new();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("initialize Git fixture");
+    assert!(init.success(), "initialize Git fixture");
+
+    std::fs::write(temp.0.join(".gitignore"), "vcs-ignored.txt\n").expect("write VCS ignore rules");
+    std::fs::write(
+        temp.0.join(".diruleignore"),
+        "dirule-ignored.txt\n!vcs-ignored.txt\n",
+    )
+    .expect("write Dirule ignore rules");
+    for name in ["dirule-ignored.txt", "vcs-ignored.txt", "visible.txt"] {
+        std::fs::write(temp.0.join(name), "content").expect("write fixture file");
+    }
+    let add_files = Command::new("git")
+        .args([
+            "add",
+            ".gitignore",
+            ".diruleignore",
+            "dirule-ignored.txt",
+            "visible.txt",
+        ])
+        .current_dir(&temp.0)
+        .status()
+        .expect("stage tracked fixture files");
+    assert!(add_files.success(), "stage tracked fixture files");
+
+    let result = scan(&temp.0).expect("scan target");
+    let paths = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+
+    assert!(!paths.contains(&PathBuf::from("dirule-ignored.txt")));
+    assert!(paths.contains(&PathBuf::from("vcs-ignored.txt")));
+    assert!(paths.contains(&PathBuf::from("visible.txt")));
+}
+
+#[test]
+fn configured_ignore_cannot_be_overridden_by_diruleignore() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join(".diruleignore"), "!excluded.txt\n")
+        .expect("write Dirule ignore rules");
+    std::fs::write(temp.0.join("excluded.txt"), "content").expect("write fixture file");
+    let matcher = Matcher::new("excluded.txt").expect("compile configured ignore");
+
+    let result = scan_with_ignores(&temp.0, &[matcher]).expect("scan target");
+
+    assert!(
+        !result
+            .entries
+            .iter()
+            .any(|entry| entry.path == Path::new("excluded.txt"))
+    );
 }
 
 #[test]
@@ -1304,12 +1391,14 @@ fn scan_skips_and_reports_non_unicode_paths() {
 
 #[test]
 fn scan_fails_when_an_ignore_file_is_malformed() {
-    let temp = TempDir::new();
-    std::fs::write(temp.0.join(".ignore"), "[z-a]\n").expect("write malformed ignore file");
+    for name in [".ignore", ".diruleignore"] {
+        let temp = TempDir::new();
+        std::fs::write(temp.0.join(name), "[z-a]\n").expect("write malformed ignore file");
 
-    let error = scan(&temp.0).expect_err("malformed ignore rules must fail scanning");
+        let error = scan(&temp.0).expect_err("malformed ignore rules must fail scanning");
 
-    assert!(error.to_string().contains("cannot scan target"));
+        assert!(error.to_string().contains("cannot scan target"));
+    }
 }
 
 #[cfg(unix)]
@@ -1317,7 +1406,11 @@ fn scan_fails_when_an_ignore_file_is_malformed() {
 fn scan_fails_when_an_ignore_file_is_unreadable() {
     use std::os::unix::fs::PermissionsExt;
 
-    for relative in [Path::new(".ignore"), Path::new("nested/.gitignore")] {
+    for relative in [
+        Path::new(".ignore"),
+        Path::new("nested/.gitignore"),
+        Path::new("nested/.diruleignore"),
+    ] {
         let temp = TempDir::new();
         let ignore_file = temp.0.join(relative);
         let ignore_directory = relative.parent().unwrap_or(Path::new(""));

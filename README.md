@@ -140,7 +140,7 @@ to = "builtin:kebab-case"
 
 ### Exclusions
 
-Dirule honors project ignore files such as `.gitignore` and `.ignore`, plus Git's repository and global exclude rules. In a Git repository, ignored untracked paths are skipped while tracked paths remain eligible. Outside Git, `.ignore` files still filter the scan. Use the top-level `ignore` setting for paths Dirule must always skip, whether tracked or not. A rule's `exclude` setting skips a path only for that rule, so a later rule may still match it.
+Dirule honors project ignore files such as `.gitignore` and `.ignore`, plus Git's repository and global exclude rules. In a Git repository, ignored untracked paths are skipped while tracked paths remain eligible. Outside Git, `.ignore` files still filter the scan. Add a `.diruleignore` file for Dirule-specific exclusions; its standard `!pattern` syntax can include a VCS-ignored path, and its rules apply to tracked and untracked paths. The top-level `ignore` setting is an absolute exclusion for paths Dirule must always skip. A rule's `exclude` setting skips a path only for that rule, so a later rule may still match it.
 
 ## Conflict handling
 
