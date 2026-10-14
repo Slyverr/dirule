@@ -43,6 +43,19 @@ cargo bench -p dirule-fs --bench apply
 
 The core benchmarks cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. The filesystem benchmarks measure repeat scans of nested trees with ignored paths, destination validation, and full application of file rename cycles with and without journaling at several input sizes. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
 
+## Releases
+
+Update the workspace version in `Cargo.toml` and add release notes to `CHANGELOG.md`. Run the workspace validation checks above and confirm the release plan:
+
+```sh
+cargo install cargo-dist --version 0.33.0 --locked
+cargo dist plan --tag=vX.Y.Z --output-format=json
+```
+
+Use the `cargo-dist` version pinned in `dist-workspace.toml`.
+
+After the release commit is on the intended release branch and its CI checks pass, push a matching `vX.Y.Z` tag. The release workflow builds the configured archives, installers, and checksums, then creates a GitHub release. A version tag with a prerelease suffix is published as a prerelease.
+
 ## Commits
 
 Use this first-line format:
