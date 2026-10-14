@@ -1,6 +1,6 @@
 # Repository instructions
 
-Dirule is a Rust workspace for a local-first filesystem rules CLI. Use the [README](README.md) for the human-facing overview and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and commit conventions.
+Dirule is a Rust workspace for a local-first filesystem rules CLI. Use the [README](README.md) for the human-facing overview and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution, commit, versioning, and release conventions.
 
 ## Source of truth
 

@@ -46,7 +46,9 @@ The core benchmarks cover config parsing, named-pattern matching, filename trans
 
 ## Releases
 
-Update the workspace version in `Cargo.toml` and add release notes to `CHANGELOG.md`. Run the workspace validation checks above and confirm the release plan:
+Dirule uses lockstep workspace versions. During `0.x`, use a patch release for bug fixes and compatible maintenance; use a minor release for new user-facing capabilities or intentional CLI/config behavior changes. Do not bump the version for each commit. Treat `0.x` as pre-stable: compatibility is not guaranteed. Move to `1.0.0` when the CLI and configuration behavior are stable enough to support a compatibility promise; after that, use SemVer major for breaking changes, minor for compatible features, and patch for compatible fixes. Release when a coherent change set is ready and CI passes; there is no fixed release calendar.
+
+Keep completed user-visible changes under `Unreleased` in `CHANGELOG.md`. For a release, update the workspace version in `Cargo.toml` and `Cargo.lock`, move those notes under the release heading, and leave a fresh `Unreleased` section. Run the workspace validation checks above and confirm the release plan:
 
 ```sh
 cargo install cargo-dist --version 0.33.0 --locked
