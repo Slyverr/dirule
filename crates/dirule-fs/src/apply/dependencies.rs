@@ -76,7 +76,7 @@ fn dependency_keys(target: &Path, path: &Path) -> Vec<PathBuf> {
 pub(super) fn stage_sources(
     target_guard: &path::TargetGuard<'_>,
     entries: &[&PlannedEntry],
-    identities: &std::collections::BTreeMap<PathBuf, SourceIdentity>,
+    identities: &HashMap<PathBuf, SourceIdentity>,
     moved_operations: &mut Vec<MovedOperation>,
     recorder: &mut dyn MutationRecorder,
 ) -> Result<StagedSources, ApplyError> {

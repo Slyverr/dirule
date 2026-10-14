@@ -1,5 +1,5 @@
 use dirule_core::{Entry, EntryKind};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use thiserror::Error;
@@ -12,7 +12,7 @@ pub struct ScanResult {
     pub entries: Vec<Entry>,
     pub findings: Vec<String>,
     pub(crate) target_identity: Option<SourceIdentity>,
-    pub(crate) identities: BTreeMap<PathBuf, SourceIdentity>,
+    pub(crate) identities: HashMap<PathBuf, SourceIdentity>,
 }
 
 struct ScannedEntry {
@@ -102,7 +102,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .require_git(false)
         .follow_links(false);
 
-    let mut paths = BTreeMap::<PathBuf, ScannedEntry>::new();
+    let mut paths = HashMap::<PathBuf, ScannedEntry>::new();
     let mut findings = Vec::new();
     for item in builder.build() {
         let entry = item.map_err(|source| ScanError::Walk {
@@ -214,22 +214,21 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         ));
     }
 
-    let mut identities = BTreeMap::new();
-    let entries = paths
-        .into_iter()
-        .map(|(path, entry)| {
-            identities.insert(
-                path.clone(),
-                entry
-                    .identity
-                    .expect("scanned entries have identities before returning"),
-            );
-            Entry {
-                path,
-                kind: entry.kind,
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut identities = HashMap::with_capacity(paths.len());
+    let mut entries = Vec::with_capacity(paths.len());
+    for (path, entry) in paths {
+        identities.insert(
+            path.clone(),
+            entry
+                .identity
+                .expect("scanned entries have identities before returning"),
+        );
+        entries.push(Entry {
+            path,
+            kind: entry.kind,
+        });
+    }
+    entries.sort_unstable_by(|left, right| left.path.cmp(&right.path));
 
     Ok(ScanResult {
         entries,
