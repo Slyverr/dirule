@@ -828,6 +828,63 @@ fn config_editor_rejects_invalid_rule_edits_without_losing_valid_state() {
 }
 
 #[test]
+fn config_editor_preserves_inline_comments_when_updating_rules() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\n\n[[rules]]\nname = 'Normalize names' # rule label\nmatch = '**/*.md' # markdown only\nto = 'builtin:kebab-case' # selected transform\nexclude = [\n  '**/drafts/**', # draft exclusion note\n] # keep drafts unchanged\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, contents).expect("write project config");
+
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    let mut rule = editor.config().expect("read project rules").rules[0].clone();
+    rule.to = "builtin:snake-case".into();
+    rule.exclude.push("**/archive/**".into());
+    editor.update_rule(0, rule).expect("update project rule");
+
+    let saved = editor.contents();
+    assert!(saved.contains("# rule label"));
+    assert!(saved.contains("# markdown only"));
+    assert!(saved.contains("# selected transform"));
+    assert!(saved.contains("# draft exclusion note"));
+    assert!(saved.contains("# keep drafts unchanged"));
+    assert_eq!(editor.config().unwrap().rules[0].to, "builtin:snake-case");
+    editor.save().expect("save project config");
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("# selected transform")
+    );
+}
+
+#[test]
+fn config_editor_preserves_inline_comments_when_updating_configuration_lists() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\" # schema version\nignore = [\n  'build/**', # build output\n] # ignored paths\n\n[acronyms]\nentries = [\n  'iOS', # project spelling\n] # acronym spellings\n\n[[rules]]\nname = 'Normalize names'\nmatch = '**/*'\nto = 'builtin:kebab-case'\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, contents).expect("write project config");
+
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    editor
+        .set_ignore_patterns(&["build/**".into(), "generated/**".into()])
+        .expect("update ignored paths");
+    editor
+        .set_acronym_entries(&["iOS".into(), "eBay".into()])
+        .expect("update acronym spellings");
+
+    let rendered = editor.contents();
+    assert!(rendered.contains("# schema version"));
+    assert!(rendered.contains("# build output"));
+    assert!(rendered.contains("# ignored paths"));
+    assert!(rendered.contains("# project spelling"));
+    assert!(rendered.contains("# acronym spellings"));
+}
+
+#[test]
 fn config_editor_refuses_to_overwrite_external_changes() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

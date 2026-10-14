@@ -180,12 +180,21 @@ impl ConfigEditor {
 
     pub fn set_ignore_patterns(&mut self, patterns: &[String]) -> Result<(), ConfigEditorError> {
         let original = self.document.clone();
-        let mut ignore = toml_edit::Array::new();
-        for pattern in patterns {
-            ignore.push(pattern.as_str());
-        }
-        self.document["version"] = toml_edit::value(CURRENT_CONFIG_VERSION.to_string());
-        self.document["ignore"] = toml_edit::value(ignore);
+        let existing_ignore = self
+            .document
+            .get("ignore")
+            .and_then(toml_edit::Item::as_value);
+        let ignore = string_array_preserving_entries(existing_ignore, patterns);
+        set_value_preserving_decor(
+            self.document.as_table_mut(),
+            "version",
+            toml_edit::value(CURRENT_CONFIG_VERSION.to_string()),
+        );
+        set_value_preserving_decor(
+            self.document.as_table_mut(),
+            "ignore",
+            toml_edit::value(ignore),
+        );
 
         self.validate_or_restore(original)
     }
@@ -196,22 +205,28 @@ impl ConfigEditor {
         }
 
         let original = self.document.clone();
-        let mut values = toml_edit::Array::new();
-        for entry in entries {
-            values.push(entry.as_str());
-        }
 
         if let Some(acronyms) = self.document.as_table_mut().get_mut("acronyms") {
             match acronyms {
                 toml_edit::Item::Table(table) => {
-                    table["entries"] = toml_edit::value(values);
+                    let existing = table.get("entries").and_then(toml_edit::Item::as_value);
+                    let values = string_array_preserving_entries(existing, entries);
+                    set_value_preserving_decor(table, "entries", toml_edit::value(values));
                 }
                 toml_edit::Item::Value(toml_edit::Value::InlineTable(table)) => {
-                    table["entries"] = toml_edit::Value::from(values);
+                    let existing = table.get("entries");
+                    let values = string_array_preserving_entries(existing, entries);
+                    let mut replacement = toml_edit::Value::from(values);
+                    let existing = table.get("entries").map(|value| value.decor().clone());
+                    if let Some(decor) = existing {
+                        *replacement.decor_mut() = decor;
+                    }
+                    table["entries"] = replacement;
                 }
                 _ => return Err(self.invalid_config("acronyms must be a table")),
             }
         } else {
+            let values = string_array_preserving_entries(None, entries);
             let mut acronyms = toml_edit::Table::new();
             acronyms["entries"] = toml_edit::value(values);
             self.document["acronyms"] = toml_edit::Item::Table(acronyms);
@@ -228,17 +243,11 @@ impl ConfigEditor {
         let original = self.document.clone();
         match value {
             Some(value) => {
-                let decor = self
-                    .document
-                    .as_table()
-                    .get(field)
-                    .and_then(toml_edit::Item::as_value)
-                    .map(|value| value.decor().clone());
-                let mut replacement = toml_edit::Value::from(value);
-                if let Some(decor) = decor {
-                    *replacement.decor_mut() = decor;
-                }
-                self.document[field] = toml_edit::Item::Value(replacement);
+                set_value_preserving_decor(
+                    self.document.as_table_mut(),
+                    field,
+                    toml_edit::value(value),
+                );
             }
             None => {
                 self.document.as_table_mut().remove(field);
@@ -372,25 +381,59 @@ fn rule_table(rule: &Rule) -> toml_edit::Table {
 }
 
 fn update_rule_table(table: &mut toml_edit::Table, rule: &Rule) {
-    table["name"] = toml_edit::value(&rule.name);
-    table["match"] = toml_edit::value(&rule.pattern);
-    table["to"] = toml_edit::value(&rule.to);
+    set_value_preserving_decor(table, "name", toml_edit::value(&rule.name));
+    set_value_preserving_decor(table, "match", toml_edit::value(&rule.pattern));
+    set_value_preserving_decor(table, "to", toml_edit::value(&rule.to));
     match rule.kind {
         RuleKind::Any => {
             table.remove("kind");
         }
-        RuleKind::File => table["kind"] = toml_edit::value("file"),
-        RuleKind::Directory => table["kind"] = toml_edit::value("directory"),
+        RuleKind::File => set_value_preserving_decor(table, "kind", toml_edit::value("file")),
+        RuleKind::Directory => {
+            set_value_preserving_decor(table, "kind", toml_edit::value("directory"));
+        }
     }
     if rule.exclude.is_empty() {
         table.remove("exclude");
     } else {
-        let mut exclude = toml_edit::Array::new();
-        for pattern in &rule.exclude {
-            exclude.push(pattern.as_str());
-        }
-        table["exclude"] = toml_edit::value(exclude);
+        let existing = table.get("exclude").and_then(toml_edit::Item::as_value);
+        let exclude = string_array_preserving_entries(existing, &rule.exclude);
+        set_value_preserving_decor(table, "exclude", toml_edit::value(exclude));
     }
+}
+
+fn string_array_preserving_entries(
+    existing: Option<&toml_edit::Value>,
+    entries: &[String],
+) -> toml_edit::Array {
+    let mut array = existing
+        .and_then(toml_edit::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut existing_values = array.iter().cloned().collect::<Vec<_>>();
+    array.clear();
+
+    for entry in entries {
+        let value = existing_values
+            .iter()
+            .position(|value| value.as_str() == Some(entry))
+            .map(|index| existing_values.remove(index))
+            .unwrap_or_else(|| toml_edit::Value::from(entry.as_str()));
+        array.push_formatted(value);
+    }
+
+    array
+}
+
+fn set_value_preserving_decor(table: &mut toml_edit::Table, key: &str, mut item: toml_edit::Item) {
+    if let (Some(existing), Some(replacement)) = (
+        table.get(key).and_then(toml_edit::Item::as_value),
+        item.as_value_mut(),
+    ) {
+        *replacement.decor_mut() = existing.decor().clone();
+    }
+
+    table[key] = item;
 }
 
 impl fmt::Display for ConfigEditorError {
