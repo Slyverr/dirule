@@ -1,6 +1,6 @@
 use super::{args, output};
-use dirule_core::{CURRENT_CONFIG_VERSION, Config, Plan, parse_config, plan};
-use dirule_fs::{ScanResult, scan, validate_destinations};
+use dirule_core::{CURRENT_CONFIG_VERSION, Config, Plan, parse_config};
+use dirule_fs::ScanResult;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
@@ -56,15 +56,9 @@ pub(super) fn evaluate(
         .or_else(|| config.target.clone().map(|path| resolve_target(&cwd, path)))
         .transpose()?
         .unwrap_or(cwd);
-    let target = target
-        .canonicalize()
-        .map_err(|error| format!("cannot access target {}: {error}", target.display()))?;
+    let preview = crate::application::preview(&config, &target)?;
 
-    let mut scan = scan(&target)?;
-    let mut plan = plan(&config, &scan.entries)?;
-    validate_destinations(&target, &mut plan)?;
-    plan.findings.append(&mut scan.findings);
-    Ok((target, plan, scan))
+    Ok((preview.target, preview.plan, preview.snapshot))
 }
 
 struct ConfigSource {
