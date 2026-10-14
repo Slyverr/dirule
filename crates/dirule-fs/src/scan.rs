@@ -58,6 +58,11 @@ pub enum ScanError {
         #[source]
         source: std::io::Error,
     },
+    #[error("invalid ignore file {path}: {message}")]
+    InvalidIgnoreFile {
+        path: PathBuf,
+        message: &'static str,
+    },
     #[error("cannot read tracked paths from Git: {0}")]
     Git(String),
     #[error("target is not a directory: {0}")]
@@ -367,12 +372,9 @@ fn validate_ignore_file(path: &Path) -> Result<(), ScanError> {
                 source,
             })?;
             if line.starts_with('!') {
-                return Err(ScanError::IgnoreFile {
+                return Err(ScanError::InvalidIgnoreFile {
                     path: path.to_path_buf(),
-                    source: std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "negation patterns are not supported; .diruleignore only excludes paths",
-                    ),
+                    message: "negation patterns are not supported; .diruleignore only excludes paths",
                 });
             }
         }

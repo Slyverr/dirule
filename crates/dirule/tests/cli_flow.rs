@@ -813,6 +813,12 @@ fn quick_sort_rejects_diruleignore_negations() {
         error["error"]["message"]
             .as_str()
             .unwrap()
+            .contains("invalid ignore file")
+    );
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
             .contains(".diruleignore only excludes paths")
     );
     assert!(project.0.join("Invoice.PDF").is_file());
