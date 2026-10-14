@@ -1751,6 +1751,15 @@ fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     assert!(apply_json_error.contains("Apply preview"));
     assert!(apply_json_error.contains("MyFile.txt -> my-file.txt"));
     assert!(apply_json_error.contains("use --yes"));
+    let error_document_start = apply_json_error
+        .rfind("\n{")
+        .expect("JSON command error follows the preview");
+    let error: serde_json::Value =
+        serde_json::from_str(&apply_json_error[error_document_start + 1..])
+            .expect("confirmation error is a JSON document");
+    assert_eq!(error["schema_version"], "1.0");
+    assert_eq!(error["error"]["code"], "command_error");
+    assert_eq!(error["error"]["exit_code"], 2);
     assert!(project.0.join("MyFile.txt").is_file());
     assert!(!project.0.join("my-file.txt").exists());
     assert!(!project.journal_directory().exists());
