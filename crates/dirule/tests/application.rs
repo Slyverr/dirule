@@ -4,7 +4,10 @@ use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_TEMP_TARGET: AtomicU64 = AtomicU64::new(0);
 
 struct TempTarget(PathBuf);
 
@@ -14,9 +17,12 @@ impl TempTarget {
             .duration_since(UNIX_EPOCH)
             .expect("clock is after Unix epoch")
             .as_nanos();
-        let target =
-            std::env::temp_dir().join(format!("dirule-application-{}-{stamp}", std::process::id()));
-        fs::create_dir_all(&target).expect("create target");
+        let sequence = NEXT_TEMP_TARGET.fetch_add(1, Ordering::Relaxed);
+        let target = std::env::temp_dir().join(format!(
+            "dirule-application-{}-{stamp}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&target).expect("create target");
 
         Self(target)
     }
