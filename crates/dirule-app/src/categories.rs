@@ -9,27 +9,35 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use toml_edit::{DocumentMut, Item};
 
+/// Current version of the user category-catalog format.
 pub const CURRENT_CATEGORY_CATALOG_VERSION: ConfigVersion = ConfigVersion::new(1, 0);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// One file category and its extension-to-destination mapping.
 pub struct SortCategory {
+    /// Name accepted as a sort selector.
     pub name: String,
+    /// Lowercase extensions assigned to this category.
     pub extensions: Vec<String>,
+    /// Target-relative directory for matching files.
     pub destination: String,
 }
 
 #[derive(Clone, Debug)]
+/// Built-in and user-defined categories available to sort operations.
 pub struct CategoryCatalog {
     categories: BTreeMap<String, SortCategory>,
 }
 
 #[derive(Debug)]
+/// A category catalog could not be read or did not match its schema.
 pub enum CategoryCatalogError {
     Io { path: PathBuf, source: io::Error },
     Invalid { path: PathBuf, message: String },
 }
 
 impl CategoryCatalog {
+    /// Return the built-in categories without reading user configuration.
     pub fn built_in() -> Self {
         Self {
             categories: built_in_categories()
@@ -39,6 +47,9 @@ impl CategoryCatalog {
         }
     }
 
+    /// Load the user's category catalog when available, otherwise use built-ins.
+    ///
+    /// User-defined entries with a built-in name replace that built-in category.
     pub fn user_if_available() -> Result<Self, CategoryCatalogError> {
         let Some(base) = paths::user_config_directory() else {
             return Ok(Self::built_in());
@@ -47,6 +58,7 @@ impl CategoryCatalog {
         Self::load_optional(&base.join("dirule").join("categories.toml"))
     }
 
+    /// Load a catalog from `path`; a missing file selects built-in categories.
     pub fn load_optional(path: &Path) -> Result<Self, CategoryCatalogError> {
         let contents = match fs::read_to_string(path) {
             Ok(contents) => contents,
@@ -62,6 +74,7 @@ impl CategoryCatalog {
         Self::parse(path, &contents)
     }
 
+    /// Parse and validate a category catalog from TOML contents.
     pub fn parse(path: &Path, contents: &str) -> Result<Self, CategoryCatalogError> {
         let document = contents
             .parse::<DocumentMut>()
@@ -109,10 +122,12 @@ impl CategoryCatalog {
         Ok(catalog)
     }
 
+    /// Find a category by its normalized lowercase name.
     pub fn get(&self, name: &str) -> Option<&SortCategory> {
         self.categories.get(name)
     }
 
+    /// Iterate over categories in stable name order.
     pub fn iter(&self) -> impl Iterator<Item = &SortCategory> {
         self.categories.values()
     }

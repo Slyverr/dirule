@@ -7,19 +7,26 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
+/// Access a directory of named, versioned TOML rule configurations.
 pub struct PresetStore {
     directory: PathBuf,
 }
 
 #[derive(Debug)]
+/// A validated preset and its original TOML contents.
 pub struct Preset {
+    /// Name used to select the preset.
     pub name: String,
+    /// Path to the preset file.
     pub path: PathBuf,
+    /// Parsed and validated rules.
     pub config: Config,
+    /// Original TOML source, including comments and formatting.
     pub contents: String,
 }
 
 #[derive(Debug)]
+/// A preset could not be resolved, parsed, saved, or removed.
 pub enum PresetError {
     UserDirectoryUnavailable,
     RelativeDirectory(PathBuf),
@@ -38,10 +45,12 @@ pub enum PresetError {
 }
 
 impl PresetStore {
+    /// Open the platform's user preset directory or return an error.
     pub fn user() -> Result<Self, PresetError> {
         Self::user_if_available()?.ok_or(PresetError::UserDirectoryUnavailable)
     }
 
+    /// Open the platform's user preset directory when it can be resolved.
     pub fn user_if_available() -> Result<Option<Self>, PresetError> {
         let Some(base) = super::paths::user_config_directory() else {
             return Ok(None);
@@ -50,6 +59,7 @@ impl PresetStore {
         Self::new(base.join("dirule").join("presets")).map(Some)
     }
 
+    /// Create a store for an absolute directory, without creating it yet.
     pub fn new(directory: impl Into<PathBuf>) -> Result<Self, PresetError> {
         let directory = directory.into();
         if !directory.is_absolute() {
@@ -59,10 +69,12 @@ impl PresetStore {
         Ok(Self { directory })
     }
 
+    /// Return the directory managed by this store.
     pub fn directory(&self) -> &Path {
         &self.directory
     }
 
+    /// Resolve a validated preset name to its TOML path.
     pub fn path(&self, name: &str) -> Result<PathBuf, PresetError> {
         if !valid_name(name) {
             return Err(PresetError::InvalidName(name.to_owned()));
@@ -71,6 +83,7 @@ impl PresetStore {
         Ok(self.directory.join(format!("{name}.toml")))
     }
 
+    /// List valid preset names in stable alphabetical order.
     pub fn list(&self) -> Result<Vec<String>, PresetError> {
         let entries = match fs::read_dir(&self.directory) {
             Ok(entries) => entries,
@@ -108,6 +121,7 @@ impl PresetStore {
         Ok(names)
     }
 
+    /// Load and validate a named preset, preserving its source text.
     pub fn load(&self, name: &str) -> Result<Preset, PresetError> {
         let path = self.path(name)?;
         let contents = fs::read_to_string(&path).map_err(|source| {
@@ -134,6 +148,7 @@ impl PresetStore {
         })
     }
 
+    /// Read the target configured by a preset without loading its rules.
     pub fn configured_target(&self, name: &str) -> Result<Option<PathBuf>, PresetError> {
         let path = self.path(name)?;
         let contents = fs::read_to_string(&path).map_err(|source| {
@@ -157,6 +172,7 @@ impl PresetStore {
             .map(PathBuf::from))
     }
 
+    /// Save a validated config file as a new preset without overwriting.
     pub fn save(&self, name: &str, source_path: &Path) -> Result<PathBuf, PresetError> {
         let destination = self.path(name)?;
         let contents = fs::read_to_string(source_path).map_err(|source| PresetError::Io {
@@ -168,6 +184,7 @@ impl PresetStore {
         self.write(destination, &contents, source_path)
     }
 
+    /// Save validated TOML contents as a new preset without overwriting.
     pub fn save_contents(&self, name: &str, contents: &str) -> Result<PathBuf, PresetError> {
         let destination = self.path(name)?;
 
@@ -205,6 +222,7 @@ impl PresetStore {
         Ok(destination)
     }
 
+    /// Remove a preset by name.
     pub fn remove(&self, name: &str) -> Result<PathBuf, PresetError> {
         let path = self.path(name)?;
         fs::remove_file(&path).map_err(|source| {

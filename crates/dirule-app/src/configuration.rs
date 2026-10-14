@@ -1,3 +1,5 @@
+//! Services for selecting, loading, creating, and editing rule configurations.
+
 mod create;
 mod editor;
 pub(crate) mod file;

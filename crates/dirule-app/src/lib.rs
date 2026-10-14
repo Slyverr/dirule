@@ -1,3 +1,8 @@
+//! Frontend-neutral services that connect Dirule's rule engine and filesystem layer.
+//!
+//! Use [`preview`] or one of the quick-operation helpers to inspect a complete plan.
+//! Call [`apply_authorized`] only after the caller has obtained explicit approval.
+
 use self::configuration::{ConfigurationLoadError, ConfigurationSource};
 use self::paths::HomeDirectoryUnavailable;
 use dirule_core::{AcronymOptions, Config, Plan, Rule, RuleKind, Transform, plan_compiled};
@@ -9,10 +14,15 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+/// Load and validate custom file-category definitions used by sorting.
 pub mod categories;
+/// Load, discover, create, and edit rule configurations.
 pub mod configuration;
+/// List and undo journaled filesystem operations.
 pub mod journal;
+/// Resolve target, configuration, and user-state paths.
 pub mod paths;
+/// Read and manage reusable user presets.
 pub mod presets;
 mod sort;
 
@@ -21,28 +31,48 @@ pub use categories::{
 };
 pub use sort::{sort_by_extension_preview, sort_extension_preview, sort_selectors_preview};
 
+/// A read-only scan and validated plan for one target.
+///
+/// The plan and scan snapshot are paired so applying the plan can revalidate the
+/// same sources and destinations. Creating a preview does not mutate the target.
 pub struct Preview {
+    /// Canonical target directory used for the scan.
     pub target: PathBuf,
+    /// Proposed renames and any conflicts or findings.
     pub plan: Plan,
+    /// Scanned entries and findings used to validate an apply operation.
     pub snapshot: ScanResult,
 }
 
+/// The result of applying a previously reviewed preview.
 pub struct Applied {
+    /// Canonical target directory that was changed.
     pub target: PathBuf,
+    /// Plan that was passed to the filesystem apply layer.
     pub plan: Plan,
+    /// Successful and skipped filesystem operations.
     pub report: ApplyReport,
+    /// Journal run identifier, when the apply created a journal entry.
     pub run_id: Option<String>,
 }
 
 #[derive(Debug)]
+/// A failure while creating or validating a preview.
 pub enum PreviewError {
+    /// A quick operation could not be represented as a valid rule.
     Operation(String),
+    /// The target could not be accessed or canonicalized.
     Target {
+        /// Requested target path.
         path: PathBuf,
+        /// Underlying filesystem error.
         source: std::io::Error,
     },
+    /// Scanning the target failed.
     Scan(ScanError),
+    /// Configuration compilation or planning failed.
     Plan(dirule_core::Error),
+    /// A proposed destination failed filesystem validation.
     Destinations(ApplyError),
 }
 
@@ -77,9 +107,13 @@ impl Error for PreviewError {
 }
 
 #[derive(Debug)]
+/// A failure while loading a source, resolving its target, or creating its preview.
 pub enum PreviewSourceError {
+    /// The selected configuration could not be loaded.
     Configuration(ConfigurationLoadError),
+    /// The target could not be resolved, including home expansion.
     Target(HomeDirectoryUnavailable),
+    /// Scanning, planning, or destination validation failed.
     Preview(PreviewError),
 }
 
@@ -103,6 +137,10 @@ impl Error for PreviewSourceError {
     }
 }
 
+/// Preview a case transformation over files and directories in a target.
+///
+/// By default only entries directly inside `target` are considered. Set
+/// `recursive` to include nested entries.
 pub fn rename_preview(
     target: &Path,
     transform: Transform,
@@ -130,6 +168,10 @@ fn quick_config(rules: Vec<Rule>) -> Config {
     }
 }
 
+/// Compile rules, scan a target, build a plan, and validate every destination.
+///
+/// This operation is read-only. The returned preview can be shown to the user
+/// before passing it to [`apply_authorized`].
 pub fn preview(config: &Config, target: &Path) -> Result<Preview, PreviewError> {
     let target = target
         .canonicalize()
@@ -151,6 +193,10 @@ pub fn preview(config: &Config, target: &Path) -> Result<Preview, PreviewError> 
     })
 }
 
+/// Load a selected configuration, resolve its target, and create a preview.
+///
+/// `explicit_target` takes precedence over a target stored in the configuration.
+/// Relative paths are resolved from `base`.
 pub fn preview_source(
     source: &ConfigurationSource,
     base: &Path,
@@ -165,6 +211,10 @@ pub fn preview_source(
     preview(loaded.config(), &target).map_err(PreviewSourceError::Preview)
 }
 
+/// Apply a reviewed preview using the requested conflict policy and journal.
+///
+/// The caller is responsible for obtaining explicit approval before calling this
+/// function. The filesystem layer revalidates source and destination identities.
 pub fn apply_authorized(
     preview: Preview,
     policy: ConflictPolicy,

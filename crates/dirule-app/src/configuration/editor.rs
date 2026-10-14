@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, TomlError};
 
+/// Edit a valid TOML configuration while preserving unrelated formatting.
 pub struct ConfigEditor {
     path: PathBuf,
     original: String,
@@ -14,6 +15,7 @@ pub struct ConfigEditor {
 }
 
 #[derive(Debug)]
+/// A configuration edit was invalid, unsafe to write, or raced with another edit.
 pub enum ConfigEditorError {
     RelativePath(PathBuf),
     NotRegularFile(PathBuf),
@@ -39,6 +41,7 @@ pub enum ConfigEditorError {
 }
 
 impl ConfigEditor {
+    /// Open an absolute, regular, valid configuration file for editing.
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, ConfigEditorError> {
         let path = path.into();
         if !path.is_absolute() {
@@ -70,14 +73,17 @@ impl ConfigEditor {
         })
     }
 
+    /// Return the file being edited.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Set or remove the optional configuration name.
     pub fn set_name(&mut self, name: Option<&str>) -> Result<(), ConfigEditorError> {
         self.set_optional_string("name", name)
     }
 
+    /// Set or remove the target path stored in the configuration.
     pub fn set_target(&mut self, target: Option<&Path>) -> Result<(), ConfigEditorError> {
         let target = target
             .map(|path| {
@@ -89,10 +95,12 @@ impl ConfigEditor {
         self.set_optional_string("target", target)
     }
 
+    /// Render the current in-memory document without writing it.
     pub fn contents(&self) -> String {
         self.document.to_string()
     }
 
+    /// Parse the current in-memory document into a validated configuration.
     pub fn config(&self) -> Result<Config, ConfigEditorError> {
         let contents = self.contents();
 
@@ -102,6 +110,7 @@ impl ConfigEditor {
         })
     }
 
+    /// Append a rule and keep the edit only if the resulting config is valid.
     pub fn add_rule(&mut self, rule: Rule) -> Result<(), ConfigEditorError> {
         let original = self.document.clone();
         let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
@@ -112,6 +121,7 @@ impl ConfigEditor {
         self.validate_or_restore(original)
     }
 
+    /// Replace a rule by its zero-based index and validate the resulting config.
     pub fn update_rule(&mut self, index: usize, rule: Rule) -> Result<(), ConfigEditorError> {
         let original = self.document.clone();
         let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
@@ -126,6 +136,7 @@ impl ConfigEditor {
         self.validate_or_restore(original)
     }
 
+    /// Remove a rule by its zero-based index and return the removed rule.
     pub fn remove_rule(&mut self, index: usize) -> Result<Rule, ConfigEditorError> {
         let original_config = self.config()?;
         let rule_count = original_config.rules.len();
@@ -143,6 +154,7 @@ impl ConfigEditor {
         Ok(rule)
     }
 
+    /// Move a rule from one zero-based index to another.
     pub fn move_rule(&mut self, from: usize, to: usize) -> Result<(), ConfigEditorError> {
         let original = self.document.clone();
         let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
@@ -170,6 +182,7 @@ impl ConfigEditor {
         self.validate_or_restore(original)
     }
 
+    /// Replace the top-level target-wide ignore patterns.
     pub fn set_ignore_patterns(&mut self, patterns: &[String]) -> Result<(), ConfigEditorError> {
         let original = self.document.clone();
         let existing_ignore = self
@@ -191,6 +204,7 @@ impl ConfigEditor {
         self.validate_or_restore(original)
     }
 
+    /// Replace the acronym entries used by built-in name transformations.
     pub fn set_acronym_entries(&mut self, entries: &[String]) -> Result<(), ConfigEditorError> {
         if entries.is_empty() && self.document.get("acronyms").is_none() {
             return Ok(());
@@ -266,6 +280,7 @@ impl ConfigEditor {
         }
     }
 
+    /// Validate and atomically write changes if the file has not changed externally.
     pub fn save(&mut self) -> Result<Config, ConfigEditorError> {
         let rendered = self.contents();
         let contents = if rendered == format!("{}\n", self.original) {

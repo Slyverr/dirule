@@ -3,6 +3,9 @@ use dirule_core::{AcronymOptions, Config, Rule, RuleKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+/// Preview sorting files with one extension into a pluralized destination.
+///
+/// `extension` may include a leading dot. Matching is case-insensitive.
 pub fn sort_extension_preview(
     target: &Path,
     extension: &str,
@@ -16,6 +19,10 @@ pub fn sort_extension_preview(
     sort_selectors_preview(target, &[selector], &CategoryCatalog::built_in(), recursive)
 }
 
+/// Preview a sort selected by file extensions, category names, or both.
+///
+/// `recursive` includes files in nested directories; destinations remain
+/// relative to the target root.
 pub fn sort_selectors_preview(
     target: &Path,
     selectors: &[String],
@@ -85,6 +92,7 @@ pub fn sort_selectors_preview(
     preview(&quick_config(rules), target)
 }
 
+/// Preview sorting files into a destination for each normalized extension.
 pub fn sort_by_extension_preview(target: &Path, recursive: bool) -> Result<Preview, PreviewError> {
     let pattern = if recursive { "**/?*.*" } else { "?*.*" };
     let config = quick_config(vec![Rule {

@@ -8,6 +8,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug)]
+/// Implicit configuration discovery failed or found ambiguous preset targets.
 pub enum ConfigurationSelectionError {
     Target(HomeDirectoryUnavailable),
     LocalConfig {
@@ -25,6 +26,9 @@ pub enum ConfigurationSelectionError {
     },
 }
 
+/// Discover config for a target using local-file then exact-target-preset precedence.
+///
+/// The function does not search parent directories or merge multiple sources.
 pub fn discover_source(
     base: &Path,
     target: Option<PathBuf>,

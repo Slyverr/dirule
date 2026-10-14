@@ -6,12 +6,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
+/// Creating a starter config failed because the path, template, or write was invalid.
 pub enum ConfigCreationError {
     RelativePath(PathBuf),
     InvalidStarter(dirule_core::Error),
     Io { path: PathBuf, source: io::Error },
 }
 
+/// Create a validated starter config without overwriting an existing file.
 pub fn create_starter(path: impl Into<PathBuf>) -> Result<(), ConfigCreationError> {
     let path = path.into();
     if !path.is_absolute() {

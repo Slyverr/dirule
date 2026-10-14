@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// The user state directory could not be resolved for journal storage.
 pub struct UserStateDirectoryUnavailable;
 
 impl fmt::Display for UserStateDirectoryUnavailable {
@@ -15,6 +16,7 @@ impl fmt::Display for UserStateDirectoryUnavailable {
 impl Error for UserStateDirectoryUnavailable {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// A home-relative target could not be expanded because the home path is unavailable.
 pub struct HomeDirectoryUnavailable;
 
 impl fmt::Display for HomeDirectoryUnavailable {
@@ -25,6 +27,7 @@ impl fmt::Display for HomeDirectoryUnavailable {
 
 impl Error for HomeDirectoryUnavailable {}
 
+/// Return the absolute home directory when the platform provides one.
 pub fn home_directory() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -36,6 +39,7 @@ pub fn home_directory() -> Option<PathBuf> {
     }
 }
 
+/// Resolve a relative path against `base`; leave absolute paths unchanged.
 pub fn resolve_from(base: &Path, path: PathBuf) -> PathBuf {
     if path.is_absolute() {
         path
@@ -44,6 +48,7 @@ pub fn resolve_from(base: &Path, path: PathBuf) -> PathBuf {
     }
 }
 
+/// Resolve a target path, including supported `~` and `~/...` forms.
 pub fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, HomeDirectoryUnavailable> {
     let Some(path_text) = path.to_str() else {
         return Ok(resolve_from(base, path));
@@ -81,6 +86,7 @@ pub fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, HomeDirecto
     Ok(home.join(home_relative))
 }
 
+/// Resolve the target using explicit, configured, then base-directory precedence.
 pub fn resolve_operation_target(
     base: &Path,
     explicit: Option<PathBuf>,

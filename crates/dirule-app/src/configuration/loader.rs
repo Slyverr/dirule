@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
+/// A configuration file is missing, unreadable, or invalid.
 pub enum ConfigurationLoadError {
     Missing {
         source: ConfigurationSource,
@@ -22,21 +23,25 @@ pub enum ConfigurationLoadError {
 }
 
 #[derive(Debug)]
+/// A parsed configuration and the path from which it was loaded.
 pub struct LoadedConfiguration {
     path: PathBuf,
     config: Config,
 }
 
 impl LoadedConfiguration {
+    /// Return the source file path.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Return the validated configuration.
     pub fn config(&self) -> &Config {
         &self.config
     }
 }
 
+/// Read and validate a configuration file.
 pub fn load(path: impl Into<PathBuf>) -> Result<LoadedConfiguration, ConfigurationLoadError> {
     let path = path.into();
     let contents = fs::read_to_string(&path).map_err(|source| ConfigurationLoadError::Io {
@@ -51,6 +56,7 @@ pub fn load(path: impl Into<PathBuf>) -> Result<LoadedConfiguration, Configurati
     Ok(LoadedConfiguration { path, config })
 }
 
+/// Read and validate a selected project config, explicit file, or preset.
 pub fn load_source(
     source: &ConfigurationSource,
 ) -> Result<LoadedConfiguration, ConfigurationLoadError> {
