@@ -97,6 +97,39 @@ fn matcher_sets_preserve_multiple_pattern_and_capture_behavior() {
 }
 
 #[test]
+fn matcher_sets_match_the_same_paths_as_individual_globs() {
+    let patterns = [
+        "**/*.(?i)pdf",
+        "archive/[!a-c]?.{pdf,png}",
+        r"literal/\*",
+        "ReadMe",
+    ];
+    let matchers = patterns
+        .iter()
+        .map(|pattern| Matcher::new(pattern).expect("valid matcher"))
+        .collect::<Vec<_>>();
+    let set = MatcherSet::new(matchers.clone());
+
+    for path in [
+        "invoice.PDF",
+        "src/invoice.PdF",
+        "archive/z7.pdf",
+        "archive/z7.png",
+        "archive/b7.txt",
+        "literal/*",
+        "literal/anything",
+        "ReadMe",
+        "readme",
+    ] {
+        assert_eq!(
+            set.is_match(path),
+            matchers.iter().any(|matcher| matcher.is_match(path)),
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn matching_flags_can_select_case_insensitive_components() {
     let matcher = Matcher::new("**/*.(?i)pdf").expect("valid glob pattern");
 
