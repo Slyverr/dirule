@@ -62,6 +62,8 @@ pub enum ScanError {
     Git(String),
     #[error("target is not a directory: {0}")]
     NotDirectory(PathBuf),
+    #[error("refusing to scan Git metadata: {0}")]
+    GitMetadataTarget(PathBuf),
 }
 
 pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
@@ -71,6 +73,13 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
             path: target.to_path_buf(),
             source,
         })?;
+    if target
+        .components()
+        .any(|component| component.as_os_str() == OsStr::new(".git"))
+    {
+        return Err(ScanError::GitMetadataTarget(target));
+    }
+
     if !target.is_dir() {
         return Err(ScanError::NotDirectory(target));
     }

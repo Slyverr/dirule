@@ -63,6 +63,14 @@ fn scan_skips_git_metadata_without_skipping_hidden_project_files() {
         .expect("write nested repository metadata");
     std::fs::write(temp.0.join("nested/project.txt"), "project file")
         .expect("write nested project file");
+    std::fs::create_dir(temp.0.join("worktree")).expect("create linked worktree directory");
+    std::fs::write(
+        temp.0.join("worktree/.git"),
+        "gitdir: ../.git/worktrees/worktree\n",
+    )
+    .expect("write linked worktree metadata file");
+    std::fs::write(temp.0.join("worktree/project.txt"), "project file")
+        .expect("write linked worktree project file");
 
     let result = scan(&temp.0).expect("scan target");
     let paths = result
@@ -73,11 +81,27 @@ fn scan_skips_git_metadata_without_skipping_hidden_project_files() {
 
     assert!(paths.contains(&PathBuf::from(".hidden")));
     assert!(paths.contains(&PathBuf::from("nested/project.txt")));
+    assert!(paths.contains(&PathBuf::from("worktree/project.txt")));
     assert!(
         !paths
             .iter()
             .any(|path| path.components().any(|part| part.as_os_str() == ".git"))
     );
+}
+
+#[test]
+fn scan_rejects_git_metadata_as_a_target() {
+    let temp = TempDir::new();
+    std::fs::create_dir_all(temp.0.join(".git/objects"))
+        .expect("create repository metadata directory");
+
+    let metadata_targets = [temp.0.join(".git"), temp.0.join(".git/objects")];
+    for target in metadata_targets {
+        assert!(matches!(
+            scan(&target),
+            Err(ScanError::GitMetadataTarget(path)) if path == target.canonicalize().unwrap()
+        ));
+    }
 }
 
 #[cfg(unix)]

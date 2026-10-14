@@ -147,6 +147,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 - Apply VCS ignore filters before matching. In Git repositories, respect nested `.gitignore` files, `.git/info/exclude`, and the configured global Git ignore file. Git-tracked paths remain eligible even if ignored; ignore rules exclude untracked paths. Obtain tracked paths from the Git index and combine them with the ignore-aware filesystem walk. Outside Git, support `.ignore` files with the same pattern syntax.
 - If the Git executable is unavailable inside a Git repository, fail planning instead of silently omitting tracked paths.
 - Do not hardcode exclusions such as `node_modules` or `build`. Do not exclude hidden files just for being hidden.
+- Never scan Git metadata entries named `.git`, whether a directory or a linked-worktree metadata file, at any depth. Reject a target equal to or inside a `.git` metadata path.
 - Match all rules against original paths in declaration order. The first matching rule owns an entry; later rules cannot claim it based on its planned destination. Unmatched entries retain their paths.
 - Build one virtual plan from all matched entries before changing the filesystem. Do not apply a rule and rescan before evaluating the next rule.
 - A template provides a complete target-relative destination. Entries without their own destination inherit a renamed directory's virtual path; an explicit child template destination is used as written.
@@ -189,6 +190,7 @@ Tests should verify:
 - Runtime failure after an earlier move restores completed moves and removes directories created by apply; incomplete rollback is reported with its failed paths.
 - Apply rejects a source replaced since planning even when the replacement has the same length and modification time.
 - Git ignore behavior for nested rules, tracked paths, global excludes, `.ignore` outside Git, and hidden files; unreadable or malformed ignore files must stop planning.
+- Git metadata entries are skipped at any depth, ordinary hidden project files remain eligible, and targets equal to or inside `.git` metadata are rejected.
 - Explicit target override, configured target, current-directory default, exact config/preset selection, and no parent-directory config search.
 - Configuration validation accepts a valid config whose target does not exist, rejects invalid config and preset sources, and does not scan or mutate the target.
 - `check` succeeds when paths satisfy the rules and fails for a proposed path change or conflict without changing the filesystem.
