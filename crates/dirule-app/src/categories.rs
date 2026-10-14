@@ -247,7 +247,11 @@ fn parse_category(
                 format!("category {name:?}: `extensions` must contain only strings"),
             )
         })?;
-        let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+        let extension = extension
+            .strip_prefix('.')
+            .unwrap_or(extension)
+            .to_ascii_lowercase();
+
         if extension.is_empty() || !extension.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
             return Err(invalid(
                 path,

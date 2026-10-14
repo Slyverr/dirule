@@ -136,6 +136,19 @@ fn category_catalog_rejects_unknown_versions_and_duplicate_extensions() {
 }
 
 #[test]
+fn category_catalog_rejects_multiple_leading_dots_in_extensions() {
+    let source = format!(
+        "version = \"{CURRENT_CATEGORY_CATALOG_VERSION}\"\n\
+         [[categories]]\nname = 'ebooks'\nextensions = ['..PDF']\ndestination = 'books'\n"
+    );
+
+    let error = CategoryCatalog::parse(Path::new("categories.toml"), &source)
+        .expect_err("only one optional leading dot is valid");
+
+    assert!(error.to_string().contains("invalid extension"));
+}
+
+#[test]
 fn missing_user_catalog_uses_built_in_categories() {
     let target = TempTarget::new();
     let catalog = CategoryCatalog::load_optional(&target.join("missing.toml"))
