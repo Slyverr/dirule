@@ -75,7 +75,7 @@ fn scan_applies_diruleignore_outside_git() {
 }
 
 #[test]
-fn scan_diruleignore_excludes_and_reincludes_paths() {
+fn scan_diruleignore_exclusions_do_not_override_vcs_ignores() {
     let temp = TempDir::new();
     let init = Command::new("git")
         .args(["init", "-q"])
@@ -85,11 +85,8 @@ fn scan_diruleignore_excludes_and_reincludes_paths() {
     assert!(init.success(), "initialize Git fixture");
 
     std::fs::write(temp.0.join(".gitignore"), "vcs-ignored.txt\n").expect("write VCS ignore rules");
-    std::fs::write(
-        temp.0.join(".diruleignore"),
-        "dirule-ignored.txt\n!vcs-ignored.txt\n",
-    )
-    .expect("write Dirule ignore rules");
+    std::fs::write(temp.0.join(".diruleignore"), "dirule-ignored.txt\n")
+        .expect("write Dirule ignore rules");
     for name in ["dirule-ignored.txt", "vcs-ignored.txt", "visible.txt"] {
         std::fs::write(temp.0.join(name), "content").expect("write fixture file");
     }
@@ -114,14 +111,26 @@ fn scan_diruleignore_excludes_and_reincludes_paths() {
         .collect::<Vec<_>>();
 
     assert!(!paths.contains(&PathBuf::from("dirule-ignored.txt")));
-    assert!(paths.contains(&PathBuf::from("vcs-ignored.txt")));
+    assert!(!paths.contains(&PathBuf::from("vcs-ignored.txt")));
     assert!(paths.contains(&PathBuf::from("visible.txt")));
+}
+
+#[test]
+fn scan_rejects_diruleignore_negations() {
+    let temp = TempDir::new();
+    std::fs::write(temp.0.join(".diruleignore"), "!include.txt\n")
+        .expect("write Dirule ignore rules");
+    std::fs::write(temp.0.join("include.txt"), "content").expect("write fixture file");
+
+    let error = scan(&temp.0).expect_err("Dirule exclusions cannot be negated");
+
+    assert!(error.to_string().contains("only excludes paths"));
 }
 
 #[test]
 fn configured_ignore_cannot_be_overridden_by_diruleignore() {
     let temp = TempDir::new();
-    std::fs::write(temp.0.join(".diruleignore"), "!excluded.txt\n")
+    std::fs::write(temp.0.join(".diruleignore"), "excluded.txt\n")
         .expect("write Dirule ignore rules");
     std::fs::write(temp.0.join("excluded.txt"), "content").expect("write fixture file");
     let matcher = Matcher::new("excluded.txt").expect("compile configured ignore");

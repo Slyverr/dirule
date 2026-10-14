@@ -353,14 +353,36 @@ fn validate_ignore_file(path: &Path) -> Result<(), ScanError> {
         });
     }
 
-    let mut file = std::fs::File::open(path).map_err(|source| ScanError::IgnoreFile {
+    let file = std::fs::File::open(path).map_err(|source| ScanError::IgnoreFile {
         path: path.to_path_buf(),
         source,
     })?;
-    std::io::copy(&mut file, &mut std::io::sink()).map_err(|source| ScanError::IgnoreFile {
-        path: path.to_path_buf(),
-        source,
-    })?;
+
+    if path.file_name() == Some(OsStr::new(".diruleignore")) {
+        use std::io::BufRead;
+
+        for line in std::io::BufReader::new(file).lines() {
+            let line = line.map_err(|source| ScanError::IgnoreFile {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            if line.starts_with('!') {
+                return Err(ScanError::IgnoreFile {
+                    path: path.to_path_buf(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "negation patterns are not supported; .diruleignore only excludes paths",
+                    ),
+                });
+            }
+        }
+    } else {
+        let mut file = file;
+        std::io::copy(&mut file, &mut std::io::sink()).map_err(|source| ScanError::IgnoreFile {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
 
     Ok(())
 }

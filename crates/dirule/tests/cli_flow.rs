@@ -790,7 +790,7 @@ fn quick_sort_respects_project_ignore_files() {
 }
 
 #[test]
-fn quick_sort_diruleignore_can_include_a_vcs_ignored_path() {
+fn quick_sort_rejects_diruleignore_negations() {
     let project = TempProject::new();
     let init = Command::new("git")
         .args(["init", "-q"])
@@ -800,21 +800,21 @@ fn quick_sort_diruleignore_can_include_a_vcs_ignored_path() {
     assert!(init.success(), "initialize Git fixture");
     fs::write(project.0.join(".gitignore"), "Invoice.PDF\n").expect("write Git ignore rule");
     fs::write(project.0.join(".diruleignore"), "!Invoice.PDF\n")
-        .expect("write Dirule ignore exception");
+        .expect("write invalid Dirule ignore negation");
     fs::write(project.0.join("Invoice.PDF"), "invoice").expect("write ignored PDF");
 
     let preview = project.run(&["sort", "pdf", "--format", "json"]);
 
+    assert!(!preview.status.success());
+    let error: serde_json::Value =
+        serde_json::from_slice(&preview.stderr).expect("valid scan error");
+    assert_eq!(error["error"]["kind"], "scan");
     assert!(
-        preview.status.success(),
-        "{}",
-        String::from_utf8_lossy(&preview.stderr)
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(".diruleignore only excludes paths")
     );
-    let preview: serde_json::Value =
-        serde_json::from_slice(&preview.stdout).expect("valid re-included-file preview");
-    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
-        entry["source"] == "Invoice.PDF" && entry["destination"] == "pdfs/Invoice.PDF"
-    }));
     assert!(project.0.join("Invoice.PDF").is_file());
     assert!(!project.0.join("pdfs/Invoice.PDF").exists());
 }
