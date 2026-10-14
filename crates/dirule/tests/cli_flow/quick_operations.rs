@@ -272,6 +272,117 @@ fn quick_sort_accepts_multiple_extensions_and_builtin_categories() {
 }
 
 #[test]
+fn quick_sort_can_force_a_category_named_extension() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Artwork.images"), "artwork").expect("write category-named extension");
+
+    let preview = project.run(&["sort", ".images", "--format", "json"]);
+
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid extension preview");
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Artwork.images" && entry["destination"] == "imagess/Artwork.images"
+    }));
+    assert!(project.0.join("Artwork.images").is_file());
+    assert!(!project.0.join("imagess/Artwork.images").exists());
+}
+
+#[test]
+fn quick_sort_uses_explicit_target_without_loading_project_config() {
+    let project = TempProject::new();
+    let target = project.0.join("Downloads");
+    fs::create_dir(&target).expect("create explicit target");
+    fs::write(project.0.join("Current.pdf"), "current directory")
+        .expect("write current-directory file");
+    fs::write(target.join("Invoice.pdf"), "target invoice").expect("write target file");
+    fs::write(project.0.join("dirule.toml"), "invalid config")
+        .expect("write invalid project config");
+
+    let preview = project.run(&[
+        "sort",
+        "pdf",
+        "--target",
+        target.to_str().expect("UTF-8 target path"),
+        "--format",
+        "json",
+    ]);
+
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid explicit-target preview");
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Invoice.pdf" && entry["destination"] == "pdfs/Invoice.pdf"
+    }));
+    assert!(preview["entries"].as_array().unwrap().iter().all(|entry| {
+        entry["source"] != "Current.pdf" && entry["destination"] != "pdfs/Current.pdf"
+    }));
+    assert!(target.join("Invoice.pdf").is_file());
+    assert!(project.0.join("Current.pdf").is_file());
+}
+
+#[test]
+fn quick_sort_skips_conflicts_and_applies_unrelated_moves() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join("first")).expect("create first source directory");
+    fs::create_dir_all(project.0.join("second")).expect("create second source directory");
+    fs::write(project.0.join("first/Invoice.pdf"), "first invoice").expect("write first invoice");
+    fs::write(project.0.join("second/Invoice.pdf"), "second invoice")
+        .expect("write second invoice");
+    fs::write(project.0.join("Chart.png"), "chart").expect("write independent image");
+
+    let apply = project.run(&[
+        "sort",
+        "pdf",
+        "png",
+        "--recursive",
+        "--apply",
+        "--yes",
+        "--on-conflict",
+        "skip",
+        "--format",
+        "json",
+    ]);
+
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("valid apply JSON");
+    assert_eq!(apply["execution"]["status"], "applied");
+    assert!(project.0.join("first/Invoice.pdf").is_file());
+    assert!(project.0.join("second/Invoice.pdf").is_file());
+    assert!(!project.0.join("pdfs/Invoice.pdf").exists());
+    assert_eq!(text(&project.0.join("pngs/Chart.png")), "chart");
+
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    let undo = project.run(&["undo", run_id, "--yes"]);
+
+    assert!(
+        undo.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&undo.stdout),
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(project.0.join("Chart.png").is_file());
+    assert!(!project.0.join("pngs").exists());
+    assert!(project.0.join("first/Invoice.pdf").is_file());
+    assert!(project.0.join("second/Invoice.pdf").is_file());
+}
+
+#[test]
 fn quick_sort_loads_user_category_catalog_and_overrides_built_ins() {
     let project = TempProject::new();
     fs::write(project.0.join("Camera.RAW"), "raw").expect("write raw image");
@@ -499,6 +610,56 @@ fn quick_recursive_sort_collects_files_in_target_level_buckets() {
             .iter()
             .all(|entry| { entry["source"] == entry["destination"] })
     );
+}
+
+#[test]
+fn quick_extension_sort_leaves_extensionless_names_unchanged() {
+    let project = TempProject::new();
+    fs::write(project.0.join("LICENSE"), "license").expect("write extensionless file");
+    fs::write(project.0.join(".profile"), "profile").expect("write dotfile");
+    fs::write(project.0.join("archive.tar.gz"), "archive").expect("write multi-extension file");
+    fs::create_dir(project.0.join("nested")).expect("create nested directory");
+    fs::write(project.0.join("nested/.profile"), "nested profile").expect("write nested dotfile");
+
+    for arguments in [
+        vec!["sort", "--by", "extension", "--format", "json"],
+        vec![
+            "sort",
+            "--by",
+            "extension",
+            "--recursive",
+            "--format",
+            "json",
+        ],
+    ] {
+        let output = project.run(&arguments);
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan");
+        let entries = plan["entries"].as_array().expect("plan entries");
+        for (source, destination) in [
+            ("LICENSE", "LICENSE"),
+            (".profile", ".profile"),
+            ("nested/.profile", "nested/.profile"),
+            ("archive.tar.gz", "gzs/archive.tar.gz"),
+        ] {
+            assert!(
+                entries.iter().any(|entry| {
+                    entry["source"] == source && entry["destination"] == destination
+                }),
+                "expected {source:?} to remain at or move to {destination:?}: {plan}"
+            );
+        }
+    }
+    assert!(project.0.join("LICENSE").is_file());
+    assert!(project.0.join(".profile").is_file());
+    assert!(project.0.join("archive.tar.gz").is_file());
+    assert!(project.0.join("nested/.profile").is_file());
+    assert!(!project.0.join("profiles/.profile").exists());
 }
 
 #[test]
