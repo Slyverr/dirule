@@ -8,7 +8,7 @@
 
 ### Improved
 
-- Reduce scan overhead when no Git-ignored tracked paths need recovery.
+- Defer `.diruleignore` matcher setup until a Git-tracked path needs recovery.
 
 ## Version 0.2.0
 
