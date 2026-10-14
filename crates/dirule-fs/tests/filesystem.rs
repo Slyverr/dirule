@@ -49,6 +49,37 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
     assert!(!paths.iter().any(|path| path.starts_with("nested/ignored")));
 }
 
+#[test]
+fn scan_skips_git_metadata_without_skipping_hidden_project_files() {
+    let temp = TempDir::new();
+    std::fs::create_dir_all(temp.0.join(".git/objects/pack"))
+        .expect("create repository metadata directory");
+    std::fs::write(temp.0.join(".git/HEAD"), "ref: refs/heads/main\n")
+        .expect("write repository metadata");
+    std::fs::write(temp.0.join(".hidden"), "project file").expect("write hidden project file");
+    std::fs::create_dir_all(temp.0.join("nested/.git/objects"))
+        .expect("create nested repository metadata directory");
+    std::fs::write(temp.0.join("nested/.git/config"), "repository = true\n")
+        .expect("write nested repository metadata");
+    std::fs::write(temp.0.join("nested/project.txt"), "project file")
+        .expect("write nested project file");
+
+    let result = scan(&temp.0).expect("scan target");
+    let paths = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+
+    assert!(paths.contains(&PathBuf::from(".hidden")));
+    assert!(paths.contains(&PathBuf::from("nested/project.txt")));
+    assert!(
+        !paths
+            .iter()
+            .any(|path| path.components().any(|part| part.as_os_str() == ".git"))
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn scan_handles_git_repository_roots_with_newlines() {

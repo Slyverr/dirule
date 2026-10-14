@@ -1,5 +1,6 @@
 use dirule_core::{Entry, EntryKind};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use thiserror::Error;
@@ -100,7 +101,8 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .git_exclude(true)
         .parents(true)
         .require_git(false)
-        .follow_links(false);
+        .follow_links(false)
+        .filter_entry(|entry| entry.depth() == 0 || entry.file_name() != OsStr::new(".git"));
 
     let mut paths = HashMap::<PathBuf, ScannedEntry>::new();
     let mut findings = Vec::new();
