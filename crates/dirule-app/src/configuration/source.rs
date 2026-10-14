@@ -1,5 +1,5 @@
-use crate::application::paths::resolve_from;
-use crate::application::presets::{PresetError, PresetStore};
+use crate::paths::resolve_from;
+use crate::presets::{PresetError, PresetStore};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

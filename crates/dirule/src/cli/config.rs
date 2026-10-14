@@ -1,6 +1,6 @@
 use super::{args, output};
-use crate::application::configuration::{self, ConfigurationLoadError, ConfigurationSource};
-use crate::application::presets::PresetStore;
+use dirule_app::configuration::{self, ConfigurationLoadError, ConfigurationSource};
+use dirule_app::presets::PresetStore;
 use dirule_core::CURRENT_CONFIG_VERSION;
 use std::error::Error;
 use std::fs;
@@ -43,10 +43,10 @@ pub(super) fn validate(
 
 pub(super) fn evaluate(
     options: args::OperationArgs,
-) -> Result<crate::application::Preview, Box<dyn Error>> {
+) -> Result<dirule_app::Preview, Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
     let source = config_source(&cwd, options.rules)?;
-    crate::application::preview_source(&source, &cwd, options.target).map_err(preview_source_error)
+    dirule_app::preview_source(&source, &cwd, options.target).map_err(preview_source_error)
 }
 
 fn config_source(
@@ -79,10 +79,8 @@ fn load_configuration(
     }
 }
 
-fn missing_config_hint(
-    kind: crate::application::configuration::ConfigurationSourceKind,
-) -> &'static str {
-    use crate::application::configuration::ConfigurationSourceKind;
+fn missing_config_hint(kind: dirule_app::configuration::ConfigurationSourceKind) -> &'static str {
+    use dirule_app::configuration::ConfigurationSourceKind;
 
     match kind {
         ConfigurationSourceKind::ProjectDefault => "run `dirule init` or pass `--config FILE`",
@@ -91,11 +89,11 @@ fn missing_config_hint(
     }
 }
 
-fn preview_source_error(error: crate::application::PreviewSourceError) -> Box<dyn Error> {
+fn preview_source_error(error: dirule_app::PreviewSourceError) -> Box<dyn Error> {
     match error {
-        crate::application::PreviewSourceError::Configuration(
-            ConfigurationLoadError::Missing { source },
-        ) => format!(
+        dirule_app::PreviewSourceError::Configuration(ConfigurationLoadError::Missing {
+            source,
+        }) => format!(
             "configuration not found at {}; {}",
             source.path().display(),
             missing_config_hint(source.kind()),

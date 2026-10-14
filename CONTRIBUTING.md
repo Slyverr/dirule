@@ -6,7 +6,8 @@ Dirule is a Rust Cargo workspace. Keep contributions focused and follow the work
 
 - Put rule data, matching, transformations, validation, and planning in `dirule-core`.
 - Put traversal and filesystem operations in `dirule-fs`.
-- Keep CLI parsing and orchestration in `dirule`.
+- Keep CLI parsing and output in `dirule`.
+- Put frontend-neutral configuration, preset, preview, and apply services in `dirule-app`; do not add CLI or UI dependencies there.
 - Add a dependency to the narrowest crate that needs it. Prefer a maintained library over a custom parser or filesystem implementation when it fits the required behavior.
 
 ## Rust style

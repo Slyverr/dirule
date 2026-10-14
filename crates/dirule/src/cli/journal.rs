@@ -46,5 +46,5 @@ pub(super) fn undo(
 }
 
 pub(super) fn store() -> Result<JournalStore, Box<dyn Error>> {
-    Ok(crate::application::paths::user_journal_store()?)
+    Ok(dirule_app::paths::user_journal_store()?)
 }

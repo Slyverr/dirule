@@ -301,10 +301,19 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "dirule-app",
  "dirule-core",
  "dirule-fs",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "dirule-app"
+version = "0.1.0"
+dependencies = [
+ "dirule-core",
+ "dirule-fs",
  "tempfile",
  "toml_edit",
 ]

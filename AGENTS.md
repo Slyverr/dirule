@@ -11,10 +11,11 @@ Dirule is a Rust workspace for a local-first filesystem rules CLI. Use the [READ
 
 ## Workspace boundaries
 
-- `crates/dirule`: CLI and application orchestration.
+- `crates/dirule`: CLI parsing, output, and command orchestration.
+- `crates/dirule-app`: frontend-neutral configuration, preset, preview, and apply services shared by the CLI and future interfaces.
 - `crates/dirule-core`: configuration, matching, transformation, validation, and virtual planning; keep it independent of filesystem I/O.
 - `crates/dirule-fs`: traversal and filesystem operations; depend on `dirule-core` for shared rule data and plans.
-- Keep dependencies flowing from `dirule` to the libraries and from `dirule-fs` to `dirule-core`; avoid cycles.
+- Keep application behavior in `dirule-app`, which coordinates `dirule-core` and `dirule-fs`. Frontends may depend on those crates for public types, but should not duplicate their behavior. `dirule-fs` depends on `dirule-core`; avoid cycles and keep frontend-specific dependencies out of `dirule-app`.
 
 The CLI is Dirule's only user interface at this stage. Prefer portable standard-library behavior; isolate platform-specific filesystem guarantees inside `dirule-fs` when they are required.
 

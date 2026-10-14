@@ -1,5 +1,5 @@
 use super::{args, output, prompt};
-use crate::application::presets::PresetStore;
+use dirule_app::presets::PresetStore;
 use std::error::Error;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ pub(super) fn save(
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
-    let source_path = crate::application::paths::resolve_from(
+    let source_path = dirule_app::paths::resolve_from(
         &cwd,
         options
             .config

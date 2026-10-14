@@ -11,7 +11,7 @@ pub(super) struct ApplyOptions {
 }
 
 pub(super) fn execute(
-    preview: crate::application::Preview,
+    preview: dirule_app::Preview,
     options: ApplyOptions,
 ) -> Result<(), Box<dyn Error>> {
     let target = &preview.target;
@@ -81,7 +81,7 @@ pub(super) fn execute(
         args::ConflictAction::Skip => ConflictPolicy::Skip,
     };
     let store = journal::store()?;
-    let applied = crate::application::apply_authorized(preview, policy, &store)?;
+    let applied = dirule_app::apply_authorized(preview, policy, &store)?;
     output::apply_result(
         &applied.target,
         &applied.plan,

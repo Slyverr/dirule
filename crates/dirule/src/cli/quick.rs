@@ -15,10 +15,10 @@ pub(super) fn sort(
     let target = target(operation.target.as_deref())?;
     let preview = match (extension, by) {
         (Some(extension), None) => {
-            crate::application::sort_extension_preview(&target, &extension, operation.recursive)?
+            dirule_app::sort_extension_preview(&target, &extension, operation.recursive)?
         }
         (None, Some(args::SortBy::Extension)) => {
-            crate::application::sort_by_extension_preview(&target, operation.recursive)?
+            dirule_app::sort_by_extension_preview(&target, operation.recursive)?
         }
         _ => return Err("choose one extension or a supported --by value".into()),
     };
@@ -32,8 +32,7 @@ pub(super) fn rename(
 ) -> Result<(), Box<dyn Error>> {
     let target = target(options.operation.target.as_deref())?;
     let transform = Transform::from(options.transform);
-    let preview =
-        crate::application::rename_preview(&target, transform, options.operation.recursive)?;
+    let preview = dirule_app::rename_preview(&target, transform, options.operation.recursive)?;
 
     execute(preview, options.operation, color)
 }
@@ -45,7 +44,7 @@ fn target(path: Option<&Path>) -> Result<PathBuf, Box<dyn Error>> {
 }
 
 fn execute(
-    preview: crate::application::Preview,
+    preview: dirule_app::Preview,
     options: args::QuickOperationArgs,
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {

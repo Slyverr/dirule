@@ -206,7 +206,8 @@ The flake supports x86_64 and ARM64 Linux, plus ARM64 macOS. On Intel macOS, ins
 
 ## Workspace
 
-- `crates/dirule`: CLI and application orchestration.
+- `crates/dirule`: CLI parsing, output, and command orchestration.
+- `crates/dirule-app`: shared application services for the CLI and future interfaces.
 - `crates/dirule-core`: configuration, matching, transforms, and planning.
 - `crates/dirule-fs`: ignore-aware scanning and filesystem operations.
 

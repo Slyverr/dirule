@@ -1,5 +1,5 @@
-use dirule::application::configuration::{ConfigEditor, ConfigEditorError};
-use dirule::application::presets::{PresetError, PresetStore};
+use dirule_app::configuration::{ConfigEditor, ConfigEditorError};
+use dirule_app::presets::{PresetError, PresetStore};
 use dirule_core::parse_config;
 use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
@@ -60,7 +60,7 @@ to = "builtin:kebab-case"
     )
     .expect("parse config");
 
-    let preview = dirule::application::preview(&config, &target.0).expect("preview target");
+    let preview = dirule_app::preview(&config, &target.0).expect("preview target");
 
     assert_eq!(preview.target, target.0.canonicalize().unwrap());
     assert!(preview.plan.entries.iter().any(|entry| {
@@ -70,7 +70,7 @@ to = "builtin:kebab-case"
     assert!(!target.join("my-file.txt").exists());
 
     let journal = JournalStore::new(target.join(".journal"));
-    let applied = dirule::application::apply_authorized(preview, ConflictPolicy::Abort, &journal)
+    let applied = dirule_app::apply_authorized(preview, ConflictPolicy::Abort, &journal)
         .expect("apply authorized plan");
     let run_id = applied.run_id.as_deref().expect("journaled run ID");
     assert_eq!(applied.report.moved.len(), 1);
@@ -144,15 +144,15 @@ fn application_path_resolution_keeps_absolute_paths_and_anchors_relative_paths()
     let absolute = base.join("other-project");
 
     assert_eq!(
-        dirule::application::paths::resolve_from(&base, relative.clone()),
+        dirule_app::paths::resolve_from(&base, relative.clone()),
         base.join(relative)
     );
     assert_eq!(
-        dirule::application::paths::resolve_from(&base, absolute.clone()),
+        dirule_app::paths::resolve_from(&base, absolute.clone()),
         absolute
     );
     assert_eq!(
-        dirule::application::paths::resolve_target(&base, "nested/project".into())
+        dirule_app::paths::resolve_target(&base, "nested/project".into())
             .expect("resolve relative target"),
         base.join("nested/project")
     );
@@ -165,7 +165,7 @@ fn application_target_resolution_prefers_explicit_then_configured_then_base() {
     let explicit = PathBuf::from("explicit-target");
 
     assert_eq!(
-        dirule::application::paths::resolve_operation_target(
+        dirule_app::paths::resolve_operation_target(
             &base,
             Some(explicit.clone()),
             Some(configured.clone())
@@ -174,12 +174,12 @@ fn application_target_resolution_prefers_explicit_then_configured_then_base() {
         base.join(explicit)
     );
     assert_eq!(
-        dirule::application::paths::resolve_operation_target(&base, None, Some(configured.clone()))
+        dirule_app::paths::resolve_operation_target(&base, None, Some(configured.clone()))
             .expect("resolve configured target"),
         base.join(configured)
     );
     assert_eq!(
-        dirule::application::paths::resolve_operation_target(&base, None, None)
+        dirule_app::paths::resolve_operation_target(&base, None, None)
             .expect("resolve base target"),
         base.0
     );
@@ -195,7 +195,7 @@ fn configuration_loader_exposes_validated_config_and_source_path() {
     );
     fs::write(&path, &contents).expect("write project config");
 
-    let loaded = dirule::application::configuration::load(&path).expect("load project config");
+    let loaded = dirule_app::configuration::load(&path).expect("load project config");
 
     assert_eq!(loaded.path(), path);
     assert_eq!(loaded.config().rules.len(), 1);
@@ -208,11 +208,11 @@ fn configuration_loader_errors_include_the_source_path() {
     let path = target.join("broken.toml");
     fs::write(&path, "version = [").expect("write invalid config");
 
-    let error = dirule::application::configuration::load(&path).unwrap_err();
+    let error = dirule_app::configuration::load(&path).unwrap_err();
 
     assert!(matches!(
         error,
-        dirule::application::configuration::ConfigurationLoadError::Invalid { .. }
+        dirule_app::configuration::ConfigurationLoadError::Invalid { .. }
     ));
     assert!(error.to_string().contains(&path.display().to_string()));
 }
@@ -220,16 +220,16 @@ fn configuration_loader_errors_include_the_source_path() {
 #[test]
 fn configuration_sources_resolve_project_files_and_named_presets() {
     let base = TempTarget::new();
-    let default = dirule::application::configuration::ConfigurationSource::project_default(&base);
+    let default = dirule_app::configuration::ConfigurationSource::project_default(&base);
 
     assert_eq!(default.path(), base.join("dirule.toml"));
     assert_eq!(default.name(), "dirule.toml");
     assert_eq!(
         default.kind(),
-        dirule::application::configuration::ConfigurationSourceKind::ProjectDefault
+        dirule_app::configuration::ConfigurationSourceKind::ProjectDefault
     );
 
-    let explicit = dirule::application::configuration::ConfigurationSource::explicit_file(
+    let explicit = dirule_app::configuration::ConfigurationSource::explicit_file(
         &base,
         PathBuf::from("config/rules.toml"),
     );
@@ -237,32 +237,31 @@ fn configuration_sources_resolve_project_files_and_named_presets() {
     assert_eq!(explicit.name(), "config/rules.toml");
     assert_eq!(
         explicit.kind(),
-        dirule::application::configuration::ConfigurationSourceKind::ExplicitFile
+        dirule_app::configuration::ConfigurationSourceKind::ExplicitFile
     );
 
     let store = PresetStore::new(base.join("presets")).expect("create preset store");
-    let preset =
-        dirule::application::configuration::ConfigurationSource::preset(&store, "downloads")
-            .expect("resolve preset");
+    let preset = dirule_app::configuration::ConfigurationSource::preset(&store, "downloads")
+        .expect("resolve preset");
 
     assert_eq!(preset.path(), store.directory().join("downloads.toml"));
     assert_eq!(preset.name(), "downloads");
     assert_eq!(
         preset.kind(),
-        dirule::application::configuration::ConfigurationSourceKind::Preset
+        dirule_app::configuration::ConfigurationSourceKind::Preset
     );
 }
 
 #[test]
 fn configuration_loading_reports_missing_selected_sources() {
     let target = TempTarget::new();
-    let source = dirule::application::configuration::ConfigurationSource::project_default(&target);
+    let source = dirule_app::configuration::ConfigurationSource::project_default(&target);
 
-    let error = dirule::application::configuration::load_source(&source).unwrap_err();
+    let error = dirule_app::configuration::load_source(&source).unwrap_err();
 
     assert!(matches!(
         error,
-        dirule::application::configuration::ConfigurationLoadError::Missing { .. }
+        dirule_app::configuration::ConfigurationLoadError::Missing { .. }
     ));
     assert!(
         error
@@ -288,13 +287,12 @@ fn preview_source_uses_configured_target_and_explicit_override() {
         ),
     )
     .expect("write project config");
-    let source = dirule::application::configuration::ConfigurationSource::project_default(&base);
+    let source = dirule_app::configuration::ConfigurationSource::project_default(&base);
 
-    let configured = dirule::application::preview_source(&source, &base, None)
-        .expect("preview configured target");
-    let explicit =
-        dirule::application::preview_source(&source, &base, Some(PathBuf::from("explicit")))
-            .expect("preview explicit target");
+    let configured =
+        dirule_app::preview_source(&source, &base, None).expect("preview configured target");
+    let explicit = dirule_app::preview_source(&source, &base, Some(PathBuf::from("explicit")))
+        .expect("preview explicit target");
 
     assert_eq!(configured.target, configured_target.canonicalize().unwrap());
     assert!(configured.plan.entries.iter().any(|entry| {
@@ -481,8 +479,8 @@ fn sort_by_extension_normalizes_suffixes_and_leaves_dotfiles_alone() {
     fs::create_dir_all(target.join("nested")).expect("create nested directory");
     fs::write(target.join("nested/Report.PDF"), "report").expect("write nested PDF");
 
-    let preview = dirule::application::sort_by_extension_preview(&target.0, true)
-        .expect("preview extension sort");
+    let preview =
+        dirule_app::sort_by_extension_preview(&target.0, true).expect("preview extension sort");
 
     assert!(preview.plan.conflicts.is_empty(), "{:#?}", preview.plan);
     assert!(preview.plan.entries.iter().any(|entry| {
@@ -507,7 +505,7 @@ fn sort_extension_matches_case_insensitively_without_recursing_by_default() {
     fs::create_dir_all(target.join("nested")).expect("create nested directory");
     fs::write(target.join("nested/Report.pdf"), "report").expect("write nested PDF");
 
-    let preview = dirule::application::sort_extension_preview(&target.0, ".PDF", false)
+    let preview = dirule_app::sort_extension_preview(&target.0, ".PDF", false)
         .expect("preview case-insensitive extension sort");
 
     assert!(preview.plan.entries.iter().any(|entry| {
@@ -529,9 +527,8 @@ fn rename_preview_uses_shared_transforms_and_inherits_directory_moves() {
     fs::write(target.join("HTTPServer/ReadMe.txt"), "notes").expect("write nested file");
     fs::write(target.join("MyXMLParser.pdf"), "document").expect("write source file");
 
-    let preview =
-        dirule::application::rename_preview(&target.0, dirule_core::Transform::KebabCase, false)
-            .expect("preview rename operation");
+    let preview = dirule_app::rename_preview(&target.0, dirule_core::Transform::KebabCase, false)
+        .expect("preview rename operation");
 
     assert!(preview.plan.entries.iter().any(|entry| {
         entry.source == Path::new("MyXMLParser.pdf")
