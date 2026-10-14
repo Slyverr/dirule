@@ -1,6 +1,5 @@
-use super::{args, journal, output, prompt};
+use super::{args, output};
 use dirule_core::Transform;
-use dirule_fs::ConflictPolicy;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
@@ -57,10 +56,9 @@ fn execute(
         format,
         ..
     } = options;
-    let target = &preview.target;
-    let plan = &preview.plan;
-
     if !apply {
+        let target = &preview.target;
+        let plan = &preview.plan;
         output::plan(
             target,
             plan,
@@ -76,75 +74,14 @@ fn execute(
         return Ok(());
     }
 
-    if format == args::OutputFormat::Human {
-        output::plan(
-            target,
-            plan,
+    super::apply::execute(
+        preview,
+        super::apply::ApplyOptions {
             format,
             color,
-            output::PlanContext::Apply,
-            false,
-        )?;
-    } else if output::json_apply_preview_needed(format, yes, plan) {
-        output::plan_to_stderr(target, plan, color, output::PlanContext::Apply, false)?;
-    }
-
-    if !plan.is_conflict_free() && on_conflict == args::ConflictAction::Abort {
-        return Err(format!("plan contains {} conflict(s)", plan.conflicts.len()).into());
-    }
-    if !plan.has_changes() {
-        output::apply_result(
-            target,
-            plan,
-            output::ApplySummary {
-                status: output::ApplyStatus::NoChanges,
-                moved: 0,
-                skipped: 0,
-                run_id: None,
-            },
-            format,
-            color,
-        )?;
-        return Ok(());
-    }
-    if !prompt::confirm(
-        "Apply this plan?",
-        "use --yes to apply without an interactive terminal",
-        yes,
-    )? {
-        output::apply_result(
-            target,
-            plan,
-            output::ApplySummary {
-                status: output::ApplyStatus::Cancelled,
-                moved: 0,
-                skipped: 0,
-                run_id: None,
-            },
-            format,
-            color,
-        )?;
-        return Ok(());
-    }
-
-    let policy = match on_conflict {
-        args::ConflictAction::Abort => ConflictPolicy::Abort,
-        args::ConflictAction::Skip => ConflictPolicy::Skip,
-    };
-    let store = journal::store()?;
-    let applied = crate::application::apply_authorized(preview, policy, &store)?;
-    output::apply_result(
-        &applied.target,
-        &applied.plan,
-        output::ApplySummary {
-            status: output::ApplyStatus::Applied,
-            moved: applied.report.moved.len(),
-            skipped: applied.report.skipped.len(),
-            run_id: applied.run_id.as_deref(),
+            yes,
+            on_conflict,
+            verbose: false,
         },
-        format,
-        color,
-    )?;
-
-    Ok(())
+    )
 }

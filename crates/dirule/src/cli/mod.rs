@@ -1,3 +1,4 @@
+mod apply;
 mod args;
 mod commands;
 mod config;

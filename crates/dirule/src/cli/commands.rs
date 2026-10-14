@@ -1,6 +1,5 @@
-use super::{args, config, journal, output, presets, prompt};
+use super::{args, config, journal, output, presets};
 use clap::CommandFactory;
-use dirule_fs::ConflictPolicy;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Write};
@@ -73,77 +72,16 @@ pub(super) fn run(
             let format = operation.format;
             let verbose = operation.verbose;
             let preview = config::evaluate(operation)?;
-            let target = &preview.target;
-            let result = &preview.plan;
-
-            if format == args::OutputFormat::Human {
-                output::plan(
-                    target,
-                    result,
+            super::apply::execute(
+                preview,
+                super::apply::ApplyOptions {
                     format,
                     color,
-                    output::PlanContext::Apply,
+                    yes,
+                    on_conflict,
                     verbose,
-                )?;
-            } else if output::json_apply_preview_needed(format, yes, result) {
-                output::plan_to_stderr(target, result, color, output::PlanContext::Apply, verbose)?;
-            }
-            if !result.is_conflict_free() && on_conflict == args::ConflictAction::Abort {
-                return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());
-            }
-            if !result.has_changes() {
-                output::apply_result(
-                    target,
-                    result,
-                    output::ApplySummary {
-                        status: output::ApplyStatus::NoChanges,
-                        moved: 0,
-                        skipped: 0,
-                        run_id: None,
-                    },
-                    format,
-                    color,
-                )?;
-                return Ok(());
-            }
-            if !prompt::confirm(
-                "Apply this plan?",
-                "use --yes to apply without an interactive terminal",
-                yes,
-            )? {
-                output::apply_result(
-                    target,
-                    result,
-                    output::ApplySummary {
-                        status: output::ApplyStatus::Cancelled,
-                        moved: 0,
-                        skipped: 0,
-                        run_id: None,
-                    },
-                    format,
-                    color,
-                )?;
-                return Ok(());
-            }
-            let policy = match on_conflict {
-                args::ConflictAction::Abort => ConflictPolicy::Abort,
-                args::ConflictAction::Skip => ConflictPolicy::Skip,
-            };
-            let store = journal::store()?;
-            let applied = crate::application::apply_authorized(preview, policy, &store)?;
-            output::apply_result(
-                &applied.target,
-                &applied.plan,
-                output::ApplySummary {
-                    status: output::ApplyStatus::Applied,
-                    moved: applied.report.moved.len(),
-                    skipped: applied.report.skipped.len(),
-                    run_id: applied.run_id.as_deref(),
                 },
-                format,
-                color,
-            )?;
-            Ok(())
+            )
         }
         args::CliCommand::Sort(options) => super::quick::sort(options, color),
         args::CliCommand::Rename(options) => super::quick::rename(options, color),
