@@ -1,4 +1,4 @@
-use dirule_core::{Matcher, Rule, RuleKind, parse_config};
+use dirule_core::{Matcher, MatcherSet, Rule, RuleKind, parse_config};
 
 #[test]
 fn extracts_named_capture_values() {
@@ -68,6 +68,32 @@ fn path_exclusion_matching_includes_matching_ancestor_directories() {
     assert!(matcher.matches_path_or_parent("generated/api/client.ts"));
     assert!(!matcher.matches_path_or_parent("src/generated/client.ts"));
     assert!(!matcher.matches_path_or_parent("generated-files/client.ts"));
+}
+
+#[test]
+fn matcher_sets_preserve_multiple_pattern_and_capture_behavior() {
+    let matchers = MatcherSet::new(
+        ["generated", "**/vendor/**", "Invoices/<year>.pdf"]
+            .into_iter()
+            .map(|pattern| Matcher::new(pattern).expect("valid matcher")),
+    );
+
+    for path in [
+        "generated",
+        "generated/api/client.ts",
+        "src/vendor/package/file.rs",
+        "Invoices/2026.pdf",
+    ] {
+        assert!(matchers.matches_path_or_parent(path), "{path}");
+    }
+
+    for path in [
+        "generated-files/client.ts",
+        "src/generated/client.ts",
+        "src/file.rs",
+    ] {
+        assert!(!matchers.matches_path_or_parent(path), "{path}");
+    }
 }
 
 #[test]

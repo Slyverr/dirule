@@ -153,11 +153,7 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
                 }
             };
 
-            if rule
-                .exclude
-                .iter()
-                .any(|pattern| pattern.is_match(&source_text))
-            {
+            if rule.exclude.is_match(&source_text) {
                 continue;
             }
 

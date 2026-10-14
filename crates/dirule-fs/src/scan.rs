@@ -1,4 +1,4 @@
-use dirule_core::{Entry, EntryKind, Finding, FindingKind, Matcher};
+use dirule_core::{Entry, EntryKind, Finding, FindingKind, Matcher, MatcherSet};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -67,10 +67,14 @@ pub enum ScanError {
 }
 
 pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
-    scan_with_ignores(target, &[])
+    scan_with_ignore_set(target, &MatcherSet::default())
 }
 
 pub fn scan_with_ignores(target: &Path, ignores: &[Matcher]) -> Result<ScanResult, ScanError> {
+    scan_with_ignore_set(target, &MatcherSet::new(ignores.to_vec()))
+}
+
+pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanResult, ScanError> {
     let target = target
         .canonicalize()
         .map_err(|source| ScanError::Metadata {
@@ -107,7 +111,7 @@ pub fn scan_with_ignores(target: &Path, ignores: &[Matcher]) -> Result<ScanResul
 
     let mut builder = ignore::WalkBuilder::new(&target);
     let ignore_root = target.clone();
-    let ignore_patterns = ignores.to_vec();
+    let ignore_patterns = ignores.clone();
     builder
         .hidden(false)
         .ignore(true)
@@ -186,7 +190,7 @@ pub fn scan_with_ignores(target: &Path, ignores: &[Matcher]) -> Result<ScanResul
     let (tracked, tracked_findings) = git::tracked_paths(&target)?;
     findings.extend(tracked_findings);
     for tracked in tracked {
-        if is_ignored_path(&tracked, ignores) {
+        if slash_path(&tracked).is_some_and(|path| ignores.matches_path_or_parent(&path)) {
             continue;
         }
 
@@ -275,25 +279,17 @@ pub fn scan_with_ignores(target: &Path, ignores: &[Matcher]) -> Result<ScanResul
     })
 }
 
-fn entry_is_ignored(root: &Path, path: &Path, ignores: &[Matcher]) -> bool {
+fn entry_is_ignored(root: &Path, path: &Path, ignores: &MatcherSet) -> bool {
     if path == root {
         return false;
     }
 
     relative_unicode(root, path)
-        .and_then(|path| path.to_str().map(str::to_owned))
-        .map(|path| is_ignored_path(Path::new(&path), ignores))
+        .and_then(|path| {
+            path.to_str()
+                .map(|path| ignores.matches_path_or_parent(path))
+        })
         .unwrap_or(false)
-}
-
-fn is_ignored_path(path: &Path, ignores: &[Matcher]) -> bool {
-    let Some(path) = slash_path(path) else {
-        return false;
-    };
-
-    ignores
-        .iter()
-        .any(|pattern| pattern.matches_path_or_parent(&path))
 }
 
 fn slash_path(path: &Path) -> Option<String> {

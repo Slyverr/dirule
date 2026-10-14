@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dirule_core::{EntryKind, Matcher};
-use dirule_fs::{scan, scan_with_ignores};
+use dirule_core::{EntryKind, Matcher, MatcherSet};
+use dirule_fs::{scan, scan_with_ignore_set};
 use std::fs;
 use std::hint::black_box;
 use std::path::Path;
@@ -42,7 +42,7 @@ fn benchmark_configured_ignore_overhead(criterion: &mut Criterion) {
     let visible_files = 10_000;
     let target = configured_ignore_fixture(visible_files);
     fs::write(target.path().join(".ignore"), "generated/\n").unwrap();
-    let baseline = scan_with_ignores(target.path(), &[]).unwrap();
+    let baseline = scan_with_ignore_set(target.path(), &MatcherSet::default()).unwrap();
 
     assert_eq!(
         baseline
@@ -58,10 +58,10 @@ fn benchmark_configured_ignore_overhead(criterion: &mut Criterion) {
     group.sample_size(10);
 
     for count in [0, 1, 4, 16] {
-        let ignores = (0..count)
-            .map(|index| Matcher::new(&format!("not-present-{index}/**")).unwrap())
-            .collect::<Vec<_>>();
-        let result = scan_with_ignores(target.path(), &ignores).unwrap();
+        let ignores = MatcherSet::new(
+            (0..count).map(|index| Matcher::new(&format!("not-present-{index}/**")).unwrap()),
+        );
+        let result = scan_with_ignore_set(target.path(), &ignores).unwrap();
         let files = result
             .entries
             .iter()
@@ -76,7 +76,7 @@ fn benchmark_configured_ignore_overhead(criterion: &mut Criterion) {
             |bencher, ignores| {
                 bencher.iter(|| {
                     black_box(
-                        scan_with_ignores(black_box(target.path()), black_box(ignores)).unwrap(),
+                        scan_with_ignore_set(black_box(target.path()), black_box(ignores)).unwrap(),
                     )
                 })
             },
@@ -110,11 +110,12 @@ fn benchmark_configured_ignore_pruning(criterion: &mut Criterion) {
     });
 
     for count in [1, 4, 16] {
-        let mut ignores = (0..count)
-            .map(|index| Matcher::new(&format!("not-present-{index}/**")).unwrap())
-            .collect::<Vec<_>>();
-        ignores.push(Matcher::new("generated/**").unwrap());
-        let result = scan_with_ignores(target.path(), &ignores).unwrap();
+        let ignores = MatcherSet::new(
+            (0..count)
+                .map(|index| Matcher::new(&format!("not-present-{index}/**")).unwrap())
+                .chain([Matcher::new("generated/**").unwrap()]),
+        );
+        let result = scan_with_ignore_set(target.path(), &ignores).unwrap();
         let files = result
             .entries
             .iter()
@@ -135,7 +136,7 @@ fn benchmark_configured_ignore_pruning(criterion: &mut Criterion) {
             |bencher, ignores| {
                 bencher.iter(|| {
                     black_box(
-                        scan_with_ignores(black_box(target.path()), black_box(ignores)).unwrap(),
+                        scan_with_ignore_set(black_box(target.path()), black_box(ignores)).unwrap(),
                     )
                 })
             },

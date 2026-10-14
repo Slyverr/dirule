@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use std::collections::BTreeMap;
-use wax::{CandidatePath, Glob, Program};
+use wax::{Any, CandidatePath, Glob, Program};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Captures(BTreeMap<String, String>);
@@ -22,6 +22,52 @@ pub struct Matcher {
     pattern: String,
     glob: Glob<'static>,
     capture_indexes: Vec<(String, usize)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MatcherSet {
+    combined: Option<Any<'static>>,
+    fallback: Vec<Matcher>,
+}
+
+impl MatcherSet {
+    pub fn new(matchers: impl IntoIterator<Item = Matcher>) -> Self {
+        let mut simple = Vec::new();
+        let mut fallback = Vec::new();
+
+        for matcher in matchers {
+            if matcher.capture_indexes.is_empty() {
+                simple.push(matcher);
+            } else {
+                fallback.push(matcher);
+            }
+        }
+
+        let combined = if simple.is_empty() {
+            None
+        } else {
+            wax::any(simple.iter().map(|matcher| matcher.glob.clone())).ok()
+        };
+
+        if combined.is_none() {
+            fallback.extend(simple);
+        }
+
+        Self { combined, fallback }
+    }
+
+    pub fn is_match(&self, path: &str) -> bool {
+        self.combined
+            .as_ref()
+            .is_some_and(|matcher| matcher.is_match(path))
+            || self.fallback.iter().any(|matcher| matcher.is_match(path))
+    }
+
+    pub fn matches_path_or_parent(&self, path: &str) -> bool {
+        path.match_indices('/')
+            .any(|(index, _)| self.is_match(&path[..index]))
+            || self.is_match(path)
+    }
 }
 
 impl Matcher {

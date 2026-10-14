@@ -4,7 +4,9 @@ mod version;
 
 pub use version::{CURRENT_CONFIG_VERSION, ConfigVersion};
 
-use crate::{AcronymLexicon, AcronymOptions, CompiledTemplate, Error, Matcher, Result, Transform};
+use crate::{
+    AcronymLexicon, AcronymOptions, CompiledTemplate, Error, Matcher, MatcherSet, Result, Transform,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -21,18 +23,16 @@ pub struct Config {
 pub struct CompiledConfig {
     pub(crate) rules: Vec<CompiledRule>,
     pub(crate) acronyms: AcronymLexicon,
-    ignore: Vec<Matcher>,
+    ignore: MatcherSet,
 }
 
 impl CompiledConfig {
-    pub fn ignore_patterns(&self) -> &[Matcher] {
+    pub fn ignore_patterns(&self) -> &MatcherSet {
         &self.ignore
     }
 
     pub fn ignores_path(&self, path: &str) -> bool {
-        self.ignore
-            .iter()
-            .any(|pattern| pattern.matches_path_or_parent(path))
+        self.ignore.matches_path_or_parent(path)
     }
 }
 
@@ -41,7 +41,7 @@ pub(crate) struct CompiledRule {
     pub(crate) name: String,
     pub(crate) matcher: Matcher,
     pub(crate) kind: RuleKind,
-    pub(crate) exclude: Vec<Matcher>,
+    pub(crate) exclude: MatcherSet,
     pub(crate) destination: CompiledDestination,
 }
 
@@ -126,6 +126,7 @@ impl Config {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let ignore = MatcherSet::new(ignore);
         let mut compiled_rules = Vec::with_capacity(self.rules.len());
 
         for (index, rule) in self.rules.iter().enumerate() {
@@ -158,6 +159,7 @@ impl Config {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let exclude = MatcherSet::new(exclude);
 
             let (namespace, value) = rule.to.split_once(':').ok_or_else(|| {
                 Error::Config(format!(
