@@ -61,8 +61,6 @@ cargo run -p dirule -- apply
 
 `validate` checks the selected config and compiles its rules without scanning the target. `apply` asks for confirmation in an interactive terminal. Use `--yes` for a non-interactive run. `plan`, `check`, and `apply` accept `--target PATH` and either `--config FILE` or `--preset NAME`; `validate` accepts the config or preset options without `--target`. Use `--format json` for structured output, or `--verbose` to show the rule responsible for each rename and identify paths inherited from a renamed directory.
 
-For CI, `check` exits with status `0` when all paths satisfy the rules and `1` when changes or conflicts are found. Errors that prevent the check from running exit with status `2`. With `--format json`, execution errors are versioned JSON on stderr; see the [CLI output contract](docs/specs/cli-output.md).
-
 Use `--color auto|always|never` to control terminal colors. Automatic color follows terminal support and honors non-empty `NO_COLOR` and `TERM=dumb`; an explicit `--color` choice takes precedence.
 
 With `apply --format json`, the result stays on stdout. When confirmation is required, Dirule writes the human-readable plan preview to stderr.
@@ -70,6 +68,29 @@ With `apply --format json`, the result stays on stdout. When confirmation is req
 Targets equal to `~` or beginning with `~/` expand against the user's home directory (`~\\` is also accepted on Windows). No shell or environment-variable expansion is performed.
 
 JSON plans include the canonical target path; their source and destination paths are target-relative and use `/` separators on every platform.
+
+## Quick operations
+
+Sort files or rename entries without creating a configuration. These commands preview changes by default; pass `--apply` to request changes and `--yes` only when a non-interactive run should skip confirmation.
+
+```sh
+dirule sort pdf --target ~/Downloads
+dirule sort pdf --target ~/Downloads --apply
+dirule sort --by extension --target ~/Downloads --recursive
+dirule rename kebab-case --target src/
+```
+
+`sort` matches extensions without regard to case. Recursive sorting collects nested files into extension buckets under the target; duplicate destination names are reported as conflicts. `rename` uses the built-in case transformations. Dirule changes paths only and does not update references inside files. See the [quick operations specification](docs/specs/quick-operations.md) for the full behavior.
+
+## CI and automation
+
+Run `check` to verify names without changing the target:
+
+```sh
+dirule check --format json
+```
+
+It exits with status `0` when paths comply, `1` when the plan contains changes or conflicts, and `2` when Dirule cannot evaluate the check. JSON results go to stdout; execution errors are versioned JSON on stderr. See the [CLI output contract](docs/specs/cli-output.md) for the error shape and stable codes.
 
 ## Rules
 
