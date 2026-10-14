@@ -29,15 +29,30 @@ fn version_1_0_migrates_to_the_default_rule_kind() {
     let config = parse_config(
         r#"
 version = "1.0"
+name = "Legacy downloads"
+target = "~/Downloads"
+
+[acronyms]
+entries = ["iOS"]
 
 [[rules]]
 name = "Normalize names"
-match = "**/*"
+match = "**/*.pdf"
 to = "builtin:kebab-case"
 "#,
     )
     .expect("legacy configuration migrates");
 
+    assert_eq!(config.name.as_deref(), Some("Legacy downloads"));
+    assert_eq!(
+        config.target.as_deref(),
+        Some(std::path::Path::new("~/Downloads"))
+    );
+    assert_eq!(config.acronyms.entries, ["iOS"]);
+    assert_eq!(config.rules.len(), 1);
+    assert_eq!(config.rules[0].name, "Normalize names");
+    assert_eq!(config.rules[0].pattern, "**/*.pdf");
+    assert_eq!(config.rules[0].to, "builtin:kebab-case");
     assert_eq!(config.rules[0].kind, RuleKind::Any);
     assert!(config.rules[0].exclude.is_empty());
 }
