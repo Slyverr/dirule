@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Improved
+
+- Reduce scan overhead when no Git-ignored tracked paths need recovery.
+
 ## Version 0.2.0
 
 ### Added
