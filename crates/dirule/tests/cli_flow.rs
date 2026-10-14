@@ -1080,11 +1080,8 @@ fn preset_listing_uses_the_platform_config_directory() {
 #[test]
 fn validate_checks_config_without_scanning_its_target() {
     let project = TempProject::new();
-    fs::write(
-        project.0.join("dirule.toml"),
-        "version = \"1.0\"\ntarget = \"missing-target\"\n\n[[rules]]\nname = \"Normalize\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
-    )
-    .expect("write config with missing target");
+    let config = "version = \"1.0\"\ntarget = \"missing-target\"\n\n[[rules]]\nname = \"Normalize\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n";
+    fs::write(project.0.join("dirule.toml"), config).expect("write config with missing target");
 
     let output = project.run(&["validate", "--format", "json"]);
 
@@ -1101,6 +1098,10 @@ fn validate_checks_config_without_scanning_its_target() {
     assert_eq!(result["source"]["kind"], "config");
     assert_eq!(result["source"]["name"], "dirule.toml");
     assert_eq!(result["rule_count"], 1);
+    assert_eq!(
+        fs::read_to_string(project.0.join("dirule.toml")).expect("read config after validation"),
+        config
+    );
     assert!(!project.0.join("missing-target").exists());
     assert!(!project.journal_directory().exists());
 }
