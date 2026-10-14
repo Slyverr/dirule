@@ -1,12 +1,12 @@
 use super::{args, output, prompt};
-use dirule_fs::JournalStore;
+use dirule_app::journal::JournalService;
 use std::error::Error;
 
 pub(super) fn list(
     format: args::OutputFormat,
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
-    let runs = store()?.list()?;
+    let runs = JournalService::user()?.list_runs()?;
     output::runs(&runs, format, color)?;
     Ok(())
 }
@@ -16,7 +16,7 @@ pub(super) fn show(
     format: args::OutputFormat,
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
-    let details = store()?.get(&run_id)?;
+    let details = JournalService::user()?.run_details(&run_id)?;
     output::run_details(&details, format, color)?;
     Ok(())
 }
@@ -34,7 +34,7 @@ pub(super) fn undo(
         return Ok(());
     }
 
-    let report = store()?.undo(&options.run_id)?;
+    let report = JournalService::user()?.undo_authorized(&options.run_id)?;
     output::undo_result(
         &options.run_id,
         "undone",
@@ -43,8 +43,4 @@ pub(super) fn undo(
         color,
     )?;
     Ok(())
-}
-
-pub(super) fn store() -> Result<JournalStore, Box<dyn Error>> {
-    Ok(dirule_app::paths::user_journal_store()?)
 }

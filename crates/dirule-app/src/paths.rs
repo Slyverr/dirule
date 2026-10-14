@@ -93,7 +93,7 @@ pub fn resolve_operation_target(
         .map(|target| target.unwrap_or_else(|| base.to_path_buf()))
 }
 
-pub fn user_journal_store() -> Result<JournalStore, UserStateDirectoryUnavailable> {
+pub(crate) fn user_journal_store() -> Result<JournalStore, UserStateDirectoryUnavailable> {
     let base = user_state_directory().ok_or(UserStateDirectoryUnavailable)?;
 
     Ok(JournalStore::new(base.join("dirule").join("runs")))

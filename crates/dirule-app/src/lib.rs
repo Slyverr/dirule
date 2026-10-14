@@ -2,14 +2,15 @@ use self::configuration::{ConfigurationLoadError, ConfigurationSource};
 use self::paths::HomeDirectoryUnavailable;
 use dirule_core::{AcronymOptions, Config, Plan, Rule, RuleKind, Transform, plan};
 use dirule_fs::{
-    ApplyError, ApplyReport, ConflictPolicy, JournalStore, ScanError, ScanResult, apply_journaled,
-    scan, validate_destinations,
+    ApplyError, ApplyReport, ConflictPolicy, ScanError, ScanResult, apply_journaled, scan,
+    validate_destinations,
 };
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub mod configuration;
+pub mod journal;
 pub mod paths;
 pub mod presets;
 
@@ -210,14 +211,14 @@ pub fn preview_source(
 pub fn apply_authorized(
     preview: Preview,
     policy: ConflictPolicy,
-    journal: &JournalStore,
+    journal: &journal::JournalService,
 ) -> Result<Applied, ApplyError> {
     let Preview {
         target,
         plan,
         snapshot,
     } = preview;
-    let applied = apply_journaled(&target, &plan, &snapshot, policy, journal)?;
+    let applied = apply_journaled(&target, &plan, &snapshot, policy, journal.store())?;
 
     Ok(Applied {
         target,

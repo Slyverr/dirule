@@ -1,4 +1,4 @@
-use super::{args, journal, output, prompt};
+use super::{args, output, prompt};
 use dirule_fs::ConflictPolicy;
 use std::error::Error;
 
@@ -80,8 +80,8 @@ pub(super) fn execute(
         args::ConflictAction::Abort => ConflictPolicy::Abort,
         args::ConflictAction::Skip => ConflictPolicy::Skip,
     };
-    let store = journal::store()?;
-    let applied = dirule_app::apply_authorized(preview, policy, &store)?;
+    let journal = dirule_app::journal::JournalService::user()?;
+    let applied = dirule_app::apply_authorized(preview, policy, &journal)?;
     output::apply_result(
         &applied.target,
         &applied.plan,

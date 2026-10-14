@@ -1,4 +1,5 @@
 use dirule_app::configuration::{ConfigEditor, ConfigEditorError};
+use dirule_app::journal::JournalService;
 use dirule_app::presets::{PresetError, PresetStore};
 use dirule_core::parse_config;
 use dirule_fs::{ConflictPolicy, JournalStore};
@@ -80,7 +81,7 @@ to = "builtin:kebab-case"
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
 
-    let journal = JournalStore::new(target.join(".journal"));
+    let journal = JournalService::new(JournalStore::new(target.join(".journal")));
     let applied = dirule_app::apply_authorized(preview, ConflictPolicy::Abort, &journal)
         .expect("apply authorized plan");
     let run_id = applied.run_id.as_deref().expect("journaled run ID");
@@ -88,7 +89,17 @@ to = "builtin:kebab-case"
     assert!(!source.exists());
     assert!(target.join("my-file.txt").is_file());
 
-    journal.undo(run_id).expect("undo applied plan");
+    let runs = journal.list_runs().expect("list apply runs");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].id, run_id);
+
+    let details = journal.run_details(run_id).expect("inspect apply run");
+    assert_eq!(details.run.id, run_id);
+    assert_eq!(details.operations.len(), 1);
+
+    journal
+        .undo_authorized(run_id)
+        .expect("undo authorized run");
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
 }
