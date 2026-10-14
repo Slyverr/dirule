@@ -247,6 +247,87 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
 }
 
 #[test]
+fn configured_directory_rename_preserves_hidden_paths_and_undoes() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join(".github")).expect("create GitHub config directory");
+    fs::create_dir_all(project.0.join(".config")).expect("create config directory");
+    fs::create_dir_all(project.0.join(".HiddenProject")).expect("create hidden project directory");
+    fs::create_dir_all(project.0.join("nested/.MyConfig")).expect("create nested hidden directory");
+    fs::write(project.0.join(".github/README.md"), "workflow").expect("write GitHub config file");
+    fs::write(project.0.join(".config/settings.toml"), "setting = true")
+        .expect("write config file");
+    fs::write(project.0.join(".HiddenProject/data.txt"), "hidden")
+        .expect("write hidden project file");
+    fs::write(project.0.join("nested/.MyConfig/data.txt"), "nested")
+        .expect("write nested config file");
+    fs::write(
+        project.0.join("dirule.toml"),
+        r#"
+version = "1.2"
+
+[[rules]]
+name = "Normalize directories"
+match = "**/*"
+kind = "directory"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("write config");
+
+    let plan = project.run(&["plan", "--format", "json"]);
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).expect("valid plan JSON");
+    let entries = plan["entries"].as_array().expect("plan entries");
+    for (source, destination) in [
+        (".HiddenProject", ".hidden-project"),
+        ("nested/.MyConfig", "nested/.my-config"),
+    ] {
+        assert!(
+            entries
+                .iter()
+                .any(|entry| { entry["source"] == source && entry["destination"] == destination })
+        );
+    }
+    for path in [".github", ".config"] {
+        assert!(
+            entries
+                .iter()
+                .any(|entry| { entry["source"] == path && entry["destination"] == path })
+        );
+    }
+
+    let apply = project.run(&["apply", "--yes", "--format", "json"]);
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("valid apply JSON");
+    let run_id = apply["execution"]["run_id"].as_str().expect("run ID");
+    assert!(project.0.join(".github/README.md").is_file());
+    assert!(project.0.join(".config/settings.toml").is_file());
+    assert_eq!(text(&project.0.join(".hidden-project/data.txt")), "hidden");
+    assert_eq!(
+        text(&project.0.join("nested/.my-config/data.txt")),
+        "nested"
+    );
+
+    let undo = project.run(&["undo", run_id, "--yes", "--format", "json"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(project.0.join(".HiddenProject/data.txt").is_file());
+    assert!(project.0.join("nested/.MyConfig/data.txt").is_file());
+}
+
+#[test]
 fn quick_rename_previews_applies_and_undoes_without_a_config() {
     let project = TempProject::new();
     fs::write(project.0.join("MyXMLParser.pdf"), "document").expect("write source file");
