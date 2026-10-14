@@ -1,5 +1,5 @@
 use super::{ApplySummary, CURRENT_OUTPUT_VERSION};
-use dirule_core::{Conflict, Plan, PlannedEntry};
+use dirule_core::{Conflict, Finding, Plan, PlannedEntry};
 use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
 use std::error::Error;
@@ -50,13 +50,61 @@ impl Serialize for PlanDocument<'_> {
     where
         S: Serializer,
     {
-        let mut document = serializer.serialize_struct("PlanDocument", 5)?;
+        let mut document = serializer.serialize_struct("PlanDocument", 6)?;
         document.serialize_field("conflicts", &ConflictList(&self.plan.conflicts))?;
+        document.serialize_field("diagnostics", &DiagnosticList(&self.plan.findings))?;
         document.serialize_field("entries", &EntryList(&self.plan.entries))?;
-        document.serialize_field("findings", &self.plan.findings)?;
+        document.serialize_field("findings", &FindingMessages(&self.plan.findings))?;
         document.serialize_field("schema_version", CURRENT_OUTPUT_VERSION)?;
         document.serialize_field("target", &TargetPath(self.target))?;
         document.end()
+    }
+}
+
+struct DiagnosticList<'a>(&'a [Finding]);
+
+impl Serialize for DiagnosticList<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut diagnostics = serializer.serialize_seq(Some(self.0.len()))?;
+        for finding in self.0 {
+            diagnostics.serialize_element(&DiagnosticDocument(finding))?;
+        }
+        diagnostics.end()
+    }
+}
+
+struct DiagnosticDocument<'a>(&'a Finding);
+
+impl Serialize for DiagnosticDocument<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let finding = self.0;
+        let mut document = serializer.serialize_struct("DiagnosticDocument", 4)?;
+        document.serialize_field("kind", &finding.kind)?;
+        document.serialize_field("path", &finding.path)?;
+        document.serialize_field("message", &finding.message)?;
+        document.serialize_field("suggestion", finding.kind.suggestion())?;
+        document.end()
+    }
+}
+
+struct FindingMessages<'a>(&'a [Finding]);
+
+impl Serialize for FindingMessages<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut messages = serializer.serialize_seq(Some(self.0.len()))?;
+        for finding in self.0 {
+            messages.serialize_element(&finding.message)?;
+        }
+        messages.end()
     }
 }
 

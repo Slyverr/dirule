@@ -1,10 +1,11 @@
 use super::{ScanError, validate_ignore_file};
+use dirule_core::{Finding, FindingKind};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-pub(super) fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<String>), ScanError> {
+pub(super) fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<Finding>), ScanError> {
     let root = match Command::new("git")
         .arg("-C")
         .arg(target)
@@ -79,8 +80,10 @@ pub(super) fn tracked_paths(target: &Path) -> Result<(BTreeSet<PathBuf>, Vec<Str
         .filter(|bytes| !bytes.is_empty())
     {
         let Ok(path) = std::str::from_utf8(bytes) else {
-            findings.push(format!(
-                "skipped Git-tracked path with non-Unicode bytes: {bytes:?}"
+            findings.push(Finding::new(
+                FindingKind::SkippedGitNonUnicodePath,
+                None,
+                format!("skipped Git-tracked path with non-Unicode bytes: {bytes:?}"),
             ));
             continue;
         };

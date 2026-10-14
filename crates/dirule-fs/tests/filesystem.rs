@@ -1,4 +1,6 @@
-use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry, parse_config, plan};
+use dirule_core::{
+    Conflict, ConflictKind, EntryKind, FindingKind, Plan, PlannedEntry, parse_config, plan,
+};
 use dirule_fs::validate_destinations;
 use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
@@ -1262,7 +1264,18 @@ fn scan_sorts_findings_for_skipped_special_files() {
             .is_none_or(|extension| extension != "sock")
     }));
     assert_eq!(result.findings.len(), 3);
-    assert!(result.findings.is_sorted());
+    assert!(
+        result
+            .findings
+            .iter()
+            .all(|finding| finding.kind == FindingKind::SkippedNonRegularEntry)
+    );
+    assert!(
+        result
+            .findings
+            .windows(2)
+            .all(|pair| pair[0].message <= pair[1].message)
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -1279,7 +1292,13 @@ fn scan_skips_and_reports_non_unicode_paths() {
 
     assert!(result.entries.is_empty());
     assert_eq!(result.findings.len(), 1);
-    assert!(result.findings[0].contains("cannot be represented as Unicode"));
+    assert_eq!(result.findings[0].kind, FindingKind::SkippedNonUnicodePath);
+    assert_eq!(result.findings[0].path, None);
+    assert!(
+        result.findings[0]
+            .message
+            .contains("cannot be represented as Unicode")
+    );
 }
 
 #[test]

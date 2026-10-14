@@ -1,7 +1,7 @@
 use crate::config::CompiledDestination;
 use crate::{
-    CompiledConfig, Config, DestinationValues, Error, Result, RuleKind, transform_directory,
-    transform_filename,
+    CompiledConfig, Config, DestinationValues, Error, Finding, FindingKind, Result, RuleKind,
+    transform_directory, transform_filename,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -71,7 +71,7 @@ pub struct Conflict {
 pub struct Plan {
     pub entries: Vec<PlannedEntry>,
     pub conflicts: Vec<Conflict>,
-    pub findings: Vec<String>,
+    pub findings: Vec<Finding>,
 }
 
 impl Plan {
@@ -96,9 +96,13 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
     let mut ordered = Vec::with_capacity(entries.len());
     for entry in entries {
         if has_non_unicode_component(&entry.path) {
-            result.findings.push(format!(
-                "skipped path that cannot be represented as Unicode: {}",
-                entry.path.display()
+            result.findings.push(Finding::new(
+                FindingKind::SkippedNonUnicodePath,
+                None,
+                format!(
+                    "skipped path that cannot be represented as Unicode: {}",
+                    entry.path.display()
+                ),
             ));
         } else {
             ordered.push(entry);
@@ -115,9 +119,11 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
     for entry in ordered {
         let source = clean_path(&entry.path)?;
         if entry.kind == EntryKind::Symlink {
-            result
-                .findings
-                .push(format!("skipped symlink {}", display_path(&source)));
+            result.findings.push(Finding::new(
+                FindingKind::SkippedSymlink,
+                Some(&source),
+                format!("skipped symlink {}", display_path(&source)),
+            ));
             continue;
         }
 

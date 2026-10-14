@@ -1238,7 +1238,7 @@ fn json_command_errors_emit_a_versioned_error_document_to_stderr() {
     assert!(output.stdout.is_empty());
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("command error is a JSON document");
-    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["schema_version"], "1.3");
     assert_eq!(value["error"]["code"], "command_error");
     assert_eq!(value["error"]["kind"], "configuration");
     assert_eq!(value["error"]["exit_code"], 2);
@@ -1269,7 +1269,7 @@ fn json_command_errors_classify_unavailable_targets() {
     assert!(output.stdout.is_empty());
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("target error is a JSON document");
-    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["schema_version"], "1.3");
     assert_eq!(value["error"]["code"], "command_error");
     assert_eq!(value["error"]["kind"], "target");
     assert_eq!(value["error"]["exit_code"], 2);
@@ -1284,7 +1284,7 @@ fn json_journal_errors_are_classified() {
     assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("journal error is a JSON document");
-    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["schema_version"], "1.3");
     assert_eq!(value["error"]["kind"], "journal");
 }
 
@@ -1310,7 +1310,7 @@ fn json_config_selection_errors_are_classified() {
     assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("selection error is a JSON document");
-    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["schema_version"], "1.3");
     assert_eq!(value["error"]["kind"], "configuration_selection");
 }
 
@@ -1538,7 +1538,7 @@ fn validate_checks_config_without_scanning_its_target() {
     );
     let result: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid validation JSON");
-    assert_eq!(result["schema_version"], "1.2");
+    assert_eq!(result["schema_version"], "1.3");
     assert_eq!(result["valid"], true);
     assert_eq!(result["source"]["kind"], "config");
     assert_eq!(result["source"]["name"], "dirule.toml");
@@ -1623,7 +1623,7 @@ fn preset_listing_emits_versioned_json() {
     );
     let value: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid preset listing JSON");
-    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["schema_version"], "1.3");
     assert_eq!(value["presets"], serde_json::json!(["downloads", "zeta"]));
 }
 
@@ -2212,7 +2212,7 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
 
     assert_eq!(check.status.code(), Some(1));
     let value: serde_json::Value = serde_json::from_slice(&check.stdout).expect("valid check JSON");
-    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["schema_version"], "1.3");
     let entries = value["entries"].as_array().expect("entries array");
     assert!(
         entries.iter().any(|entry| {
@@ -2227,7 +2227,7 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
     );
     let error: serde_json::Value =
         serde_json::from_slice(&check.stderr).expect("check failure is a JSON document");
-    assert_eq!(error["schema_version"], "1.2");
+    assert_eq!(error["schema_version"], "1.3");
     assert_eq!(error["error"]["code"], "check_failed");
     assert_eq!(error["error"]["kind"], "check_failure");
     assert_eq!(error["error"]["exit_code"], 1);
@@ -2264,7 +2264,7 @@ fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     let error: serde_json::Value =
         serde_json::from_str(&apply_json_error[error_document_start + 1..])
             .expect("confirmation error is a JSON document");
-    assert_eq!(error["schema_version"], "1.2");
+    assert_eq!(error["schema_version"], "1.3");
     assert_eq!(error["error"]["code"], "command_error");
     assert_eq!(error["error"]["exit_code"], 2);
     assert!(project.0.join("MyFile.txt").is_file());
@@ -2398,4 +2398,33 @@ fn cli_reports_a_skipped_symlink_once() {
     let output = String::from_utf8_lossy(&plan.stdout);
     assert!(output.contains("1 finding(s)"));
     assert_eq!(output.matches("skipped symlink MyLink").count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn plan_json_keeps_finding_messages_and_exposes_structured_diagnostics() {
+    use std::os::unix::fs::symlink;
+
+    let project = TempProject::new();
+    fs::write(project.0.join("target.txt"), "target").expect("write target file");
+    symlink("target.txt", project.0.join("MyLink")).expect("create symlink");
+    assert!(project.run(&["init"]).status.success());
+
+    let output = project.run(&["plan", "--format", "json"]);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+
+    assert_eq!(value["schema_version"], "1.3");
+    assert_eq!(
+        value["findings"],
+        serde_json::json!(["skipped symlink MyLink"])
+    );
+    assert_eq!(
+        value["diagnostics"],
+        serde_json::json!([{
+            "kind": "skipped_symlink",
+            "path": "MyLink",
+            "message": "skipped symlink MyLink",
+            "suggestion": "Dirule skips symlinks; manage their targets separately."
+        }])
+    );
 }

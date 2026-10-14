@@ -4,6 +4,7 @@
 
 ### Added
 
+- Structured findings with stable kinds, affected paths, and suggestions in JSON plan output.
 - Structured conflict details and stable error categories in JSON output.
 
 ### Improved

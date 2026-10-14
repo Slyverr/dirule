@@ -1,4 +1,4 @@
-use dirule_core::{Entry, EntryKind};
+use dirule_core::{Entry, EntryKind, Finding, FindingKind};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ mod git;
 #[derive(Clone, Debug, Default)]
 pub struct ScanResult {
     pub entries: Vec<Entry>,
-    pub findings: Vec<String>,
+    pub findings: Vec<Finding>,
     pub(crate) target_identity: Option<SourceIdentity>,
     pub(crate) identities: HashMap<PathBuf, SourceIdentity>,
 }
@@ -153,15 +153,23 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
                     },
                 );
             } else {
-                findings.push(format!(
-                    "skipped non-regular filesystem entry: {}",
-                    relative.display()
+                findings.push(Finding::new(
+                    FindingKind::SkippedNonRegularEntry,
+                    Some(&relative),
+                    format!(
+                        "skipped non-regular filesystem entry: {}",
+                        relative.display()
+                    ),
                 ));
             }
         } else if let Ok(relative) = entry.path().strip_prefix(&target) {
-            findings.push(format!(
-                "skipped path that cannot be represented as Unicode: {}",
-                relative.display()
+            findings.push(Finding::new(
+                FindingKind::SkippedNonUnicodePath,
+                None,
+                format!(
+                    "skipped path that cannot be represented as Unicode: {}",
+                    relative.display()
+                ),
             ));
         }
     }
@@ -182,9 +190,13 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
                 }
             };
             let Some(kind) = entry_kind(Some(metadata.file_type())) else {
-                findings.push(format!(
-                    "skipped non-regular filesystem entry: {}",
-                    tracked.display()
+                findings.push(Finding::new(
+                    FindingKind::SkippedNonRegularEntry,
+                    Some(&tracked),
+                    format!(
+                        "skipped non-regular filesystem entry: {}",
+                        tracked.display()
+                    ),
                 ));
                 continue;
             };
@@ -240,7 +252,7 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         });
     }
     entries.sort_unstable_by(|left, right| left.path.cmp(&right.path));
-    findings.sort_unstable();
+    findings.sort_unstable_by(|left, right| left.message.cmp(&right.message));
 
     Ok(ScanResult {
         entries,

@@ -1,5 +1,6 @@
 use dirule_core::{
-    AcronymOptions, Config, ConflictKind, Entry, EntryKind, Rule, RuleKind, parse_config, plan,
+    AcronymOptions, Config, ConflictKind, Entry, EntryKind, FindingKind, Rule, RuleKind,
+    parse_config, plan,
 };
 use std::path::{Path, PathBuf};
 
@@ -536,7 +537,13 @@ fn planning_skips_and_reports_non_unicode_paths() {
 
     assert!(plan.entries.is_empty());
     assert_eq!(plan.findings.len(), 1);
-    assert!(plan.findings[0].contains("cannot be represented as Unicode"));
+    assert_eq!(plan.findings[0].kind, FindingKind::SkippedNonUnicodePath);
+    assert_eq!(plan.findings[0].path, None);
+    assert!(
+        plan.findings[0]
+            .message
+            .contains("cannot be represented as Unicode")
+    );
 }
 
 #[test]
