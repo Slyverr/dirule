@@ -1,7 +1,75 @@
 use dirule_core::{
-    AcronymOptions, Config, ConflictKind, Entry, EntryKind, Rule, RuleKind, parse_config, plan,
+    AcronymOptions, Config, ConflictKind, Entry, EntryKind, FindingKind, Rule, RuleKind,
+    parse_config, plan,
 };
 use std::path::{Path, PathBuf};
+
+#[test]
+fn planning_skips_symlinks_before_matching_rules() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid config");
+    let entries = [Entry {
+        path: PathBuf::from("MyShortcut"),
+        kind: EntryKind::Symlink,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert!(planned.entries.is_empty());
+    assert!(!planned.has_changes());
+    assert_eq!(planned.findings.len(), 1);
+    assert_eq!(planned.findings[0].kind, FindingKind::SkippedSymlink);
+    assert_eq!(planned.findings[0].path.as_deref(), Some("MyShortcut"));
+}
+
+#[test]
+fn planning_rejects_paths_outside_the_target() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid config");
+    let absolute = std::env::temp_dir().join("outside");
+    let entries = [
+        Entry {
+            path: PathBuf::new(),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("."),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("../outside"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: absolute,
+            kind: EntryKind::File,
+        },
+    ];
+
+    for entry in entries {
+        let error = plan(&config, &[entry]).expect_err("entry path must stay target-relative");
+
+        assert!(error.to_string().contains("entry path"), "{error}");
+    }
+}
 
 #[test]
 fn built_in_transform_rules_can_use_named_match_captures() {
