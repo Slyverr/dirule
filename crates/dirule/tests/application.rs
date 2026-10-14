@@ -176,6 +176,54 @@ fn config_editor_preserves_comments_and_file_permissions() {
 }
 
 #[test]
+fn config_editor_supports_adding_and_reordering_rules() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\n\n# first rule note\n[[rules]]\nname = \"First rule\"\nmatch = \"**/*.md\"\nto = \"builtin:kebab-case\"\n\n# second rule note\n[[rules]]\nname = \"Second rule\"\nmatch = \"**/*\"\nto = \"builtin:snake-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, contents).expect("write project config");
+
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    let rules = editor.document_mut()["rules"]
+        .as_array_of_tables_mut()
+        .expect("get rule array");
+    let mut third_rule = toml_edit::Table::new();
+    third_rule["name"] = toml_edit::value("Third rule");
+    third_rule["match"] = toml_edit::value("**/*.txt");
+    third_rule["to"] = toml_edit::value("builtin:pascal-case");
+    rules.push(third_rule);
+
+    let moved_rule = rules.remove(2);
+    rules.insert(0, moved_rule);
+
+    let edited = editor.config().expect("validate edited config");
+    assert_eq!(
+        edited
+            .rules
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Third rule", "First rule", "Second rule"]
+    );
+
+    editor.save().expect("save edited project config");
+    let saved = fs::read_to_string(&path).expect("read edited project config");
+    assert!(saved.contains("# first rule note"));
+    assert!(saved.contains("# second rule note"));
+    let reloaded = parse_config(&saved).expect("parse saved project config");
+    assert_eq!(
+        reloaded
+            .rules
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Third rule", "First rule", "Second rule"]
+    );
+}
+
+#[test]
 fn config_editor_refuses_to_overwrite_external_changes() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");
