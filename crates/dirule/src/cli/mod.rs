@@ -17,13 +17,34 @@ use std::fmt;
 const CHECK_FAILURE_EXIT_CODE: u8 = 1;
 const COMMAND_ERROR_EXIT_CODE: u8 = 2;
 
+#[derive(Clone, Copy, Debug)]
+enum CliErrorKind {
+    CheckFailure,
+    CommandError,
+}
+
+impl CliErrorKind {
+    fn code(self) -> &'static str {
+        match self {
+            Self::CheckFailure => "check_failed",
+            Self::CommandError => "command_error",
+        }
+    }
+
+    fn exit_code(self) -> u8 {
+        match self {
+            Self::CheckFailure => CHECK_FAILURE_EXIT_CODE,
+            Self::CommandError => COMMAND_ERROR_EXIT_CODE,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CliError {
     source: Box<dyn Error>,
     color: ColorChoice,
     format: args::OutputFormat,
-    code: &'static str,
-    exit_code: u8,
+    kind: CliErrorKind,
 }
 
 impl fmt::Display for CliError {
@@ -43,14 +64,14 @@ pub fn print_error(error: &CliError) {
         &error.to_string(),
         error.color,
         error.format,
-        error.code,
-        error.exit_code,
+        error.kind.code(),
+        error.kind.exit_code(),
     );
 }
 
 impl CliError {
     pub fn exit_code(&self) -> u8 {
-        self.exit_code
+        self.kind.exit_code()
     }
 }
 
@@ -63,18 +84,17 @@ pub fn run() -> Result<(), CliError> {
         Ok(()) => Ok(()),
         Err(source) if output::is_broken_pipe(source.as_ref()) => Ok(()),
         Err(source) => {
-            let (code, exit_code) = if source.downcast_ref::<commands::CheckFailure>().is_some() {
-                ("check_failed", CHECK_FAILURE_EXIT_CODE)
+            let kind = if source.downcast_ref::<commands::CheckFailure>().is_some() {
+                CliErrorKind::CheckFailure
             } else {
-                ("command_error", COMMAND_ERROR_EXIT_CODE)
+                CliErrorKind::CommandError
             };
 
             Err(CliError {
                 source,
                 color,
                 format,
-                code,
-                exit_code,
+                kind,
             })
         }
     }
