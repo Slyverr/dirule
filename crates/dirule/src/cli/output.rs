@@ -1,8 +1,7 @@
-use super::args::{ColorChoice, OutputFormat};
+use super::args::ColorChoice;
 use std::ffi::OsStr;
 use std::fmt;
 use std::io::{self, IsTerminal};
-use std::path::Path;
 
 macro_rules! println {
     ($($argument:tt)*) => {{
@@ -21,13 +20,19 @@ macro_rules! eprintln {
 const CURRENT_OUTPUT_VERSION: &str = "1.0";
 
 mod apply;
+mod config;
+mod errors;
 mod journal;
 mod json;
 mod plan;
+mod presets;
 
 pub(super) use apply::{ApplyStatus, ApplySummary, apply_result};
+pub(super) use config::{created_config, validated_config};
+pub(super) use errors::error;
 pub(super) use journal::{run_details, runs, undo_result};
 pub(super) use plan::{PlanContext, json_apply_preview_needed, plan, plan_to_stderr};
+pub(super) use presets::{presets, removed_preset, saved_preset};
 
 pub(super) fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
     error
@@ -89,146 +94,6 @@ impl<T: fmt::Display> fmt::Display for Styled<T> {
     }
 }
 
-pub(super) fn created_config(path: &Path, color: ColorChoice) -> io::Result<()> {
-    let styles = Colorizer::stdout(color);
-
-    println!("{} {}", styles.style("Created", "32"), path.display());
-
-    Ok(())
-}
-
-pub(super) fn validated_config(
-    source_kind: &str,
-    source_name: &str,
-    rule_count: usize,
-    format: OutputFormat,
-    color: ColorChoice,
-) -> io::Result<()> {
-    if format == OutputFormat::Json {
-        let value = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "valid": true,
-            "source": {
-                "kind": source_kind,
-                "name": source_name,
-            },
-            "rule_count": rule_count,
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&value).expect("validation result is serializable")
-        );
-
-        return Ok(());
-    }
-
-    let label = match source_kind {
-        "preset" => "Preset is valid:",
-        _ => "Configuration is valid:",
-    };
-    let rules = if rule_count == 1 { "rule" } else { "rules" };
-    let styles = Colorizer::stdout(color);
-
-    println!(
-        "{} {} ({} {})",
-        styles.style(label, "32"),
-        source_name,
-        rule_count,
-        rules
-    );
-
-    Ok(())
-}
-
-fn preset_name(name: &str, styles: Colorizer) -> Styled<&str> {
-    styles.style(name, "36")
-}
-
-pub(super) fn presets(
-    names: &[String],
-    format: OutputFormat,
-    color: ColorChoice,
-) -> io::Result<()> {
-    if format == OutputFormat::Json {
-        let value = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "presets": names,
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&value).expect("preset listing is serializable")
-        );
-        return Ok(());
-    }
-
-    let styles = Colorizer::stdout(color);
-
-    println!("Presets");
-    if names.is_empty() {
-        println!("  No user presets found.");
-    } else {
-        for name in names {
-            println!("  {}", preset_name(name, styles));
-        }
-    }
-
-    Ok(())
-}
-
-pub(super) fn saved_preset(name: &str, path: &Path, color: ColorChoice) -> io::Result<()> {
-    let styles = Colorizer::stdout(color);
-
-    println!(
-        "{} Saved preset {} to {}",
-        styles.style("Done.", "32"),
-        preset_name(name, styles),
-        path.display()
-    );
-
-    Ok(())
-}
-
-pub(super) fn removed_preset(name: &str, color: ColorChoice) -> io::Result<()> {
-    let styles = Colorizer::stdout(color);
-
-    println!(
-        "{} Removed preset {}",
-        styles.style("Done.", "32"),
-        preset_name(name, styles)
-    );
-
-    Ok(())
-}
-
-pub(super) fn error(
-    message: &str,
-    color: ColorChoice,
-    format: OutputFormat,
-    code: &str,
-    exit_code: u8,
-) -> io::Result<()> {
-    if format == OutputFormat::Json {
-        let document = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "error": {
-                "code": code,
-                "message": message,
-                "exit_code": exit_code,
-            },
-        });
-        let output = serde_json::to_string_pretty(&document).expect("error is serializable");
-        eprintln!("{output}");
-
-        return Ok(());
-    }
-
-    let styles = Colorizer::stderr(color);
-
-    eprintln!("{}: {message}", styles.style("dirule", "31"));
-
-    Ok(())
-}
-
 pub(super) fn no_changes(color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
 
@@ -277,6 +142,7 @@ fn color_enabled_for(
 
 #[cfg(test)]
 mod tests {
+    use super::super::args::OutputFormat;
     use super::{
         ColorChoice, Colorizer, PlanContext, color_enabled_for, json_apply_preview_needed,
         plan::write_text_plan,
@@ -344,23 +210,15 @@ mod tests {
             ..Plan::default()
         };
 
-        assert!(json_apply_preview_needed(
-            super::OutputFormat::Json,
+        assert!(json_apply_preview_needed(OutputFormat::Json, false, &plan));
+        assert!(!json_apply_preview_needed(OutputFormat::Json, true, &plan));
+        assert!(!json_apply_preview_needed(
+            OutputFormat::Human,
             false,
             &plan
         ));
         assert!(!json_apply_preview_needed(
-            super::OutputFormat::Json,
-            true,
-            &plan
-        ));
-        assert!(!json_apply_preview_needed(
-            super::OutputFormat::Human,
-            false,
-            &plan
-        ));
-        assert!(!json_apply_preview_needed(
-            super::OutputFormat::Json,
+            OutputFormat::Json,
             false,
             &Plan::default()
         ));
