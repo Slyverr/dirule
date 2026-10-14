@@ -2,6 +2,7 @@ use crate::ScanResult;
 use crate::journal::{JournalRecorder, JournalStatus, JournalStore};
 use crate::scan::SourceIdentity;
 use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
@@ -707,15 +708,20 @@ fn validate_sources(
     entries: &[&PlannedEntry],
     snapshot: &ScanResult,
 ) -> Result<(), ApplyError> {
+    let moved_directories = entries
+        .iter()
+        .filter(|entry| entry.kind == EntryKind::Directory && entry.source != entry.destination)
+        .map(|entry| entry.source.as_path())
+        .collect::<HashSet<_>>();
+
     for entry in entries {
         path::ensure_relative(&entry.source)?;
         path::ensure_relative(&entry.destination)?;
-        let moved_parent = entries.iter().any(|parent| {
-            parent.kind == EntryKind::Directory
-                && parent.source != parent.destination
-                && entry.source != parent.source
-                && entry.source.starts_with(&parent.source)
-        });
+        let moved_parent = entry
+            .source
+            .ancestors()
+            .skip(1)
+            .any(|ancestor| moved_directories.contains(ancestor));
         if entry.source == entry.destination && !moved_parent {
             continue;
         }
