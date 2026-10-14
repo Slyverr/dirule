@@ -277,6 +277,52 @@ fn quick_rename_previews_applies_and_undoes_without_a_config() {
 }
 
 #[test]
+fn quick_rename_applies_and_undoes_case_only_names() {
+    let project = TempProject::new();
+    fs::write(project.0.join("LICENSE"), "license text").expect("write source file");
+
+    let apply = project.run(&[
+        "rename",
+        "kebab-case",
+        "--apply",
+        "--yes",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("valid apply result");
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    let names = fs::read_dir(&project.0)
+        .expect("read renamed target")
+        .map(|entry| entry.expect("read renamed entry").file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(names, [std::ffi::OsString::from("license")]);
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    let names = fs::read_dir(&project.0)
+        .expect("read restored target")
+        .map(|entry| entry.expect("read restored entry").file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(names, [std::ffi::OsString::from("LICENSE")]);
+    assert_eq!(
+        fs::read(project.0.join("LICENSE")).unwrap(),
+        b"license text"
+    );
+}
+
+#[test]
 fn quick_recursive_rename_transforms_directories_and_undoes() {
     let project = TempProject::new();
     fs::create_dir_all(project.0.join("HTTPServer/NestedFolder"))
