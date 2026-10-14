@@ -806,3 +806,104 @@ to = "template:${path}"
 
     assert!(plan(&config, &entries).is_err());
 }
+
+#[test]
+fn planning_handles_generated_rename_cycles_without_conflicts() {
+    for cycle_len in 2..=32 {
+        let mut source = String::from("version = '1.0'\n");
+        let mut entries = Vec::with_capacity(cycle_len);
+
+        for index in 0..cycle_len {
+            let next = (index + 1) % cycle_len;
+            source.push_str(&format!(
+                "\n[[rules]]\nname = 'Move {index}'\nmatch = 'item-{index}.txt'\nto = 'template:item-{next}.txt'\n"
+            ));
+            entries.push(Entry {
+                path: PathBuf::from(format!("item-{index}.txt")),
+                kind: EntryKind::File,
+            });
+        }
+
+        let config = parse_config(&source).expect("valid generated configuration");
+        let planned = plan(&config, &entries).expect("valid generated plan");
+
+        assert!(
+            planned.conflicts.is_empty(),
+            "cycle length {cycle_len}: {planned:#?}"
+        );
+        assert!(planned.has_changes(), "cycle length {cycle_len}");
+        assert_eq!(planned.entries.len(), cycle_len);
+
+        for entry in &planned.entries {
+            let index = entry
+                .source
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.strip_prefix("item-"))
+                .and_then(|index| index.parse::<usize>().ok())
+                .expect("generated source index");
+            let next = (index + 1) % cycle_len;
+
+            assert_eq!(entry.destination, PathBuf::from(format!("item-{next}.txt")));
+        }
+    }
+}
+
+#[test]
+fn normalized_plans_are_idempotent_for_generated_nested_paths() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid configuration");
+    let entries = [
+        Entry {
+            path: PathBuf::from("HTTPServer"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("HTTPServer/MyXMLParser.pdf"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("APIClient/JSONSchema/ReadMe.txt"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("APIClient"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("APIClient/JSONSchema"),
+            kind: EntryKind::Directory,
+        },
+    ];
+
+    let first_plan = plan(&config, &entries).expect("valid first plan");
+    let normalized_entries = first_plan
+        .entries
+        .iter()
+        .map(|entry| Entry {
+            path: entry.destination.clone(),
+            kind: entry.kind,
+        })
+        .collect::<Vec<_>>();
+    let second_plan = plan(&config, &normalized_entries).expect("valid second plan");
+
+    assert!(first_plan.conflicts.is_empty(), "{first_plan:#?}");
+    assert!(first_plan.has_changes());
+    assert!(second_plan.conflicts.is_empty(), "{second_plan:#?}");
+    assert!(!second_plan.has_changes(), "{second_plan:#?}");
+    assert!(
+        second_plan
+            .entries
+            .iter()
+            .all(|entry| entry.source == entry.destination)
+    );
+}
