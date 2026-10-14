@@ -247,6 +247,213 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
 }
 
 #[test]
+fn cli_applies_and_undoes_a_configured_file_rename_cycle() {
+    let project = TempProject::new();
+    for (name, contents) in [("a.txt", "A"), ("b.txt", "B"), ("c.txt", "C")] {
+        fs::write(project.0.join(name), contents).expect("write cycle source");
+    }
+    fs::write(
+        project.0.join("dirule.toml"),
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Move A to B"
+match = "a.txt"
+to = "template:b.txt"
+
+[[rules]]
+name = "Move B to C"
+match = "b.txt"
+to = "template:c.txt"
+
+[[rules]]
+name = "Move C to A"
+match = "c.txt"
+to = "template:a.txt"
+"#,
+    )
+    .expect("write cycle rules");
+
+    let plan = project.run(&["plan", "--format", "json"]);
+
+    assert!(
+        plan.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&plan.stdout),
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).expect("valid plan JSON");
+    let changes = plan["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["source"] != entry["destination"])
+        .count();
+    assert_eq!(changes, 3);
+    assert!(plan["conflicts"].as_array().unwrap().is_empty());
+
+    let apply = project.run(&["apply", "--yes", "--format", "json"]);
+
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("valid apply JSON");
+    assert_eq!(apply["execution"]["status"], "applied");
+    assert_eq!(text(&project.0.join("a.txt")), "C");
+    assert_eq!(text(&project.0.join("b.txt")), "A");
+    assert_eq!(text(&project.0.join("c.txt")), "B");
+
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    let undo = project.run(&["undo", run_id, "--yes"]);
+
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert_eq!(text(&project.0.join("a.txt")), "A");
+    assert_eq!(text(&project.0.join("b.txt")), "B");
+    assert_eq!(text(&project.0.join("c.txt")), "C");
+}
+
+#[test]
+fn cli_applies_and_undoes_a_configured_directory_swap() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join("first")).expect("create first directory");
+    fs::create_dir_all(project.0.join("second")).expect("create second directory");
+    fs::write(project.0.join("first/marker.txt"), "first").expect("write first marker");
+    fs::write(project.0.join("second/marker.txt"), "second").expect("write second marker");
+    fs::write(
+        project.0.join("dirule.toml"),
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Swap first directory"
+match = "first"
+kind = "directory"
+to = "template:second"
+
+[[rules]]
+name = "Swap second directory"
+match = "second"
+kind = "directory"
+to = "template:first"
+"#,
+    )
+    .expect("write directory swap rules");
+
+    let plan = project.run(&["plan", "--format", "json"]);
+
+    assert!(
+        plan.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&plan.stdout),
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).expect("valid plan JSON");
+    assert!(plan["conflicts"].as_array().unwrap().is_empty());
+
+    let apply = project.run(&["apply", "--yes", "--format", "json"]);
+
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("valid apply JSON");
+    assert_eq!(apply["execution"]["status"], "applied");
+    assert_eq!(text(&project.0.join("first/marker.txt")), "second");
+    assert_eq!(text(&project.0.join("second/marker.txt")), "first");
+
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    let undo = project.run(&["undo", run_id, "--yes"]);
+
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert_eq!(text(&project.0.join("first/marker.txt")), "first");
+    assert_eq!(text(&project.0.join("second/marker.txt")), "second");
+}
+
+#[test]
+fn cli_skips_an_occupied_directory_and_its_descendants_but_applies_independent_moves() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join("Source")).expect("create source directory");
+    fs::create_dir_all(project.0.join("Occupied")).expect("create occupied destination");
+    fs::write(project.0.join("Source/child.txt"), "dependent").expect("write dependent child");
+    fs::write(project.0.join("Occupied/existing.txt"), "keep")
+        .expect("write existing destination content");
+    fs::write(project.0.join("Independent.txt"), "independent").expect("write independent source");
+    fs::write(
+        project.0.join("dirule.toml"),
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Move source directory"
+match = "Source"
+kind = "directory"
+to = "template:Occupied"
+
+[[rules]]
+name = "Normalize independent file"
+match = "Independent.txt"
+kind = "file"
+to = "template:independent.txt"
+"#,
+    )
+    .expect("write mixed conflict rules");
+
+    let apply = project.run(&[
+        "apply",
+        "--yes",
+        "--on-conflict",
+        "skip",
+        "--format",
+        "json",
+    ]);
+
+    assert!(
+        apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&apply.stdout),
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value = serde_json::from_slice(&apply.stdout).expect("valid apply JSON");
+    assert_eq!(apply["execution"]["status"], "applied");
+    assert!(project.0.join("Source/child.txt").is_file());
+    assert_eq!(text(&project.0.join("Occupied/existing.txt")), "keep");
+    assert_eq!(text(&project.0.join("independent.txt")), "independent");
+    assert!(!project.0.join("Independent.txt").exists());
+
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    let undo = project.run(&["undo", run_id, "--yes"]);
+
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert_eq!(text(&project.0.join("Independent.txt")), "independent");
+    assert!(project.0.join("Source/child.txt").is_file());
+    assert_eq!(text(&project.0.join("Occupied/existing.txt")), "keep");
+}
+
+#[test]
 fn configured_directory_rename_preserves_hidden_paths_and_undoes() {
     let project = TempProject::new();
     fs::create_dir_all(project.0.join(".github")).expect("create GitHub config directory");
