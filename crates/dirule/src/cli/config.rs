@@ -1,6 +1,5 @@
 use super::{args, output};
-use dirule_core::{CURRENT_CONFIG_VERSION, Config, Plan, parse_config};
-use dirule_fs::ScanResult;
+use dirule_core::{CURRENT_CONFIG_VERSION, Config, parse_config};
 use std::error::Error;
 use std::fs;
 use std::io::Write;
@@ -44,7 +43,7 @@ pub(super) fn validate(
 
 pub(super) fn evaluate(
     options: args::OperationArgs,
-) -> Result<(PathBuf, Plan, ScanResult), Box<dyn Error>> {
+) -> Result<crate::application::Preview, Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
     let source = config_source(&cwd, options.rules)?;
     ensure_config_exists(&source)?;
@@ -56,9 +55,7 @@ pub(super) fn evaluate(
         .or_else(|| config.target.clone().map(|path| resolve_target(&cwd, path)))
         .transpose()?
         .unwrap_or(cwd);
-    let preview = crate::application::preview(&config, &target)?;
-
-    Ok((preview.target, preview.plan, preview.snapshot))
+    Ok(crate::application::preview(&config, &target)?)
 }
 
 struct ConfigSource {

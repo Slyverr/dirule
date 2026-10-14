@@ -1,6 +1,6 @@
 use super::{args, config, journal, output, presets, prompt};
 use clap::CommandFactory;
-use dirule_fs::{ConflictPolicy, apply_journaled};
+use dirule_fs::ConflictPolicy;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Write};
@@ -25,11 +25,13 @@ pub(super) fn run(
         args::CliCommand::Check(options) => {
             let format = options.format;
             let verbose = options.verbose;
-            let (target, result, _) = config::evaluate(options)?;
+            let preview = config::evaluate(options)?;
+            let target = &preview.target;
+            let result = &preview.plan;
 
             output::plan(
-                &target,
-                &result,
+                target,
+                result,
                 format,
                 color,
                 output::PlanContext::Check,
@@ -45,11 +47,13 @@ pub(super) fn run(
         args::CliCommand::Plan(options) => {
             let format = options.format;
             let verbose = options.verbose;
-            let (target, result, _) = config::evaluate(options)?;
+            let preview = config::evaluate(options)?;
+            let target = &preview.target;
+            let result = &preview.plan;
 
             output::plan(
-                &target,
-                &result,
+                target,
+                result,
                 format,
                 color,
                 output::PlanContext::Preview,
@@ -68,33 +72,29 @@ pub(super) fn run(
             } = options;
             let format = operation.format;
             let verbose = operation.verbose;
-            let (target, result, snapshot) = config::evaluate(operation)?;
+            let preview = config::evaluate(operation)?;
+            let target = &preview.target;
+            let result = &preview.plan;
 
             if format == args::OutputFormat::Human {
                 output::plan(
-                    &target,
-                    &result,
+                    target,
+                    result,
                     format,
                     color,
                     output::PlanContext::Apply,
                     verbose,
                 )?;
-            } else if output::json_apply_preview_needed(format, yes, &result) {
-                output::plan_to_stderr(
-                    &target,
-                    &result,
-                    color,
-                    output::PlanContext::Apply,
-                    verbose,
-                )?;
+            } else if output::json_apply_preview_needed(format, yes, result) {
+                output::plan_to_stderr(target, result, color, output::PlanContext::Apply, verbose)?;
             }
             if !result.is_conflict_free() && on_conflict == args::ConflictAction::Abort {
                 return Err(format!("plan contains {} conflict(s)", result.conflicts.len()).into());
             }
             if !result.has_changes() {
                 output::apply_result(
-                    &target,
-                    &result,
+                    target,
+                    result,
                     output::ApplySummary {
                         status: output::ApplyStatus::NoChanges,
                         moved: 0,
@@ -112,8 +112,8 @@ pub(super) fn run(
                 yes,
             )? {
                 output::apply_result(
-                    &target,
-                    &result,
+                    target,
+                    result,
                     output::ApplySummary {
                         status: output::ApplyStatus::Cancelled,
                         moved: 0,
@@ -130,10 +130,10 @@ pub(super) fn run(
                 args::ConflictAction::Skip => ConflictPolicy::Skip,
             };
             let store = journal::store()?;
-            let applied = apply_journaled(&target, &result, &snapshot, policy, &store)?;
+            let applied = crate::application::apply_authorized(preview, policy, &store)?;
             output::apply_result(
-                &target,
-                &result,
+                &applied.target,
+                &applied.plan,
                 output::ApplySummary {
                     status: output::ApplyStatus::Applied,
                     moved: applied.report.moved.len(),

@@ -1,5 +1,8 @@
 use dirule_core::{Config, Plan, plan};
-use dirule_fs::{ApplyError, ScanError, ScanResult, scan, validate_destinations};
+use dirule_fs::{
+    ApplyError, ApplyReport, ConflictPolicy, JournalStore, ScanError, ScanResult, apply_journaled,
+    scan, validate_destinations,
+};
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -8,6 +11,13 @@ pub struct Preview {
     pub target: PathBuf,
     pub plan: Plan,
     pub snapshot: ScanResult,
+}
+
+pub struct Applied {
+    pub target: PathBuf,
+    pub plan: Plan,
+    pub report: ApplyReport,
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -65,5 +75,25 @@ pub fn preview(config: &Config, target: &Path) -> Result<Preview, PreviewError> 
         target,
         plan,
         snapshot,
+    })
+}
+
+pub fn apply_authorized(
+    preview: Preview,
+    policy: ConflictPolicy,
+    journal: &JournalStore,
+) -> Result<Applied, ApplyError> {
+    let Preview {
+        target,
+        plan,
+        snapshot,
+    } = preview;
+    let applied = apply_journaled(&target, &plan, &snapshot, policy, journal)?;
+
+    Ok(Applied {
+        target,
+        plan,
+        report: applied.report,
+        run_id: applied.run_id,
     })
 }

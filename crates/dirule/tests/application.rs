@@ -1,10 +1,11 @@
 use dirule_core::parse_config;
+use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
-fn preview_returns_a_plan_without_mutating_the_target() {
+fn preview_and_authorized_apply_share_the_operation_api() {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock is after Unix epoch")
@@ -35,5 +36,18 @@ to = "builtin:kebab-case"
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
 
-    fs::remove_dir_all(target).expect("remove target");
+    let journal = JournalStore::new(target.with_extension("journal"));
+    let applied = dirule::application::apply_authorized(preview, ConflictPolicy::Abort, &journal)
+        .expect("apply authorized plan");
+    let run_id = applied.run_id.as_deref().expect("journaled run ID");
+    assert_eq!(applied.report.moved.len(), 1);
+    assert!(!source.exists());
+    assert!(target.join("my-file.txt").is_file());
+
+    journal.undo(run_id).expect("undo applied plan");
+    assert!(source.is_file());
+    assert!(!target.join("my-file.txt").exists());
+
+    fs::remove_dir_all(&target).expect("remove target");
+    fs::remove_dir_all(target.with_extension("journal")).expect("remove test journal");
 }
