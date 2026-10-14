@@ -641,6 +641,114 @@ fn config_editor_sets_hard_ignore_patterns_and_migrates_the_document() {
 }
 
 #[test]
+fn config_editor_updates_metadata_through_typed_operations() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\nname = 'Old rules' # name note\ntarget = '.' # target note\n\n[acronyms] # acronym table note\nentries = ['iOS']\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, contents).expect("write project config");
+
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    editor
+        .set_name(Some("Project rules"))
+        .expect("update config name");
+    editor
+        .set_target(Some(Path::new("archive")))
+        .expect("update config target");
+    editor
+        .set_acronym_entries(&["iOS".into(), "eBay".into()])
+        .expect("update acronym entries");
+
+    let config = editor.config().expect("validate edited config");
+    let rendered = editor.contents();
+
+    assert_eq!(config.name.as_deref(), Some("Project rules"));
+    assert_eq!(config.target.as_deref(), Some(Path::new("archive")));
+    assert_eq!(config.acronyms.entries, ["iOS", "eBay"]);
+    assert!(rendered.contains("# name note"));
+    assert!(rendered.contains("# target note"));
+    assert!(rendered.contains("# acronym table note"));
+
+    editor.save().expect("save edited config");
+    let saved = fs::read_to_string(&path).expect("read edited config");
+    assert_eq!(
+        parse_config(&saved).unwrap().acronyms.entries,
+        ["iOS", "eBay"]
+    );
+
+    editor.set_name(None).expect("remove config name");
+    editor.set_target(None).expect("remove config target");
+    editor
+        .set_acronym_entries(&[])
+        .expect("clear acronym entries");
+    let cleared = editor.config().expect("validate cleared metadata");
+
+    assert_eq!(cleared.name, None);
+    assert_eq!(cleared.target, None);
+    assert!(cleared.acronyms.entries.is_empty());
+}
+
+#[test]
+fn config_editor_updates_inline_acronym_tables() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\nacronyms = {{ entries = [\"iOS\"] }}\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, contents).expect("write project config");
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+
+    editor
+        .set_acronym_entries(&["eBay".into()])
+        .expect("update inline acronym table");
+
+    assert_eq!(
+        editor
+            .config()
+            .expect("validate edited config")
+            .acronyms
+            .entries,
+        ["eBay"]
+    );
+}
+
+#[test]
+fn config_editor_rejects_invalid_acronym_edits_without_losing_valid_state() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    fs::write(&path, config_with_target(None)).expect("write project config");
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    let before = editor.contents();
+
+    assert!(matches!(
+        editor.set_acronym_entries(&["iOS".into(), "iOS".into()]),
+        Err(ConfigEditorError::Configuration { .. })
+    ));
+    assert_eq!(editor.contents(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn config_editor_rejects_non_unicode_target_paths() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    fs::write(&path, config_with_target(None)).expect("write project config");
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    let target = PathBuf::from(OsString::from_vec(vec![0xff]));
+
+    assert!(matches!(
+        editor.set_target(Some(&target)),
+        Err(ConfigEditorError::NonUnicodeTarget(_))
+    ));
+}
+
+#[test]
 fn config_editor_supports_adding_and_reordering_rules() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

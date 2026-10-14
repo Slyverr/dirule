@@ -28,6 +28,7 @@ pub struct ConfigEditor {
 pub enum ConfigEditorError {
     RelativePath(PathBuf),
     NotRegularFile(PathBuf),
+    NonUnicodeTarget(PathBuf),
     ConcurrentModification(PathBuf),
     InvalidRuleIndex {
         index: usize,
@@ -90,6 +91,21 @@ impl ConfigEditor {
 
     pub fn document_mut(&mut self) -> &mut DocumentMut {
         &mut self.document
+    }
+
+    pub fn set_name(&mut self, name: Option<&str>) -> Result<(), ConfigEditorError> {
+        self.set_optional_string("name", name)
+    }
+
+    pub fn set_target(&mut self, target: Option<&Path>) -> Result<(), ConfigEditorError> {
+        let target = target
+            .map(|path| {
+                path.to_str()
+                    .ok_or_else(|| ConfigEditorError::NonUnicodeTarget(path.to_path_buf()))
+            })
+            .transpose()?;
+
+        self.set_optional_string("target", target)
     }
 
     pub fn contents(&self) -> String {
@@ -181,6 +197,64 @@ impl ConfigEditor {
         }
         self.document["version"] = toml_edit::value(CURRENT_CONFIG_VERSION.to_string());
         self.document["ignore"] = toml_edit::value(ignore);
+
+        self.validate_or_restore(original)
+    }
+
+    pub fn set_acronym_entries(&mut self, entries: &[String]) -> Result<(), ConfigEditorError> {
+        if entries.is_empty() && self.document.get("acronyms").is_none() {
+            return Ok(());
+        }
+
+        let original = self.document.clone();
+        let mut values = toml_edit::Array::new();
+        for entry in entries {
+            values.push(entry.as_str());
+        }
+
+        if let Some(acronyms) = self.document.as_table_mut().get_mut("acronyms") {
+            match acronyms {
+                toml_edit::Item::Table(table) => {
+                    table["entries"] = toml_edit::value(values);
+                }
+                toml_edit::Item::Value(toml_edit::Value::InlineTable(table)) => {
+                    table["entries"] = toml_edit::Value::from(values);
+                }
+                _ => return Err(self.invalid_config("acronyms must be a table")),
+            }
+        } else {
+            let mut acronyms = toml_edit::Table::new();
+            acronyms["entries"] = toml_edit::value(values);
+            self.document["acronyms"] = toml_edit::Item::Table(acronyms);
+        }
+
+        self.validate_or_restore(original)
+    }
+
+    fn set_optional_string(
+        &mut self,
+        field: &'static str,
+        value: Option<&str>,
+    ) -> Result<(), ConfigEditorError> {
+        let original = self.document.clone();
+        match value {
+            Some(value) => {
+                let decor = self
+                    .document
+                    .as_table()
+                    .get(field)
+                    .and_then(toml_edit::Item::as_value)
+                    .map(|value| value.decor().clone());
+                let mut replacement = toml_edit::Value::from(value);
+                if let Some(decor) = decor {
+                    *replacement.decor_mut() = decor;
+                }
+                self.document[field] = toml_edit::Item::Value(replacement);
+            }
+            None => {
+                self.document.as_table_mut().remove(field);
+            }
+        }
 
         self.validate_or_restore(original)
     }
@@ -345,6 +419,11 @@ impl fmt::Display for ConfigEditorError {
                 "configuration path is not a regular file: {}",
                 path.display()
             ),
+            Self::NonUnicodeTarget(path) => write!(
+                formatter,
+                "configuration target must be valid Unicode: {}",
+                path.display()
+            ),
             Self::ConcurrentModification(path) => write!(
                 formatter,
                 "configuration changed after it was opened: {}",
@@ -381,6 +460,7 @@ impl Error for ConfigEditorError {
             Self::Configuration { source, .. } => Some(source),
             Self::RelativePath(_)
             | Self::NotRegularFile(_)
+            | Self::NonUnicodeTarget(_)
             | Self::ConcurrentModification(_)
             | Self::InvalidRuleIndex { .. } => None,
         }
