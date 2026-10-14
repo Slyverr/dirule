@@ -1,6 +1,6 @@
 use crate::config::CompiledDestination;
 use crate::{
-    CompiledConfig, Config, DestinationValues, Error, Result, RuleKind, transform,
+    CompiledConfig, Config, DestinationValues, Error, Result, RuleKind, transform_directory,
     transform_filename,
 };
 use serde::{Deserialize, Serialize};
@@ -132,10 +132,14 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
             let (stem, extension) = split_extension(basename);
             destination = match &rule.destination {
                 CompiledDestination::Builtin(operation) => {
-                    let transformed = if entry.kind == EntryKind::Directory {
-                        transform(basename, *operation, &config.acronyms)
-                    } else {
-                        transform_filename(basename, *operation, &config.acronyms)
+                    let transformed = match entry.kind {
+                        EntryKind::Directory => {
+                            transform_directory(basename, *operation, &config.acronyms)
+                        }
+                        EntryKind::File => {
+                            transform_filename(basename, *operation, &config.acronyms)
+                        }
+                        EntryKind::Symlink => unreachable!("symlinks are skipped before matching"),
                     };
                     planned_parent.join(transformed)
                 }
@@ -172,7 +176,13 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
             rule: owner,
         });
     }
-    find_conflicts(&mut result, &original_paths);
+    let moved_sources = result
+        .entries
+        .iter()
+        .filter(|entry| entry.source != entry.destination)
+        .map(|entry| entry.source.clone())
+        .collect();
+    find_conflicts(&mut result, &original_paths, &moved_sources);
     Ok(result)
 }
 
@@ -187,7 +197,11 @@ impl RuleKind {
     }
 }
 
-fn find_conflicts(plan: &mut Plan, original_paths: &HashSet<PathBuf>) {
+fn find_conflicts(
+    plan: &mut Plan,
+    original_paths: &HashSet<PathBuf>,
+    moved_sources: &HashSet<PathBuf>,
+) {
     let mut destinations = HashMap::<PathBuf, bool>::new();
     for entry in &plan.entries {
         if entry.source != entry.destination {
@@ -206,7 +220,8 @@ fn find_conflicts(plan: &mut Plan, original_paths: &HashSet<PathBuf>) {
                     path: destination,
                     reason: "multiple entries have the same planned destination".into(),
                 })
-            } else if original_paths.contains(&destination) {
+            } else if original_paths.contains(&destination) && !moved_sources.contains(&destination)
+            {
                 Some(Conflict {
                     path: destination,
                     reason: "destination already exists in the scanned tree".into(),

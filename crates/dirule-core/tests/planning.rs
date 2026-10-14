@@ -28,6 +28,76 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn planning_allows_destinations_vacated_by_other_moves() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Swap first"
+match = "first"
+to = "template:second"
+
+[[rules]]
+name = "Swap second"
+match = "second"
+to = "template:first"
+"#,
+    )
+    .expect("valid config");
+    let entries = [
+        Entry {
+            path: PathBuf::from("first"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("second"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert!(planned.conflicts.is_empty(), "{planned:#?}");
+    assert_eq!(planned.entries[0].destination, PathBuf::from("second"));
+    assert_eq!(planned.entries[1].destination, PathBuf::from("first"));
+}
+
+#[test]
+fn planning_preserves_hidden_directory_prefixes() {
+    let config = parse_config(
+        r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize directories"
+match = "**/*"
+kind = "directory"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid config");
+    let entries = [
+        Entry {
+            path: PathBuf::from(".GitHub"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("nested/.Config"),
+            kind: EntryKind::Directory,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(planned.entries[0].destination, PathBuf::from(".git-hub"));
+    assert_eq!(
+        planned.entries[1].destination,
+        PathBuf::from("nested/.config")
+    );
+}
+
+#[test]
 fn template_parent_uses_the_planned_directory_name() {
     let config = parse_config(
         r#"

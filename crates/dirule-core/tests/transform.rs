@@ -1,4 +1,4 @@
-use dirule_core::{AcronymLexicon, Transform, transform, transform_filename};
+use dirule_core::{AcronymLexicon, Transform, transform, transform_directory, transform_filename};
 
 #[test]
 fn handles_case_boundaries_dotfiles_and_extensions() {
@@ -40,6 +40,22 @@ fn handles_case_boundaries_dotfiles_and_extensions() {
         transform_filename(".JSONData", Transform::PascalCase, &acronyms),
         ".JsonData"
     );
+}
+
+#[test]
+fn directory_transforms_preserve_hidden_prefixes() {
+    let acronyms = AcronymLexicon::default();
+
+    for (source, expected) in [
+        (".GitHub", ".git-hub"),
+        (".Config", ".config"),
+        ("GitHub", "git-hub"),
+    ] {
+        assert_eq!(
+            transform_directory(source, Transform::KebabCase, &acronyms),
+            expected
+        );
+    }
 }
 
 #[test]

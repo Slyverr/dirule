@@ -70,7 +70,7 @@ Use the maintained `wax` matcher through a small adapter for named captures. Use
 
 The `to` value has the form `namespace:value`. The initial namespaces are `builtin` and `template`.
 
-A built-in transformation changes the entry name and preserves its planned parent. For files, it transforms the stem and preserves the extension. For directories, it transforms the directory name; descendants inherit the resulting virtual parent path.
+A built-in transformation changes the entry name and preserves its planned parent. For files, it transforms the stem and preserves the extension. For directories, it transforms the directory name and preserves a leading dot as its hidden marker; descendants inherit the resulting virtual parent path.
 
 The common template values are `${path}`, `${parent}`, `${name}`, `${stem}`, and `${extension}`. Named captures such as `<year>` provide `${year}`. `${path}` and captures refer to the original source path; `${parent}` refers to the planned parent path. `${name}`, `${stem}`, and `${extension}` refer to the original entry name. `${extension}` omits the dot and is empty when there is no extension. For dotfiles and multiple extensions, the final extension is the suffix after the last dot, except a leading dot alone is not an extension.
 
@@ -178,6 +178,7 @@ Tests should verify:
 - File and directory kind filters, including later rules matching entries whose kind did not match an earlier rule.
 - Rule exclusions, including fall-through to later rules, unmatched entries remaining unchanged, and rejection of malformed exclusion patterns.
 - All four transformations for ordinary names, uppercase runs, letter/digit transitions, punctuation, Unicode cased letters, scripts without case, dotfiles, and multiple extensions.
+- Built-in directory transformations preserve leading dots on `.github`, `.config`, and nested hidden directories.
 - Acronym behavior for generic uppercase runs such as `HTTPServer`, configured mixed-case spellings such as `iOSGuide`, longest-first tokenization, and non-matching inside a larger token.
 - Identical transformation output from built-in `to` values and equivalent template filters.
 - First-match ownership against original paths and one combined plan detecting collisions across rules before any filesystem change.

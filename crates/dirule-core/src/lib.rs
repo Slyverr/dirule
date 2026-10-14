@@ -12,7 +12,7 @@ pub use error::{Error, Result};
 pub use matching::{Captures, Matcher};
 pub use plan::{Conflict, Entry, EntryKind, Plan, PlannedEntry, plan, plan_compiled};
 pub use template::{CompiledTemplate, DestinationValues, expand_template, validate_template};
-pub use transform::{Transform, transform, transform_filename};
+pub use transform::{Transform, transform, transform_directory, transform_filename};
 
 pub fn parse_config(source: &str) -> Result<Config> {
     config::parse(source)

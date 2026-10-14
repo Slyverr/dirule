@@ -48,6 +48,20 @@ pub fn transform_filename(value: &str, operation: Transform, acronyms: &AcronymL
     output
 }
 
+pub fn transform_directory(value: &str, operation: Transform, acronyms: &AcronymLexicon) -> String {
+    let (hidden, value) = value
+        .strip_prefix('.')
+        .map_or((false, value), |value| (true, value));
+    let tokens = tokenize(value, acronyms);
+    let mut output = String::with_capacity(value.len());
+    if hidden {
+        output.push('.');
+    }
+    render_tokens(value, &tokens, operation, &mut output);
+
+    output
+}
+
 fn render_tokens(value: &str, tokens: &[Range<usize>], operation: Transform, output: &mut String) {
     let separator = match operation {
         Transform::SnakeCase => Some('_'),
