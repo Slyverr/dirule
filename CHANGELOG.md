@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## Version 0.2.1
+
 ### Fixed
 
 - Preserve comments and formatting when editing an existing TOML configuration.
