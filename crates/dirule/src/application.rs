@@ -7,6 +7,8 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub mod presets;
+
 pub struct Preview {
     pub target: PathBuf,
     pub plan: Plan,

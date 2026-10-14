@@ -1,21 +1,6 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-pub(super) fn preset_directory() -> Result<PathBuf, Box<dyn Error>> {
-    #[cfg(target_os = "windows")]
-    let base = absolute_env_path("APPDATA");
-    #[cfg(target_os = "macos")]
-    let base = absolute_env_path("HOME").map(|home| home.join("Library/Application Support"));
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let base = absolute_env_path("XDG_CONFIG_HOME")
-        .or_else(|| absolute_env_path("HOME").map(|home| home.join(".config")));
-    #[cfg(not(any(unix, target_os = "windows")))]
-    let base = absolute_env_path("HOME");
-
-    let base = base.ok_or("could not determine the user configuration directory")?;
-    Ok(base.join("dirule").join("presets"))
-}
-
 pub(super) fn journal_directory() -> Result<PathBuf, Box<dyn Error>> {
     #[cfg(target_os = "windows")]
     let base = absolute_env_path("LOCALAPPDATA");

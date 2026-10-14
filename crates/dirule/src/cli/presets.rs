@@ -1,6 +1,6 @@
-use super::{args, config, output, paths, prompt};
+use super::{args, config, output, prompt};
+use crate::application::presets::PresetStore;
 use std::error::Error;
-use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -8,30 +8,7 @@ pub(super) fn list(
     format: args::OutputFormat,
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
-    let directory = paths::preset_directory()?;
-    let entries = match fs::read_dir(&directory) {
-        Ok(entries) => Some(entries),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(format!("cannot read {}: {error}", directory.display()).into()),
-    };
-    let mut presets = Vec::new();
-    if let Some(entries) = entries {
-        for entry in entries {
-            let path = entry
-                .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
-                .path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "toml")
-                && let Some(name) = path.file_stem().and_then(|name| name.to_str())
-                && valid_name(name)
-            {
-                presets.push(name.to_owned());
-            }
-        }
-    }
-
-    presets.sort();
+    let presets = PresetStore::user()?.list()?;
     output::presets(&presets, format, color)?;
     Ok(())
 }
@@ -47,47 +24,15 @@ pub(super) fn save(
             .config
             .unwrap_or_else(|| PathBuf::from("dirule.toml")),
     );
-    let destination = path(&options.name)?;
-    let (_, contents) = config::load_config(&source_path)?;
-
-    let directory = destination
-        .parent()
-        .ok_or("preset path has no parent directory")?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&destination)
-        .map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                format!(
-                    "preset {:?} already exists at {}",
-                    options.name,
-                    destination.display()
-                )
-            } else {
-                format!("cannot create {}: {error}", destination.display())
-            }
-        })?;
-    if let Err(error) = file.write_all(contents.as_bytes()) {
-        drop(file);
-        let _ = fs::remove_file(&destination);
-        return Err(format!("cannot write {}: {error}", destination.display()).into());
-    }
+    let destination = PresetStore::user()?.save(&options.name, &source_path)?;
 
     output::saved_preset(&options.name, &destination, color)?;
     Ok(())
 }
 
 pub(super) fn export(name: String) -> Result<(), Box<dyn Error>> {
-    let preset_path = path(&name)?;
-    if !preset_path.is_file() {
-        return Err(format!("user preset {name:?} does not exist").into());
-    }
-
-    let (_, contents) = config::load_config(&preset_path)?;
-    io::stdout().lock().write_all(contents.as_bytes())?;
+    let preset = PresetStore::user()?.load(&name)?;
+    io::stdout().lock().write_all(preset.contents.as_bytes())?;
 
     Ok(())
 }
@@ -96,7 +41,8 @@ pub(super) fn remove(
     options: args::PresetRemoveArgs,
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
-    let path = path(&options.name)?;
+    let store = PresetStore::user()?;
+    let path = store.path(&options.name)?;
     if !path.is_file() {
         return Err(format!("user preset {:?} does not exist", options.name).into());
     }
@@ -109,21 +55,7 @@ pub(super) fn remove(
         return Ok(());
     }
 
-    fs::remove_file(&path).map_err(|error| format!("cannot remove {}: {error}", path.display()))?;
+    store.remove(&options.name)?;
     output::removed_preset(&options.name, color)?;
     Ok(())
-}
-
-pub(super) fn path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
-    if !valid_name(name) {
-        return Err("preset names may contain only ASCII letters, digits, '-' and '_'".into());
-    }
-    Ok(paths::preset_directory()?.join(format!("{name}.toml")))
-}
-
-fn valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }

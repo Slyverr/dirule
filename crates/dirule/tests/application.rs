@@ -1,3 +1,4 @@
+use dirule::application::presets::{PresetError, PresetStore};
 use dirule_core::parse_config;
 use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
@@ -72,6 +73,61 @@ to = "builtin:kebab-case"
     journal.undo(run_id).expect("undo applied plan");
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
+}
+
+#[test]
+fn preset_store_validates_roundtrips_and_removes_user_presets() {
+    let target = TempTarget::new();
+    let source = target.join("dirule.toml");
+    let contents = r#"
+version = "1.0"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#;
+    fs::write(&source, contents).expect("write source config");
+    let store = PresetStore::new(target.join("presets")).expect("create preset store");
+
+    assert!(store.list().expect("list empty store").is_empty());
+    assert!(matches!(
+        store.path("../outside"),
+        Err(PresetError::InvalidName(_))
+    ));
+
+    let path = store.save("downloads", &source).expect("save valid preset");
+    assert_eq!(store.list().expect("list saved preset"), ["downloads"]);
+    assert!(matches!(
+        store.save("downloads", &source),
+        Err(PresetError::AlreadyExists(_))
+    ));
+
+    let edited_path = store
+        .save_contents("edited", contents)
+        .expect("save preset contents");
+    assert_eq!(
+        store.list().expect("list saved presets"),
+        ["downloads", "edited"]
+    );
+    assert_eq!(
+        store.load("edited").expect("load edited preset").path,
+        edited_path
+    );
+
+    let loaded = store.load("downloads").expect("load saved preset");
+    assert_eq!(loaded.name, "downloads");
+    assert_eq!(loaded.path, path);
+    assert_eq!(loaded.contents, contents);
+    assert_eq!(loaded.config.rules.len(), 1);
+
+    store.remove("downloads").expect("remove saved preset");
+    store.remove("edited").expect("remove edited preset");
+    assert!(store.list().expect("list empty store").is_empty());
+    assert!(matches!(
+        store.load("downloads"),
+        Err(PresetError::NotFound(_))
+    ));
 }
 
 #[test]

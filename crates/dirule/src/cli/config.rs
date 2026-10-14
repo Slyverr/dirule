@@ -1,4 +1,5 @@
 use super::{args, output};
+use crate::application::presets::PresetStore;
 use dirule_core::{CURRENT_CONFIG_VERSION, Config, parse_config};
 use std::error::Error;
 use std::fs;
@@ -79,7 +80,7 @@ fn config_source(cwd: &Path, rules: args::RuleSourceArgs) -> Result<ConfigSource
 
     if let Some(name) = rules.preset {
         return Ok(ConfigSource {
-            path: super::presets::path(&name)?,
+            path: PresetStore::user()?.path(&name)?,
             kind: "preset",
             name,
             missing_hint: "check `dirule presets list` or create that preset",
