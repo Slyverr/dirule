@@ -9,10 +9,17 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub mod categories;
 pub mod configuration;
 pub mod journal;
 pub mod paths;
 pub mod presets;
+mod sort;
+
+pub use categories::{
+    CURRENT_CATEGORY_CATALOG_VERSION, CategoryCatalog, CategoryCatalogError, SortCategory,
+};
+pub use sort::{sort_by_extension_preview, sort_extension_preview, sort_selectors_preview};
 
 pub struct Preview {
     pub target: PathBuf,
@@ -111,59 +118,6 @@ pub fn rename_preview(
     }]);
 
     preview(&config, target)
-}
-
-pub fn sort_extension_preview(
-    target: &Path,
-    extension: &str,
-    recursive: bool,
-) -> Result<Preview, PreviewError> {
-    let extension = extension.strip_prefix('.').unwrap_or(extension);
-    if extension.is_empty()
-        || !extension
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric())
-    {
-        return Err(PreviewError::Operation(
-            "extension must contain only ASCII letters and digits".into(),
-        ));
-    }
-
-    let extension = extension.to_ascii_lowercase();
-    let pattern = format!("?*.(?i){extension}");
-    let pattern = if recursive {
-        format!("**/{pattern}")
-    } else {
-        pattern
-    };
-    let rules = vec![sort_rule(
-        "Sort matching files",
-        pattern,
-        "${extension|kebab-case}s/${name}",
-    )];
-
-    preview(&quick_config(rules), target)
-}
-
-pub fn sort_by_extension_preview(target: &Path, recursive: bool) -> Result<Preview, PreviewError> {
-    let pattern = if recursive { "**/?*.*" } else { "?*.*" };
-    let rules = vec![sort_rule(
-        "Sort files by extension",
-        pattern.into(),
-        "${extension|kebab-case}s/${name}",
-    )];
-
-    preview(&quick_config(rules), target)
-}
-
-fn sort_rule(name: &str, pattern: String, destination: &str) -> Rule {
-    Rule {
-        name: name.into(),
-        pattern,
-        kind: RuleKind::File,
-        exclude: Vec::new(),
-        to: format!("template:{destination}"),
-    }
 }
 
 fn quick_config(rules: Vec<Rule>) -> Config {
