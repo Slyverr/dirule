@@ -159,6 +159,33 @@ fn application_path_resolution_keeps_absolute_paths_and_anchors_relative_paths()
 }
 
 #[test]
+fn application_target_resolution_prefers_explicit_then_configured_then_base() {
+    let base = TempTarget::new();
+    let configured = PathBuf::from("configured-target");
+    let explicit = PathBuf::from("explicit-target");
+
+    assert_eq!(
+        dirule::application::paths::resolve_operation_target(
+            &base,
+            Some(explicit.clone()),
+            Some(configured.clone())
+        )
+        .expect("resolve explicit target"),
+        base.join(explicit)
+    );
+    assert_eq!(
+        dirule::application::paths::resolve_operation_target(&base, None, Some(configured.clone()))
+            .expect("resolve configured target"),
+        base.join(configured)
+    );
+    assert_eq!(
+        dirule::application::paths::resolve_operation_target(&base, None, None)
+            .expect("resolve base target"),
+        base.0
+    );
+}
+
+#[test]
 fn configuration_loader_exposes_validated_config_and_source_path() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

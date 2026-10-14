@@ -52,17 +52,11 @@ pub(super) fn evaluate(
 
     let loaded = configuration::load(&source.path)?;
     let config = loaded.config();
-    let target = options
-        .target
-        .map(|path| crate::application::paths::resolve_target(&cwd, path))
-        .or_else(|| {
-            config
-                .target
-                .clone()
-                .map(|path| crate::application::paths::resolve_target(&cwd, path))
-        })
-        .transpose()?
-        .unwrap_or(cwd);
+    let target = crate::application::paths::resolve_operation_target(
+        &cwd,
+        options.target,
+        config.target.clone(),
+    )?;
     Ok(crate::application::preview(config, &target)?)
 }
 

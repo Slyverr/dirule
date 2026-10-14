@@ -81,6 +81,18 @@ pub fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, HomeDirecto
     Ok(home.join(home_relative))
 }
 
+pub fn resolve_operation_target(
+    base: &Path,
+    explicit: Option<PathBuf>,
+    configured: Option<PathBuf>,
+) -> Result<PathBuf, HomeDirectoryUnavailable> {
+    explicit
+        .or(configured)
+        .map(|path| resolve_target(base, path))
+        .transpose()
+        .map(|target| target.unwrap_or_else(|| base.to_path_buf()))
+}
+
 pub fn user_journal_store() -> Result<JournalStore, UserStateDirectoryUnavailable> {
     let base = user_state_directory().ok_or(UserStateDirectoryUnavailable)?;
 
