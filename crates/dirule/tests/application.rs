@@ -1,3 +1,4 @@
+use dirule::application::configuration::{ConfigEditor, ConfigEditorError};
 use dirule::application::presets::{PresetError, PresetStore};
 use dirule_core::parse_config;
 use dirule_fs::{ConflictPolicy, JournalStore};
@@ -133,6 +134,124 @@ to = "builtin:kebab-case"
     assert!(matches!(
         store.load("downloads"),
         Err(PresetError::NotFound(_))
+    ));
+}
+
+#[test]
+fn config_editor_preserves_comments_and_file_permissions() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "# project settings\nversion = \"{}\" # schema\nname = 'Local rules' # keep this note\n\n[[rules]] # retain rule note\nname = 'Normalize names'\nmatch = '**/*'\nto = 'builtin:kebab-case'\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, &contents).expect("write project config");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640))
+            .expect("set project config permissions");
+    }
+
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    editor.document_mut()["rules"][0]["to"] = toml_edit::value("builtin:snake-case");
+    let config = editor.save().expect("save edited project config");
+    let saved = fs::read_to_string(&path).expect("read edited project config");
+
+    assert_eq!(config.rules[0].to, "builtin:snake-case");
+    assert!(saved.contains("# project settings"));
+    assert!(saved.contains("# schema"));
+    assert!(saved.contains("# keep this note"));
+    assert!(saved.contains("# retain rule note"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+}
+
+#[test]
+fn config_editor_refuses_to_overwrite_external_changes() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\nname = \"Local rules\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, &contents).expect("write project config");
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    editor.document_mut()["name"] = toml_edit::value("Edited rules");
+    let external = format!("{contents}\n# changed by another editor\n");
+    fs::write(&path, &external).expect("write external change");
+
+    assert!(matches!(
+        editor.save(),
+        Err(ConfigEditorError::ConcurrentModification(_))
+    ));
+    assert_eq!(fs::read_to_string(&path).unwrap(), external);
+}
+
+#[test]
+fn config_editor_rejects_invalid_edits_without_writing() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, &contents).expect("write project config");
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    editor.document_mut()["rules"][0]["to"] = toml_edit::value("unknown:transform");
+
+    assert!(matches!(
+        editor.save(),
+        Err(ConfigEditorError::Configuration { .. })
+    ));
+    assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+}
+
+#[test]
+fn config_editor_leaves_unchanged_documents_byte_identical() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = format!(
+        "version = \"{}\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"",
+        dirule_core::CURRENT_CONFIG_VERSION
+    );
+    fs::write(&path, &contents).expect("write project config without trailing newline");
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+
+    editor.save().expect("save unchanged project config");
+
+    assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+}
+
+#[cfg(unix)]
+#[test]
+fn config_editor_rejects_symlinked_config_files() {
+    use std::os::unix::fs::symlink;
+
+    let target = TempTarget::new();
+    let source = target.join("source.toml");
+    let link = target.join("dirule.toml");
+    fs::write(
+        &source,
+        format!(
+            "version = \"{}\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+            dirule_core::CURRENT_CONFIG_VERSION
+        ),
+    )
+    .expect("write source config");
+    symlink(&source, &link).expect("create config symlink");
+
+    assert!(matches!(
+        ConfigEditor::open(link),
+        Err(ConfigEditorError::NotRegularFile(_))
     ));
 }
 
