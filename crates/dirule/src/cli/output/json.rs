@@ -129,9 +129,18 @@ impl Serialize for ConflictDocument<'_> {
     where
         S: Serializer,
     {
-        let mut document = serializer.serialize_struct("ConflictDocument", 2)?;
+        let mut document = serializer.serialize_struct("ConflictDocument", 5)?;
+        document.serialize_field("kind", &self.0.kind)?;
         document.serialize_field("path", &PortablePath(&self.0.path))?;
+        let related_paths = self
+            .0
+            .related_paths
+            .iter()
+            .map(|path| PortablePath(path).to_string())
+            .collect::<Vec<_>>();
+        document.serialize_field("related_paths", &related_paths)?;
         document.serialize_field("reason", &self.0.reason)?;
+        document.serialize_field("suggestion", self.0.kind.suggestion())?;
         document.end()
     }
 }

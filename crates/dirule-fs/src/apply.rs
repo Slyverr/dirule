@@ -1,7 +1,7 @@
 use crate::ScanResult;
 use crate::journal::{JournalRecorder, JournalStatus, JournalStore};
 use crate::scan::SourceIdentity;
-use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
+use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -118,8 +118,15 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
                     .iter()
                     .any(|conflict| conflict.path == entry.destination)
                 {
+                    let kind = match &error {
+                        ApplyError::ExistingDestination(_) => ConflictKind::DestinationOccupied,
+                        ApplyError::UnsafePath(_) => ConflictKind::UnsafeParent,
+                        _ => unreachable!("the match arm only accepts destination safety errors"),
+                    };
                     plan.conflicts.push(Conflict {
                         path: entry.destination.clone(),
+                        kind,
+                        related_paths: related_move_paths(entry),
                         reason: error.to_string(),
                     });
                 }
@@ -136,6 +143,8 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
         {
             plan.conflicts.push(Conflict {
                 path: entry.destination.clone(),
+                kind: ConflictKind::DestinationOccupied,
+                related_paths: related_move_paths(entry),
                 reason: "destination already exists on disk".into(),
             });
         }
@@ -144,6 +153,13 @@ pub fn validate_destinations(target: &Path, plan: &mut Plan) -> Result<(), Apply
     dependencies::add_dependent_move_conflicts(&target, plan);
 
     Ok(())
+}
+
+fn related_move_paths(entry: &PlannedEntry) -> Vec<PathBuf> {
+    let mut paths = vec![entry.source.clone(), entry.destination.clone()];
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 pub fn apply(target: &Path, plan: &Plan, snapshot: &ScanResult) -> Result<ApplyReport, ApplyError> {

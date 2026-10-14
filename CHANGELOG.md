@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Structured conflict details and stable error categories in JSON output.
+
 ### Improved
 
 - Speed up large directory scans by reducing path-indexing overhead.

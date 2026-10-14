@@ -8,12 +8,14 @@ pub(in crate::cli) fn error(
     format: OutputFormat,
     code: &str,
     exit_code: u8,
+    kind: &str,
 ) -> io::Result<()> {
     if format == OutputFormat::Json {
         let document = serde_json::json!({
             "schema_version": CURRENT_OUTPUT_VERSION,
             "error": {
                 "code": code,
+                "kind": kind,
                 "message": message,
                 "exit_code": exit_code,
             },

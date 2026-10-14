@@ -133,12 +133,25 @@ pub(super) fn write_text_plan<W: Write>(
     if !plan.conflicts.is_empty() {
         writeln!(writer, "\nConflicts:")?;
         for conflict in &plan.conflicts {
+            let related_paths = conflict
+                .related_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+
             writeln!(
                 writer,
                 "  {} {} ({})",
                 styles.style("!", "31"),
                 conflict.path.display(),
                 conflict.reason
+            )?;
+            writeln!(writer, "    Related paths: {related_paths}")?;
+            writeln!(
+                writer,
+                "    Suggestion: {}",
+                styles.style(conflict.kind.suggestion(), "36")
             )?;
         }
     }

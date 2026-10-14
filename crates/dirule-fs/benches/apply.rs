@@ -1,5 +1,5 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dirule_core::{EntryKind, Plan, PlannedEntry};
+use dirule_core::{ConflictKind, EntryKind, Plan, PlannedEntry};
 use dirule_fs::{
     ConflictPolicy, JournalStore, apply, apply_journaled, apply_with_conflict_policy, scan,
     validate_destinations,
@@ -85,8 +85,9 @@ fn benchmark_skip_conflicts(criterion: &mut Criterion) {
                         let mut conflicts = Vec::with_capacity(count);
 
                         for index in 0..count {
-                            let blocked_source = format!("blocked-source-{index}");
-                            let blocked_destination = format!("blocked-destination-{index}");
+                            let blocked_source = PathBuf::from(format!("blocked-source-{index}"));
+                            let blocked_destination =
+                                PathBuf::from(format!("blocked-destination-{index}"));
                             let independent_source = format!("independent-source-{index}");
                             let independent_destination =
                                 format!("independent-destination-{index}");
@@ -95,8 +96,8 @@ fn benchmark_skip_conflicts(criterion: &mut Criterion) {
                             fs::write(target.path().join(&independent_source), b"independent")
                                 .unwrap();
                             entries.push(PlannedEntry {
-                                source: PathBuf::from(blocked_source),
-                                destination: PathBuf::from(&blocked_destination),
+                                source: blocked_source.clone(),
+                                destination: blocked_destination.clone(),
                                 kind: EntryKind::File,
                                 rule: None,
                             });
@@ -107,7 +108,9 @@ fn benchmark_skip_conflicts(criterion: &mut Criterion) {
                                 rule: None,
                             });
                             conflicts.push(dirule_core::Conflict {
-                                path: PathBuf::from(blocked_destination),
+                                path: blocked_destination.clone(),
+                                kind: ConflictKind::DestinationOccupied,
+                                related_paths: vec![blocked_source, blocked_destination],
                                 reason: "benchmark conflict".into(),
                             });
                         }

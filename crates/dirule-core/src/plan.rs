@@ -29,9 +29,41 @@ pub struct PlannedEntry {
     pub rule: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictKind {
+    DuplicateDestination,
+    DestinationOccupied,
+    FileDestinationParent,
+    UnsafeParent,
+    DependentMove,
+}
+
+impl ConflictKind {
+    pub fn suggestion(self) -> &'static str {
+        match self {
+            Self::DuplicateDestination => {
+                "Adjust the rules so each entry maps to a unique destination."
+            }
+            Self::DestinationOccupied => {
+                "Choose an unoccupied destination or include its current owner in the plan."
+            }
+            Self::FileDestinationParent => {
+                "Choose destinations that do not place entries beneath a file."
+            }
+            Self::UnsafeParent => {
+                "Choose a destination with safe parent directories inside the target."
+            }
+            Self::DependentMove => "Resolve the related conflict and review the plan again.",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Conflict {
     pub path: PathBuf,
+    pub kind: ConflictKind,
+    pub related_paths: Vec<PathBuf>,
     pub reason: String,
 }
 
@@ -202,28 +234,35 @@ fn find_conflicts(
     original_paths: &HashSet<PathBuf>,
     moved_sources: &HashSet<PathBuf>,
 ) {
-    let mut destinations = HashMap::<PathBuf, bool>::new();
+    let mut destinations = HashMap::<PathBuf, (usize, Vec<PathBuf>)>::new();
     for entry in &plan.entries {
         if entry.source != entry.destination {
-            destinations
-                .entry(entry.destination.clone())
-                .and_modify(|has_multiple_owners| *has_multiple_owners = true)
-                .or_insert(false);
+            let (owners, related_paths) =
+                destinations.entry(entry.destination.clone()).or_default();
+            *owners += 1;
+            related_paths.extend([entry.source.clone(), entry.destination.clone()]);
         }
     }
 
     let mut destination_conflicts = destinations
         .into_iter()
-        .filter_map(|(destination, has_multiple_owners)| {
-            if has_multiple_owners {
+        .filter_map(|(destination, (owners, mut related_paths))| {
+            related_paths.sort_unstable();
+            related_paths.dedup();
+
+            if owners > 1 {
                 Some(Conflict {
                     path: destination,
+                    kind: ConflictKind::DuplicateDestination,
+                    related_paths,
                     reason: "multiple entries have the same planned destination".into(),
                 })
             } else if original_paths.contains(&destination) && !moved_sources.contains(&destination)
             {
                 Some(Conflict {
                     path: destination,
+                    kind: ConflictKind::DestinationOccupied,
+                    related_paths,
                     reason: "destination already exists in the scanned tree".into(),
                 })
             } else {
@@ -243,7 +282,7 @@ fn find_conflicts(
         }
     }
 
-    let mut file_parent_conflicts = vec![false; plan.entries.len()];
+    let mut file_parent_conflicts = vec![Vec::new(); plan.entries.len()];
     for entry in plan
         .entries
         .iter()
@@ -253,7 +292,13 @@ fn find_conflicts(
         while let Some(path) = parent {
             if let Some(file_indices) = file_destinations.get(path) {
                 for index in file_indices {
-                    file_parent_conflicts[*index] = true;
+                    let related_paths = &mut file_parent_conflicts[*index];
+                    related_paths.extend([
+                        plan.entries[*index].source.clone(),
+                        plan.entries[*index].destination.clone(),
+                        entry.source.clone(),
+                        entry.destination.clone(),
+                    ]);
                 }
             }
 
@@ -261,10 +306,15 @@ fn find_conflicts(
         }
     }
 
-    for (index, entry) in plan.entries.iter().enumerate() {
-        if file_parent_conflicts[index] {
+    for (index, mut related_paths) in file_parent_conflicts.into_iter().enumerate() {
+        if !related_paths.is_empty() {
+            related_paths.sort_unstable();
+            related_paths.dedup();
+
             plan.conflicts.push(Conflict {
-                path: entry.destination.clone(),
+                path: plan.entries[index].destination.clone(),
+                kind: ConflictKind::FileDestinationParent,
+                related_paths,
                 reason: "a file destination is also a parent of another destination".into(),
             });
         }

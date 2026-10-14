@@ -1,4 +1,4 @@
-use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry, parse_config, plan};
+use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry, parse_config, plan};
 use dirule_fs::validate_destinations;
 use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
@@ -529,6 +529,8 @@ fn apply_can_skip_conflicting_moves_and_apply_independent_moves() {
     std::fs::write(temp.0.join("independent"), "move me").expect("write independent source");
     let conflict = Conflict {
         path: PathBuf::from("occupied"),
+        kind: ConflictKind::DestinationOccupied,
+        related_paths: vec![PathBuf::from("conflicting"), PathBuf::from("occupied")],
         reason: "destination already exists".into(),
     };
     let plan = Plan {
@@ -606,6 +608,17 @@ fn apply_skips_moves_that_depend_on_a_conflicting_move() {
             .collect::<Vec<_>>(),
         [Path::new("final"), Path::new("second")]
     );
+    assert_eq!(
+        validated_plan
+            .conflicts
+            .iter()
+            .map(|conflict| conflict.kind)
+            .collect::<Vec<_>>(),
+        [
+            ConflictKind::DestinationOccupied,
+            ConflictKind::DependentMove,
+        ]
+    );
 
     let report = apply_with_conflict_policy(&temp.0, &plan, &snapshot, ConflictPolicy::Skip)
         .expect("apply unrelated move");
@@ -628,6 +641,35 @@ fn apply_skips_moves_that_depend_on_a_conflicting_move() {
         std::fs::read_to_string(temp.0.join("renamed")).unwrap(),
         "independent"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn validate_destinations_classifies_symlinked_parents_as_unsafe() {
+    let temp = TempDir::new();
+    let outside = TempDir::new();
+    std::fs::write(temp.0.join("source"), "source").expect("write source");
+    std::os::unix::fs::symlink(&outside.0, temp.0.join("linked"))
+        .expect("create linked destination parent");
+    let mut plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("source"),
+            destination: PathBuf::from("linked/destination"),
+            kind: EntryKind::File,
+            rule: None,
+        }],
+        ..Plan::default()
+    };
+
+    validate_destinations(&temp.0, &mut plan).expect("record unsafe destination parent");
+
+    assert_eq!(plan.conflicts.len(), 1);
+    assert_eq!(plan.conflicts[0].kind, ConflictKind::UnsafeParent);
+    assert_eq!(
+        plan.conflicts[0].related_paths,
+        [PathBuf::from("linked/destination"), PathBuf::from("source")]
+    );
+    assert!(!outside.0.join("destination").exists());
 }
 
 #[test]
@@ -661,6 +703,8 @@ fn apply_skips_descendants_of_conflicted_directories() {
         ],
         conflicts: vec![Conflict {
             path: PathBuf::from("occupied"),
+            kind: ConflictKind::DestinationOccupied,
+            related_paths: vec![PathBuf::from("old"), PathBuf::from("occupied")],
             reason: "destination already exists".into(),
         }],
         findings: Vec::new(),

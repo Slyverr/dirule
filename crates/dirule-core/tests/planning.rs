@@ -1,4 +1,6 @@
-use dirule_core::{AcronymOptions, Config, Entry, EntryKind, Rule, RuleKind, parse_config, plan};
+use dirule_core::{
+    AcronymOptions, Config, ConflictKind, Entry, EntryKind, Rule, RuleKind, parse_config, plan,
+};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -757,6 +759,19 @@ to = "template:archive/details.txt"
 
     assert_eq!(planned.conflicts.len(), 1, "{planned:#?}");
     assert_eq!(planned.conflicts[0].path, PathBuf::from("archive"));
+    assert_eq!(
+        planned.conflicts[0].kind,
+        ConflictKind::FileDestinationParent
+    );
+    assert_eq!(
+        planned.conflicts[0].related_paths,
+        [
+            PathBuf::from("archive"),
+            PathBuf::from("archive/details.txt"),
+            PathBuf::from("details.txt"),
+            PathBuf::from("report.txt"),
+        ]
+    );
     assert_eq!(
         planned.conflicts[0].reason,
         "a file destination is also a parent of another destination"

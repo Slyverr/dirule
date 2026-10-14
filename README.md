@@ -85,7 +85,7 @@ Run `check` to verify names without changing the target:
 dirule check --format json
 ```
 
-It exits with status `0` when paths comply, `1` when the plan contains changes or conflicts, and `2` when Dirule cannot evaluate the check. JSON results go to stdout; execution errors are versioned JSON on stderr. See the [CLI output contract](docs/specs/cli-output.md) for the error shape and stable codes.
+It exits with status `0` when paths comply, `1` when the plan contains changes or conflicts, and `2` when Dirule cannot evaluate the check. JSON results go to stdout; execution errors are versioned JSON on stderr with stable error codes and categories. See the [CLI output contract](docs/specs/cli-output.md) for the output shapes and stable values.
 
 ### Pre-commit
 

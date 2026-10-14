@@ -1238,8 +1238,9 @@ fn json_command_errors_emit_a_versioned_error_document_to_stderr() {
     assert!(output.stdout.is_empty());
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("command error is a JSON document");
-    assert_eq!(value["schema_version"], "1.0");
+    assert_eq!(value["schema_version"], "1.2");
     assert_eq!(value["error"]["code"], "command_error");
+    assert_eq!(value["error"]["kind"], "configuration");
     assert_eq!(value["error"]["exit_code"], 2);
     assert!(
         value["error"]["message"]
@@ -1247,6 +1248,70 @@ fn json_command_errors_emit_a_versioned_error_document_to_stderr() {
             .unwrap()
             .contains("rules.toml")
     );
+}
+
+#[test]
+fn json_command_errors_classify_unavailable_targets() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+
+    let output = project.run(&[
+        "plan",
+        "--config",
+        "dirule.toml",
+        "--target",
+        "missing-target",
+        "--format",
+        "json",
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("target error is a JSON document");
+    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["error"]["code"], "command_error");
+    assert_eq!(value["error"]["kind"], "target");
+    assert_eq!(value["error"]["exit_code"], 2);
+}
+
+#[test]
+fn json_journal_errors_are_classified() {
+    let project = TempProject::new();
+
+    let output = project.run(&["undo", "invalid/id", "--yes", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("journal error is a JSON document");
+    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["error"]["kind"], "journal");
+}
+
+#[test]
+fn json_config_selection_errors_are_classified() {
+    let project = TempProject::new();
+    let target = project.0.join("target");
+    fs::create_dir_all(&target).expect("create target");
+    let preset_directory = preset_config_base(&project).join("dirule/presets");
+    fs::create_dir_all(&preset_directory).expect("create preset directory");
+    let config = config_for_target(Some(&target), "snake-case");
+    fs::write(preset_directory.join("first.toml"), &config).expect("write first preset");
+    fs::write(preset_directory.join("second.toml"), config).expect("write second preset");
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dirule"));
+    configure_preset_environment(&mut command, &project);
+    let output = command
+        .args(["plan", "--target", "target", "--format", "json"])
+        .current_dir(&project.0)
+        .output()
+        .expect("run ambiguous target lookup");
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("selection error is a JSON document");
+    assert_eq!(value["schema_version"], "1.2");
+    assert_eq!(value["error"]["kind"], "configuration_selection");
 }
 
 #[test]
@@ -1473,7 +1538,7 @@ fn validate_checks_config_without_scanning_its_target() {
     );
     let result: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid validation JSON");
-    assert_eq!(result["schema_version"], "1.0");
+    assert_eq!(result["schema_version"], "1.2");
     assert_eq!(result["valid"], true);
     assert_eq!(result["source"]["kind"], "config");
     assert_eq!(result["source"]["name"], "dirule.toml");
@@ -1558,7 +1623,7 @@ fn preset_listing_emits_versioned_json() {
     );
     let value: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid preset listing JSON");
-    assert_eq!(value["schema_version"], "1.0");
+    assert_eq!(value["schema_version"], "1.2");
     assert_eq!(value["presets"], serde_json::json!(["downloads", "zeta"]));
 }
 
@@ -2060,6 +2125,66 @@ fn plan_json_reports_conflicts_without_mutating_the_target() {
 }
 
 #[test]
+fn plan_json_conflicts_identify_the_kind_and_related_paths() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("A__B.txt"), "first").expect("write first conflict source");
+    fs::write(project.0.join("A--B.txt"), "second").expect("write second conflict source");
+
+    let output = project.run(&["plan", "--format", "json"]);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+    let conflict = &value["conflicts"][0];
+
+    assert_eq!(conflict["kind"], "duplicate_destination");
+    let related = conflict["related_paths"]
+        .as_array()
+        .expect("related paths array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(related, ["A--B.txt", "A__B.txt", "a-b.txt"]);
+}
+
+#[test]
+fn plan_json_occupied_destination_identifies_the_move_and_existing_path() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("MyFile.txt"), "source").expect("write source");
+    fs::write(project.0.join("my-file.txt"), "destination").expect("write destination");
+
+    let output = project.run(&["plan", "--format", "json"]);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+    let conflict = &value["conflicts"][0];
+
+    assert_eq!(conflict["kind"], "destination_occupied");
+    assert_eq!(conflict["path"], "my-file.txt");
+    assert_eq!(
+        conflict["related_paths"],
+        serde_json::json!(["MyFile.txt", "my-file.txt"])
+    );
+    assert!(conflict["suggestion"].is_string());
+    assert_eq!(text(&project.0.join("MyFile.txt")), "source");
+    assert_eq!(text(&project.0.join("my-file.txt")), "destination");
+}
+
+#[test]
+fn plan_text_conflicts_show_related_paths_and_a_suggestion() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    fs::write(project.0.join("A__B.txt"), "first").expect("write first conflict source");
+    fs::write(project.0.join("A--B.txt"), "second").expect("write second conflict source");
+
+    let output = project.run(&["plan"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stdout.contains("Related paths: A--B.txt, A__B.txt, a-b.txt"));
+    assert!(
+        stdout.contains("Suggestion: Adjust the rules so each entry maps to a unique destination.")
+    );
+}
+
+#[test]
 fn check_reports_conflicts_without_mutating_the_target() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());
@@ -2087,7 +2212,7 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
 
     assert_eq!(check.status.code(), Some(1));
     let value: serde_json::Value = serde_json::from_slice(&check.stdout).expect("valid check JSON");
-    assert_eq!(value["schema_version"], "1.0");
+    assert_eq!(value["schema_version"], "1.2");
     let entries = value["entries"].as_array().expect("entries array");
     assert!(
         entries.iter().any(|entry| {
@@ -2102,8 +2227,9 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
     );
     let error: serde_json::Value =
         serde_json::from_slice(&check.stderr).expect("check failure is a JSON document");
-    assert_eq!(error["schema_version"], "1.0");
+    assert_eq!(error["schema_version"], "1.2");
     assert_eq!(error["error"]["code"], "check_failed");
+    assert_eq!(error["error"]["kind"], "check_failure");
     assert_eq!(error["error"]["exit_code"], 1);
     assert!(project.0.join("MyFile.txt").is_file());
     assert!(!project.0.join("my-file.txt").exists());
@@ -2138,7 +2264,7 @@ fn apply_requires_confirmation_when_stdin_is_not_a_terminal() {
     let error: serde_json::Value =
         serde_json::from_str(&apply_json_error[error_document_start + 1..])
             .expect("confirmation error is a JSON document");
-    assert_eq!(error["schema_version"], "1.0");
+    assert_eq!(error["schema_version"], "1.2");
     assert_eq!(error["error"]["code"], "command_error");
     assert_eq!(error["error"]["exit_code"], 2);
     assert!(project.0.join("MyFile.txt").is_file());

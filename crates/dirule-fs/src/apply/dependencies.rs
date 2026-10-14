@@ -2,7 +2,7 @@ use super::{
     ApplyError, MoveIdentity, MutationRecorder, path, rename_path_exclusive, temporary_sibling,
 };
 use crate::scan::SourceIdentity;
-use dirule_core::{Conflict, EntryKind, Plan, PlannedEntry};
+use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -55,6 +55,8 @@ pub(super) fn add_dependent_move_conflicts(target: &Path, plan: &mut Plan) {
                     if conflict_paths.insert(entry.destination.clone()) {
                         conflicts.push(Conflict {
                             path: entry.destination.clone(),
+                            kind: ConflictKind::DependentMove,
+                            related_paths: related_move_paths(entry),
                             reason: "depends on a move skipped because of a conflict".into(),
                         });
                     }
@@ -62,6 +64,13 @@ pub(super) fn add_dependent_move_conflicts(target: &Path, plan: &mut Plan) {
             }
         }
     }
+}
+
+fn related_move_paths(entry: &PlannedEntry) -> Vec<PathBuf> {
+    let mut paths = vec![entry.source.clone(), entry.destination.clone()];
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 fn dependency_keys(target: &Path, path: &Path) -> Vec<PathBuf> {
