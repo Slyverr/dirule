@@ -44,6 +44,8 @@ cargo bench -p dirule-fs --bench apply
 
 The core benchmarks cover config parsing, named-pattern matching, filename transforms, and planning at several input sizes. The filesystem benchmarks measure repeat scans of nested trees with VCS and configured ignore patterns, destination validation, and full application of file rename cycles with and without journaling at several input sizes. The scan benchmark separates configured-pattern lookup overhead from the time saved by pruning a generated subtree. Save a local baseline with `-- --save-baseline NAME` and compare it later with `-- --baseline NAME`. Compare runs on the same machine and build setup.
 
+For a code change, compare the baseline and candidate revisions with the same toolchain and benchmark setup. Record both commit IDs with the result, run the measurements close together, and repeat comparisons when load or outliers make them unclear. Treat short Criterion runs as exploratory; do not use them alone to claim a performance improvement. Criterion output is local data and should not be committed.
+
 ## Releases
 
 Dirule uses lockstep workspace versions. During `0.x`, use a patch release for bug fixes and compatible maintenance; use a minor release for new user-facing capabilities or intentional CLI/config behavior changes. Do not bump the version for each commit. Treat `0.x` as pre-stable: compatibility is not guaranteed. Move to `1.0.0` when the CLI and configuration behavior are stable enough to support a compatibility promise; after that, use SemVer major for breaking changes, minor for compatible features, and patch for compatible fixes. Release when a coherent change set is ready and CI passes; there is no fixed release calendar.
