@@ -117,15 +117,6 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
     let mut builder = ignore::WalkBuilder::new(&target);
     let ignore_root = target.clone();
     let ignore_patterns = ignores.clone();
-    let mut dirule_ignore_matchers = {
-        let mut builder = ignore::WalkBuilder::new(&target);
-        builder
-            .standard_filters(false)
-            .parents(true)
-            .require_git(false)
-            .add_custom_ignore_filename(".diruleignore");
-        builder.build_matchers()
-    };
     builder
         .hidden(false)
         .ignore(true)
@@ -204,6 +195,7 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
 
     let (tracked, tracked_findings) = git::tracked_paths(&target)?;
     findings.extend(tracked_findings);
+    let mut dirule_ignore_matchers = None;
     for tracked in tracked {
         if slash_path(&tracked).is_some_and(|path| ignores.matches_path_or_parent(&path)) {
             continue;
@@ -232,7 +224,16 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
                 ));
                 continue;
             };
-            let matched = dirule_ignore_matchers
+            let matchers = dirule_ignore_matchers.get_or_insert_with(|| {
+                let mut builder = ignore::WalkBuilder::new(&target);
+                builder
+                    .standard_filters(false)
+                    .parents(true)
+                    .require_git(false)
+                    .add_custom_ignore_filename(".diruleignore");
+                builder.build_matchers()
+            });
+            let matched = matchers
                 .first_mut()
                 .map(|matcher| matcher.matched_with_errors(&tracked, kind == EntryKind::Directory));
             if let Some((matched, error)) = matched {
