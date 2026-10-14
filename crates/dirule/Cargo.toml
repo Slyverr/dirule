@@ -14,3 +14,5 @@ dirule-core = { version = "0.1.0", path = "../dirule-core" }
 dirule-fs = { version = "0.1.0", path = "../dirule-fs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
+toml_edit = "0.25"
