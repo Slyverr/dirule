@@ -115,6 +115,17 @@ fn configure_home(command: &mut Command, home: &Path) {
     command.env("HOME", home);
 }
 
+fn config_for_target(target: Option<&Path>, transform: &str) -> String {
+    let target = target
+        .map(|path| format!("target = {:?}\n", path.to_string_lossy()))
+        .unwrap_or_default();
+
+    format!(
+        "version = \"{}\"\n{target}\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:{transform}\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    )
+}
+
 #[test]
 fn cli_accepts_human_output_format_and_rejects_text_alias() {
     let project = TempProject::new();
@@ -1253,8 +1264,155 @@ fn commands_do_not_search_parent_directories_for_a_config() {
 
     assert_eq!(output.status.code(), Some(2));
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains(&child.join("dirule.toml").display().to_string()));
+    assert!(
+        error.contains(&child.join("dirule.toml").display().to_string()),
+        "unexpected error: {error}"
+    );
     assert!(error.contains("run `dirule init`"));
+}
+
+#[test]
+fn target_local_config_precedes_exact_preset_and_explicit_sources_override_both() {
+    let project = TempProject::new();
+    let target = project.0.join("nested-project");
+    fs::create_dir(&target).expect("create target directory");
+    fs::write(target.join("MyXMLParser.txt"), "parser").expect("write target file");
+    fs::write(
+        target.join("dirule.toml"),
+        config_for_target(Some(Path::new(".")), "snake-case"),
+    )
+    .expect("write target-local config");
+    let preset_directory = preset_config_base(&project).join("dirule/presets");
+    fs::create_dir_all(&preset_directory).expect("create global preset directory");
+    fs::write(
+        preset_directory.join("matching.toml"),
+        config_for_target(Some(&target), "kebab-case"),
+    )
+    .expect("write target-bound preset");
+    fs::write(
+        preset_directory.join("base.toml"),
+        config_for_target(Some(&project.0), "kebab-case"),
+    )
+    .expect("write invocation-directory preset");
+    fs::write(
+        project.0.join("custom.toml"),
+        config_for_target(Some(Path::new(".")), "camel-case"),
+    )
+    .expect("write explicit config");
+    let target_argument = target.to_string_lossy().into_owned();
+
+    let mut local_command =
+        project.command(&["plan", "--target", &target_argument, "--format", "json"]);
+    configure_preset_environment(&mut local_command, &project);
+    let local = local_command
+        .output()
+        .expect("run with target-local config");
+    assert!(
+        local.status.success(),
+        "{}",
+        String::from_utf8_lossy(&local.stderr)
+    );
+    let local: serde_json::Value = serde_json::from_slice(&local.stdout).expect("valid local plan");
+    assert!(local["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "MyXMLParser.txt" && entry["destination"] == "my_xml_parser.txt"
+    }));
+
+    let preset_only_target = project.0.join("preset-only-project");
+    fs::create_dir(&preset_only_target).expect("create preset-only target");
+    fs::write(preset_only_target.join("MyXMLParser.txt"), "parser")
+        .expect("write preset-only target file");
+    fs::write(
+        preset_directory.join("preset-only.toml"),
+        config_for_target(Some(&preset_only_target), "pascal-case"),
+    )
+    .expect("write preset-only target binding");
+    let preset_only_argument = preset_only_target.to_string_lossy().into_owned();
+    let mut implicit_preset_command = project.command(&[
+        "plan",
+        "--target",
+        &preset_only_argument,
+        "--format",
+        "json",
+    ]);
+    configure_preset_environment(&mut implicit_preset_command, &project);
+    let implicit_preset = implicit_preset_command
+        .output()
+        .expect("run with implicitly selected preset");
+    assert!(
+        implicit_preset.status.success(),
+        "{}",
+        String::from_utf8_lossy(&implicit_preset.stderr)
+    );
+    let implicit_preset: serde_json::Value =
+        serde_json::from_slice(&implicit_preset.stdout).expect("valid implicit preset plan");
+    assert!(
+        implicit_preset["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["source"] == "MyXMLParser.txt" && entry["destination"] == "MyXmlParser.txt"
+            })
+    );
+
+    let mut preset_command = project.command(&[
+        "plan",
+        "--target",
+        &target_argument,
+        "--preset",
+        "matching",
+        "--format",
+        "json",
+    ]);
+    configure_preset_environment(&mut preset_command, &project);
+    let preset = preset_command.output().expect("run with explicit preset");
+    assert!(
+        preset.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preset.stderr)
+    );
+    let preset: serde_json::Value =
+        serde_json::from_slice(&preset.stdout).expect("valid preset plan");
+    assert!(preset["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "MyXMLParser.txt" && entry["destination"] == "my-xml-parser.txt"
+    }));
+
+    let mut config_command = project.command(&[
+        "plan",
+        "--target",
+        &target_argument,
+        "--config",
+        "custom.toml",
+        "--format",
+        "json",
+    ]);
+    configure_preset_environment(&mut config_command, &project);
+    let config = config_command.output().expect("run with explicit config");
+    assert!(
+        config.status.success(),
+        "{}",
+        String::from_utf8_lossy(&config.stderr)
+    );
+    let config: serde_json::Value =
+        serde_json::from_slice(&config.stdout).expect("valid config plan");
+    assert!(config["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "MyXMLParser.txt" && entry["destination"] == "myXmlParser.txt"
+    }));
+
+    let mut validate_command = project.command(&["validate", "--format", "json"]);
+    configure_preset_environment(&mut validate_command, &project);
+    let validation = validate_command
+        .output()
+        .expect("validate automatically selected preset");
+    assert!(
+        validation.status.success(),
+        "{}",
+        String::from_utf8_lossy(&validation.stderr)
+    );
+    let validation: serde_json::Value =
+        serde_json::from_slice(&validation.stdout).expect("valid validation result");
+    assert_eq!(validation["source"]["kind"], "preset");
+    assert_eq!(validation["source"]["name"], "base");
 }
 
 #[test]
@@ -1721,7 +1879,7 @@ fn explicit_target_overrides_the_configured_target() {
         .expect("canonicalize explicit target");
 
     let plan = Command::new(env!("CARGO_BIN_EXE_dirule"))
-        .args(["plan", "--target", "override"])
+        .args(["plan", "--target", "override", "--config", "dirule.toml"])
         .current_dir(&project.0)
         .output()
         .expect("run dirule");

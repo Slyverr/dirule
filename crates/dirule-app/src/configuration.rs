@@ -8,9 +8,11 @@ use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, TomlError};
 
 mod loader;
+mod selection;
 mod source;
 
 pub use loader::{ConfigurationLoadError, LoadedConfiguration, load, load_source};
+pub use selection::{ConfigurationSelectionError, discover_source};
 pub use source::{ConfigurationSource, ConfigurationSourceKind};
 
 pub struct ConfigEditor {

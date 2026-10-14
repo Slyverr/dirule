@@ -28,7 +28,7 @@ pub(super) fn validate(
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
-    let source = config_source(&cwd, options.rules)?;
+    let source = config_source(&cwd, options.rules, None)?;
     let loaded = load_configuration(&source)?;
     output::validated_config(
         source.kind().as_str(),
@@ -45,13 +45,16 @@ pub(super) fn evaluate(
     options: args::OperationArgs,
 ) -> Result<dirule_app::Preview, Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
-    let source = config_source(&cwd, options.rules)?;
-    dirule_app::preview_source(&source, &cwd, options.target).map_err(preview_source_error)
+    let target = options.target;
+    let source = config_source(&cwd, options.rules, target.clone())?;
+
+    dirule_app::preview_source(&source, &cwd, target).map_err(preview_source_error)
 }
 
 fn config_source(
     cwd: &Path,
     rules: args::RuleSourceArgs,
+    target: Option<std::path::PathBuf>,
 ) -> Result<ConfigurationSource, Box<dyn Error>> {
     if let Some(path) = rules.config {
         return Ok(ConfigurationSource::explicit_file(cwd, path));
@@ -61,7 +64,9 @@ fn config_source(
         return ConfigurationSource::preset(&PresetStore::user()?, &name).map_err(Into::into);
     }
 
-    Ok(ConfigurationSource::project_default(cwd))
+    let presets = PresetStore::user_if_available()?;
+
+    configuration::discover_source(cwd, target, presets.as_ref()).map_err(Into::into)
 }
 
 fn load_configuration(

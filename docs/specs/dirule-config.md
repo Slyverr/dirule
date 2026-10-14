@@ -136,8 +136,10 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 
 - `target` defaults to `.`. An explicit CLI `--target` overrides the configured value.
 - Relative targets and explicit `--config FILE` paths are resolved from the directory where Dirule is run. A target equal to `~` or beginning with `~/` (or `~\\` on Windows) expands against the user's home directory, without shell evaluation. Other environment-variable and command substitutions are not performed.
-- `--config FILE` and `--preset NAME` are mutually exclusive. Each loads exactly the selected source; neither is merged with discovered configuration.
-- Without either option, load `dirule.toml` from the current working directory only. Do not search parent directories. If absent, report an error that points to `init`, `--config`, and `--preset`.
+- `--config FILE` and `--preset NAME` are mutually exclusive and take precedence over discovery. Each loads exactly the selected source; neither is merged with discovered configuration.
+- Without either option, the chosen directory is the explicit `--target`, or the current working directory when `--target` is absent. First load `dirule.toml` directly inside that directory, if present. Do not search parent directories. A present but unreadable or invalid local config is an error; do not silently fall back to a preset.
+- If the chosen directory has no local config, find user presets whose explicitly configured `target` resolves to that same directory. Only absolute paths and supported `~` paths are target bindings; relative preset targets such as `.` are not global bindings. Compare resolved paths so symlink aliases to the same existing directory match. A single match is selected. Multiple matches are an actionable ambiguity error; no matches report that configuration must be selected or created. A preset that cannot be parsed enough to read its `target` is not an implicit-match candidate; selecting it explicitly reports its configuration error. Discovered configurations are never merged.
+- `validate` has no `--target`, so its implicit discovery uses the current working directory. An explicitly selected preset may use its own configured target; an explicit CLI `--target` overrides that preset target for `plan`, `check`, and `apply`.
 
 `dirule validate` loads and compiles the selected configuration without scanning or requiring its target to exist. It accepts the same `--config FILE` and `--preset NAME` options and uses the same current-directory default and source-selection errors. It succeeds only when parsing, migrations, rule validation, and compilation succeed. Human output identifies the selected source and rule count. `--format json` emits a versioned object with `valid`, `source` (`kind` and `name`), and `rule_count` fields. Validation never changes the configuration, target, or user state.
 
@@ -191,7 +193,7 @@ Tests should verify:
 - Apply rejects a source replaced since planning even when the replacement has the same length and modification time.
 - Git ignore behavior for nested rules, tracked paths, global excludes, `.ignore` outside Git, and hidden files; unreadable or malformed ignore files must stop planning.
 - Git metadata entries are skipped at any depth, ordinary hidden project files remain eligible, and targets equal to or inside `.git` metadata are rejected.
-- Explicit target override, configured target, current-directory default, exact config/preset selection, and no parent-directory config search.
+- Explicit source precedence; target-local config selection; exact absolute or home-relative preset-target matches; ambiguity errors; relative preset targets not acting as bindings; explicit target override; no parent-directory config search.
 - Configuration validation accepts a valid config whose target does not exist, rejects invalid config and preset sources, and does not scan or mutate the target.
 - `check` succeeds when paths satisfy the rules and fails for a proposed path change or conflict without changing the filesystem.
 - `check` exits with status `0` when paths satisfy the rules, status `1` when a proposed change or conflict is found, and status `2` when an error prevents evaluation.

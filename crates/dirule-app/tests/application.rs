@@ -43,6 +43,17 @@ impl Drop for TempTarget {
     }
 }
 
+fn config_with_target(target: Option<&Path>) -> String {
+    let target = target
+        .map(|path| format!("target = {:?}\n", path.to_string_lossy()))
+        .unwrap_or_default();
+
+    format!(
+        "version = \"{}\"\n{target}\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION
+    )
+}
+
 #[test]
 fn preview_and_authorized_apply_share_the_operation_api() {
     let target = TempTarget::new();
@@ -250,6 +261,186 @@ fn configuration_sources_resolve_project_files_and_named_presets() {
         preset.kind(),
         dirule_app::configuration::ConfigurationSourceKind::Preset
     );
+}
+
+#[test]
+fn implicit_config_discovery_prefers_a_target_local_config() {
+    let base = TempTarget::new();
+    let target = base.join("nested-project");
+    fs::create_dir(&target).expect("create target directory");
+    fs::write(
+        target.join("dirule.toml"),
+        config_with_target(Some(Path::new("."))),
+    )
+    .expect("write target-local config");
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("matching", &config_with_target(Some(&target)))
+        .expect("save matching preset");
+
+    let source = dirule_app::configuration::discover_source(
+        &base,
+        Some(PathBuf::from("nested-project")),
+        Some(&presets),
+    )
+    .expect("discover source");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::ProjectDefault
+    );
+    assert_eq!(source.path(), target.join("dirule.toml"));
+}
+
+#[test]
+fn invalid_target_local_config_does_not_fall_back_to_a_matching_preset() {
+    let base = TempTarget::new();
+    let target = base.join("nested-project");
+    fs::create_dir(&target).expect("create target directory");
+    fs::write(target.join("dirule.toml"), "version = [").expect("write invalid local config");
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("matching", &config_with_target(Some(&target)))
+        .expect("save matching preset");
+
+    let source = dirule_app::configuration::discover_source(
+        &base,
+        Some(PathBuf::from("nested-project")),
+        Some(&presets),
+    )
+    .expect("discover local source");
+    let error = dirule_app::configuration::load_source(&source)
+        .expect_err("invalid local config should be reported");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::ProjectDefault
+    );
+    assert!(error.to_string().contains("dirule.toml"));
+}
+
+#[test]
+fn implicit_config_discovery_selects_one_exact_global_preset_target() {
+    let base = TempTarget::new();
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("downloads", &config_with_target(Some(&base)))
+        .expect("save target-bound preset");
+
+    let source = dirule_app::configuration::discover_source(&base, None, Some(&presets))
+        .expect("discover source");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::Preset
+    );
+    assert_eq!(source.name(), "downloads");
+    assert_eq!(source.path(), presets.directory().join("downloads.toml"));
+}
+
+#[test]
+fn invalid_unrelated_presets_do_not_block_target_discovery() {
+    let base = TempTarget::new();
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("downloads", &config_with_target(Some(&base)))
+        .expect("save target-bound preset");
+    fs::write(presets.directory().join("broken.toml"), "version = [")
+        .expect("write malformed unrelated preset");
+
+    let source = dirule_app::configuration::discover_source(&base, None, Some(&presets))
+        .expect("discover target-bound preset despite unrelated malformed preset");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::Preset
+    );
+    assert_eq!(source.name(), "downloads");
+}
+
+#[test]
+fn implicit_discovery_normalizes_nonexistent_target_paths() {
+    let base = TempTarget::new();
+    let target = base.join("project");
+    let target_with_parent = base.join("missing/../project");
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("project", &config_with_target(Some(&target)))
+        .expect("save target-bound preset");
+
+    let source =
+        dirule_app::configuration::discover_source(&base, Some(target_with_parent), Some(&presets))
+            .expect("discover preset for normalized path");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::Preset
+    );
+    assert_eq!(source.name(), "project");
+}
+
+#[test]
+fn implicit_config_discovery_rejects_ambiguous_preset_targets() {
+    let base = TempTarget::new();
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    for name in ["downloads", "archive"] {
+        presets
+            .save_contents(name, &config_with_target(Some(&base)))
+            .expect("save target-bound preset");
+    }
+
+    let error = dirule_app::configuration::discover_source(&base, None, Some(&presets))
+        .expect_err("ambiguous target bindings");
+
+    assert!(error.to_string().contains("multiple presets target"));
+    assert!(error.to_string().contains("archive, downloads"));
+}
+
+#[test]
+fn relative_preset_targets_do_not_bind_to_the_invocation_directory() {
+    let base = TempTarget::new();
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("relative", &config_with_target(Some(Path::new("."))))
+        .expect("save relative-target preset");
+
+    let source = dirule_app::configuration::discover_source(&base, None, Some(&presets))
+        .expect("discover source");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::ProjectDefault
+    );
+    assert_eq!(source.path(), base.join("dirule.toml"));
+}
+
+#[cfg(unix)]
+#[test]
+fn implicit_config_discovery_matches_symlinked_target_paths() {
+    use std::os::unix::fs::symlink;
+
+    let base = TempTarget::new();
+    let target = base.join("project");
+    let target_alias = base.join("project-alias");
+    fs::create_dir(&target).expect("create target directory");
+    symlink(&target, &target_alias).expect("create target symlink");
+    let presets = PresetStore::new(base.join("presets")).expect("create preset store");
+    presets
+        .save_contents("project", &config_with_target(Some(&target)))
+        .expect("save target-bound preset");
+
+    let source = dirule_app::configuration::discover_source(
+        &base,
+        Some(PathBuf::from("project-alias")),
+        Some(&presets),
+    )
+    .expect("discover source through symlink");
+
+    assert_eq!(
+        source.kind(),
+        dirule_app::configuration::ConfigurationSourceKind::Preset
+    );
+    assert_eq!(source.name(), "project");
 }
 
 #[test]

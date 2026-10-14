@@ -38,10 +38,15 @@ pub enum PresetError {
 
 impl PresetStore {
     pub fn user() -> Result<Self, PresetError> {
-        let base =
-            super::paths::user_config_directory().ok_or(PresetError::UserDirectoryUnavailable)?;
+        Self::user_if_available()?.ok_or(PresetError::UserDirectoryUnavailable)
+    }
 
-        Self::new(base.join("dirule").join("presets"))
+    pub fn user_if_available() -> Result<Option<Self>, PresetError> {
+        let Some(base) = super::paths::user_config_directory() else {
+            return Ok(None);
+        };
+
+        Self::new(base.join("dirule").join("presets")).map(Some)
     }
 
     pub fn new(directory: impl Into<PathBuf>) -> Result<Self, PresetError> {
@@ -126,6 +131,29 @@ impl PresetStore {
             config,
             contents,
         })
+    }
+
+    pub fn configured_target(&self, name: &str) -> Result<Option<PathBuf>, PresetError> {
+        let path = self.path(name)?;
+        let contents = fs::read_to_string(&path).map_err(|source| {
+            if source.kind() == io::ErrorKind::NotFound {
+                PresetError::NotFound(path.clone())
+            } else {
+                PresetError::Io {
+                    action: "read",
+                    path: path.clone(),
+                    source,
+                }
+            }
+        })?;
+        let Ok(document) = contents.parse::<toml_edit::DocumentMut>() else {
+            return Ok(None);
+        };
+
+        Ok(document
+            .get("target")
+            .and_then(toml_edit::Item::as_str)
+            .map(PathBuf::from))
     }
 
     pub fn save(&self, name: &str, source_path: &Path) -> Result<PathBuf, PresetError> {

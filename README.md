@@ -69,6 +69,8 @@ Targets equal to `~` or beginning with `~/` expand against the user's home direc
 
 JSON plans include the canonical target path; their source and destination paths are target-relative and use `/` separators on every platform.
 
+Without `--config` or `--preset`, Dirule looks for `dirule.toml` directly inside the selected target (the current directory if `--target` is omitted). If it is absent, Dirule can select one user preset whose absolute or `~/` target resolves to that same directory. Multiple matches are an error. Relative preset targets do not bind globally, and Dirule does not search parent directories. Explicit `--config` and `--preset` always take precedence.
+
 ## Quick operations
 
 Sort files or rename entries without creating a configuration. These commands preview changes by default; pass `--apply` to request changes and `--yes` only when a non-interactive run should skip confirmation.
