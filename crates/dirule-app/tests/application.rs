@@ -94,6 +94,37 @@ fn starter_configuration_requires_an_absolute_path() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn starter_configuration_uses_standard_create_permissions() {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::PermissionsExt;
+
+    let target = TempTarget::new();
+    let reference_path = target.join("reference");
+    let config_path = target.join("dirule.toml");
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(reference_path)
+        .expect("create reference file");
+
+    dirule_app::configuration::create_starter(&config_path).expect("create starter config");
+
+    let reference_mode = fs::metadata(target.join("reference"))
+        .expect("read reference metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    let config_mode = fs::metadata(config_path)
+        .expect("read config metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(config_mode, reference_mode);
+}
+
 #[test]
 fn preview_and_authorized_apply_share_the_operation_api() {
     let target = TempTarget::new();
