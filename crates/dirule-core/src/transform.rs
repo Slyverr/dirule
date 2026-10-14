@@ -11,6 +11,15 @@ pub enum Transform {
 }
 
 impl Transform {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SnakeCase => "snake-case",
+            Self::KebabCase => "kebab-case",
+            Self::CamelCase => "camel-case",
+            Self::PascalCase => "pascal-case",
+        }
+    }
+
     pub fn parse(name: &str) -> Result<Self> {
         match name {
             "snake-case" => Ok(Self::SnakeCase),

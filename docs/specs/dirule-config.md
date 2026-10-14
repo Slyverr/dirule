@@ -42,7 +42,7 @@ Rules are evaluated in declaration order. The first rule matching both the entry
 
 ## Matching
 
-Patterns match the complete path relative to the selected target. `/` is the separator in configuration patterns on every platform. Matching is case-sensitive. The supported glob syntax is:
+Patterns match the complete path relative to the selected target. `/` is the separator in configuration patterns on every platform. Matching is case-sensitive by default. `(?i)` switches the following part of the current component to case-insensitive matching; `(?-i)` switches it back. The supported glob syntax is:
 
 | Syntax | Meaning |
 | --- | --- |
@@ -52,6 +52,7 @@ Patterns match the complete path relative to the selected target. `/` is the sep
 | `[!abc]` | One character outside a set. |
 | `{jpg,png}` | One alternative; nested alternatives are unsupported. |
 | `**` | Zero or more path components. |
+| `(?i)`, `(?-i)` | Switch case-insensitive matching on or off for the remainder of the component. |
 | `<name>` | Capture one or more characters within a component, ending at the next literal delimiter or `/`. |
 | `\*` | Literal `*`; in TOML, use a literal string such as `match = '\*'`. |
 

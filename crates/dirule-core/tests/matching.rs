@@ -61,6 +61,15 @@ fn tree_globs_match_root_and_nested_paths_case_sensitively() {
 }
 
 #[test]
+fn matching_flags_can_select_case_insensitive_components() {
+    let matcher = Matcher::new("**/*.(?i)pdf").expect("valid glob pattern");
+
+    assert!(matcher.is_match("invoice.PDF"));
+    assert!(matcher.is_match("archive/Invoice.Pdf"));
+    assert!(!matcher.is_match("archive/PDF.invoice"));
+}
+
+#[test]
 fn supports_character_classes_question_marks_and_alternatives() {
     let matcher = Matcher::new("archive/[!a-c]?.{pdf,png}").expect("valid glob pattern");
 

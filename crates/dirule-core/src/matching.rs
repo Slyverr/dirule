@@ -113,9 +113,6 @@ fn compile_named_captures(pattern: &str) -> Result<(String, Vec<(String, usize)>
             continue;
         }
         match chars[cursor] {
-            '(' if chars.get(cursor + 1) == Some(&'?') => {
-                return Err(Error::Pattern("matching flags are not supported".into()));
-            }
             '\\' => {
                 output.push(chars[cursor]);
                 cursor += 1;

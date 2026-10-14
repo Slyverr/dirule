@@ -43,6 +43,19 @@ fn handles_case_boundaries_dotfiles_and_extensions() {
 }
 
 #[test]
+fn transform_names_round_trip_through_their_canonical_spelling() {
+    for (name, expected) in [
+        ("snake-case", Transform::SnakeCase),
+        ("kebab-case", Transform::KebabCase),
+        ("camel-case", Transform::CamelCase),
+        ("pascal-case", Transform::PascalCase),
+    ] {
+        assert_eq!(Transform::parse(name).unwrap(), expected);
+        assert_eq!(expected.as_str(), name);
+    }
+}
+
+#[test]
 fn directory_transforms_preserve_hidden_prefixes() {
     let acronyms = AcronymLexicon::default();
 

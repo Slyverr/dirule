@@ -1,4 +1,4 @@
-use dirule_core::{Config, Plan, plan};
+use dirule_core::{AcronymOptions, Config, Plan, Rule, RuleKind, Transform, plan};
 use dirule_fs::{
     ApplyError, ApplyReport, ConflictPolicy, JournalStore, ScanError, ScanResult, apply_journaled,
     scan, validate_destinations,
@@ -22,6 +22,7 @@ pub struct Applied {
 
 #[derive(Debug)]
 pub enum PreviewError {
+    Operation(String),
     Target {
         path: PathBuf,
         source: std::io::Error,
@@ -34,6 +35,7 @@ pub enum PreviewError {
 impl fmt::Display for PreviewError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Operation(message) => formatter.write_str(message),
             Self::Target { path, source } => {
                 write!(
                     formatter,
@@ -51,11 +53,91 @@ impl fmt::Display for PreviewError {
 impl Error for PreviewError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Operation(_) => None,
             Self::Target { source, .. } => Some(source),
             Self::Scan(source) => Some(source),
             Self::Plan(source) => Some(source),
             Self::Destinations(source) => Some(source),
         }
+    }
+}
+
+pub fn rename_preview(
+    target: &Path,
+    transform: Transform,
+    recursive: bool,
+) -> Result<Preview, PreviewError> {
+    let pattern = if recursive { "**/*" } else { "*" };
+    let config = quick_config(vec![Rule {
+        name: "Rename entries".into(),
+        pattern: pattern.into(),
+        kind: RuleKind::Any,
+        exclude: Vec::new(),
+        to: format!("builtin:{}", transform.as_str()),
+    }]);
+
+    preview(&config, target)
+}
+
+pub fn sort_extension_preview(
+    target: &Path,
+    extension: &str,
+    recursive: bool,
+) -> Result<Preview, PreviewError> {
+    let extension = extension.strip_prefix('.').unwrap_or(extension);
+    if extension.is_empty()
+        || !extension
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Err(PreviewError::Operation(
+            "extension must contain only ASCII letters and digits".into(),
+        ));
+    }
+
+    let extension = extension.to_ascii_lowercase();
+    let pattern = format!("?*.(?i){extension}");
+    let pattern = if recursive {
+        format!("**/{pattern}")
+    } else {
+        pattern
+    };
+    let rules = vec![sort_rule(
+        "Sort matching files",
+        pattern,
+        "${extension|kebab-case}s/${name}",
+    )];
+
+    preview(&quick_config(rules), target)
+}
+
+pub fn sort_by_extension_preview(target: &Path, recursive: bool) -> Result<Preview, PreviewError> {
+    let pattern = if recursive { "**/?*.*" } else { "?*.*" };
+    let rules = vec![sort_rule(
+        "Sort files by extension",
+        pattern.into(),
+        "${extension|kebab-case}s/${name}",
+    )];
+
+    preview(&quick_config(rules), target)
+}
+
+fn sort_rule(name: &str, pattern: String, destination: &str) -> Rule {
+    Rule {
+        name: name.into(),
+        pattern,
+        kind: RuleKind::File,
+        exclude: Vec::new(),
+        to: format!("template:{destination}"),
+    }
+}
+
+fn quick_config(rules: Vec<Rule>) -> Config {
+    Config {
+        name: Some("Quick operation".into()),
+        target: None,
+        acronyms: AcronymOptions::default(),
+        rules,
     }
 }
 

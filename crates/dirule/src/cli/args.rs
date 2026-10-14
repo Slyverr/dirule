@@ -30,6 +30,10 @@ pub(super) enum CliCommand {
     Plan(OperationArgs),
     /// Review and apply a plan.
     Apply(ApplyArgs),
+    /// Sort files into extension-based directories.
+    Sort(SortArgs),
+    /// Rename entry names with a built-in transformation.
+    Rename(RenameArgs),
     /// Manage global presets.
     Presets(PresetsArgs),
     /// Inspect saved apply runs.
@@ -50,6 +54,8 @@ impl CliCommand {
             Self::Check(options) | Self::Plan(options) => options.format,
             Self::Validate(options) => options.format,
             Self::Apply(options) => options.operation.format,
+            Self::Sort(options) => options.operation.format,
+            Self::Rename(options) => options.operation.format,
             Self::Presets(options) => match &options.command {
                 PresetsCommand::List { format } => *format,
                 PresetsCommand::Save(_)
@@ -117,6 +123,91 @@ pub(super) struct ApplyArgs {
     /// Choose whether conflicts abort the operation or skip affected paths.
     #[arg(long, value_enum, default_value_t = ConflictAction::Abort)]
     pub(super) on_conflict: ConflictAction,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct SortArgs {
+    /// Match this extension, case-insensitively.
+    #[arg(
+        value_name = "EXTENSION",
+        conflicts_with = "by",
+        required_unless_present = "by"
+    )]
+    pub(super) extension: Option<String>,
+
+    /// Sort by a supported file property.
+    #[arg(long, value_enum, conflicts_with = "extension")]
+    pub(super) by: Option<SortBy>,
+
+    #[command(flatten)]
+    pub(super) operation: QuickOperationArgs,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub(super) enum SortBy {
+    Extension,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct RenameArgs {
+    /// Built-in naming transformation.
+    #[arg(value_enum)]
+    pub(super) transform: NameTransform,
+
+    #[command(flatten)]
+    pub(super) operation: QuickOperationArgs,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub(super) enum NameTransform {
+    #[value(name = "snake-case")]
+    Snake,
+    #[value(name = "kebab-case")]
+    Kebab,
+    #[value(name = "camel-case")]
+    Camel,
+    #[value(name = "pascal-case")]
+    Pascal,
+}
+
+impl From<NameTransform> for dirule_core::Transform {
+    fn from(transform: NameTransform) -> Self {
+        match transform {
+            NameTransform::Snake => Self::SnakeCase,
+            NameTransform::Kebab => Self::KebabCase,
+            NameTransform::Camel => Self::CamelCase,
+            NameTransform::Pascal => Self::PascalCase,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct QuickOperationArgs {
+    /// Directory to process; defaults to the current directory.
+    #[arg(short, long, value_name = "PATH")]
+    pub(super) target: Option<PathBuf>,
+
+    /// Include entries below the target directory.
+    #[arg(long)]
+    pub(super) recursive: bool,
+
+    /// Apply the preview after confirmation.
+    #[arg(long)]
+    pub(super) apply: bool,
+
+    /// Skip the confirmation prompt; requires --apply.
+    #[arg(short, long, requires = "apply")]
+    pub(super) yes: bool,
+
+    /// Choose whether conflicts abort or skip affected paths.
+    #[arg(long, value_enum, default_value_t = ConflictAction::Abort)]
+    pub(super) on_conflict: ConflictAction,
+
+    /// Output as human-readable text or JSON.
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
+    pub(super) format: OutputFormat,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
@@ -325,6 +416,52 @@ mod tests {
             Some(std::path::Path::new("rules.toml"))
         );
         assert_eq!(format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn quick_operations_parse_preview_and_apply_options() {
+        let sort = Cli::try_parse_from([
+            "dirule",
+            "sort",
+            "--by",
+            "extension",
+            "--target",
+            "/tmp/files",
+            "--recursive",
+            "--apply",
+            "--yes",
+            "--format",
+            "json",
+        ])
+        .expect("valid extension sort options");
+        let CliCommand::Sort(sort) = sort.command else {
+            panic!("expected sort command");
+        };
+        assert_eq!(sort.by, Some(super::SortBy::Extension));
+        assert!(sort.operation.recursive);
+        assert!(sort.operation.apply);
+        assert!(sort.operation.yes);
+        assert_eq!(sort.operation.format, OutputFormat::Json);
+
+        let rename =
+            Cli::try_parse_from(["dirule", "rename", "kebab-case", "--target", "/tmp/files"])
+                .expect("valid rename preview options");
+        let CliCommand::Rename(rename) = rename.command else {
+            panic!("expected rename command");
+        };
+        assert_eq!(rename.transform, super::NameTransform::Kebab);
+        assert!(!rename.operation.apply);
+    }
+
+    #[test]
+    fn quick_operations_require_confirmation_skip_to_follow_apply() {
+        let error = Cli::try_parse_from(["dirule", "rename", "snake-case", "--yes"])
+            .expect_err("--yes without --apply");
+
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]

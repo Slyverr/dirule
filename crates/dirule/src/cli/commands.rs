@@ -145,6 +145,8 @@ pub(super) fn run(
             )?;
             Ok(())
         }
+        args::CliCommand::Sort(options) => super::quick::sort(options, color),
+        args::CliCommand::Rename(options) => super::quick::rename(options, color),
         args::CliCommand::Presets(options) => match options.command {
             args::PresetsCommand::List { format } => presets::list(format, color),
             args::PresetsCommand::Save(options) => presets::save(options, color),

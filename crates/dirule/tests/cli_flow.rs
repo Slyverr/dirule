@@ -229,6 +229,221 @@ fn cli_initializes_checks_plans_applies_and_emits_json() {
 }
 
 #[test]
+fn quick_rename_previews_applies_and_undoes_without_a_config() {
+    let project = TempProject::new();
+    fs::write(project.0.join("MyXMLParser.pdf"), "document").expect("write source file");
+
+    let preview = project.run(&["rename", "kebab-case", "--format", "json"]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid rename preview");
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "MyXMLParser.pdf" && entry["destination"] == "my-xml-parser.pdf"
+    }));
+    assert!(project.0.join("MyXMLParser.pdf").is_file());
+    assert!(!project.0.join("my-xml-parser.pdf").exists());
+
+    let apply = project.run(&[
+        "rename",
+        "kebab-case",
+        "--apply",
+        "--yes",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("valid apply result");
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    assert!(project.0.join("my-xml-parser.pdf").is_file());
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(project.0.join("MyXMLParser.pdf").is_file());
+}
+
+#[test]
+fn quick_sort_matches_extension_case_insensitively_and_defaults_to_preview() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Invoice.PDF"), "invoice").expect("write uppercase extension");
+    fs::write(project.0.join("notes.txt"), "notes").expect("write unrelated file");
+
+    let preview = project.run(&["sort", "pdf", "--format", "json"]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid sort preview");
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Invoice.PDF" && entry["destination"] == "pdfs/Invoice.PDF"
+    }));
+    assert!(project.0.join("Invoice.PDF").is_file());
+    assert!(!project.0.join("pdfs/Invoice.PDF").exists());
+
+    let apply = project.run(&["sort", "pdf", "--apply", "--yes", "--format", "json"]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("valid apply result");
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    assert!(project.0.join("pdfs/Invoice.PDF").is_file());
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(project.0.join("Invoice.PDF").is_file());
+}
+
+#[test]
+fn quick_sort_apply_requires_confirmation_without_yes() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Invoice.pdf"), "invoice").expect("write source invoice");
+
+    let output = project
+        .command(&["sort", "pdf", "--apply", "--format", "json"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run quick sort without an interactive terminal");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(project.0.join("Invoice.pdf").is_file());
+    assert!(!project.0.join("pdfs/Invoice.pdf").exists());
+}
+
+#[test]
+fn quick_recursive_sort_collects_files_in_target_level_buckets() {
+    let project = TempProject::new();
+    fs::write(project.0.join("ReadMe.MD"), "readme").expect("write root markdown file");
+    fs::create_dir_all(project.0.join("docs")).expect("create docs directory");
+    fs::write(project.0.join("docs/Guide.PDF"), "guide").expect("write nested PDF");
+
+    let preview = project.run(&[
+        "sort",
+        "--by",
+        "extension",
+        "--recursive",
+        "--format",
+        "json",
+    ]);
+
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid extension sort preview");
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "ReadMe.MD" && entry["destination"] == "mds/ReadMe.MD"
+    }));
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "docs/Guide.PDF" && entry["destination"] == "pdfs/Guide.PDF"
+    }));
+    assert!(project.0.join("ReadMe.MD").is_file());
+    assert!(project.0.join("docs/Guide.PDF").is_file());
+
+    let apply = project.run(&[
+        "sort",
+        "--by",
+        "extension",
+        "--recursive",
+        "--apply",
+        "--yes",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(project.0.join("mds/ReadMe.MD").is_file());
+    assert!(project.0.join("pdfs/Guide.PDF").is_file());
+
+    let repeated = project.run(&[
+        "sort",
+        "--by",
+        "extension",
+        "--recursive",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        repeated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    let repeated: serde_json::Value =
+        serde_json::from_slice(&repeated.stdout).expect("valid repeated sort plan");
+    assert!(repeated["conflicts"].as_array().unwrap().is_empty());
+    assert!(
+        repeated["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| { entry["source"] == entry["destination"] })
+    );
+}
+
+#[test]
+fn quick_sort_reports_duplicate_recursive_destinations_without_mutating() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join("invoices-a")).expect("create first invoice directory");
+    fs::create_dir_all(project.0.join("invoices-b")).expect("create second invoice directory");
+    fs::write(project.0.join("invoices-a/April.PDF"), "first").expect("write first invoice");
+    fs::write(project.0.join("invoices-b/April.PDF"), "second").expect("write second invoice");
+
+    let output = project.run(&["sort", "pdf", "--recursive", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan");
+    assert!(!plan["conflicts"].as_array().unwrap().is_empty());
+    assert_eq!(text(&project.0.join("invoices-a/April.PDF")), "first");
+    assert_eq!(text(&project.0.join("invoices-b/April.PDF")), "second");
+    assert!(!project.0.join("pdfs").exists());
+}
+
+#[test]
+fn quick_sort_reports_existing_destinations_without_overwriting() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Invoice.pdf"), "source").expect("write source invoice");
+    fs::create_dir_all(project.0.join("pdfs")).expect("create destination bucket");
+    fs::write(project.0.join("pdfs/Invoice.pdf"), "existing").expect("write existing destination");
+
+    let output = project.run(&["sort", "pdf", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan");
+    assert!(!plan["conflicts"].as_array().unwrap().is_empty());
+    assert_eq!(text(&project.0.join("Invoice.pdf")), "source");
+    assert_eq!(text(&project.0.join("pdfs/Invoice.pdf")), "existing");
+}
+
+#[test]
 fn cli_plans_pascal_case_names_in_text_and_json() {
     let project = TempProject::new();
     fs::write(project.0.join("my-xml-parser.rs"), "parser").expect("write fixture file");

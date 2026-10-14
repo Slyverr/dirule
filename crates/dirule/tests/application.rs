@@ -1,18 +1,44 @@
 use dirule_core::parse_config;
 use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
-use std::path::Path;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+struct TempTarget(PathBuf);
+
+impl TempTarget {
+    fn new() -> Self {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock is after Unix epoch")
+            .as_nanos();
+        let target =
+            std::env::temp_dir().join(format!("dirule-application-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&target).expect("create target");
+
+        Self(target)
+    }
+}
+
+impl Deref for TempTarget {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for TempTarget {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(self.0.with_extension("journal"));
+    }
+}
 
 #[test]
 fn preview_and_authorized_apply_share_the_operation_api() {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock is after Unix epoch")
-        .as_nanos();
-    let target =
-        std::env::temp_dir().join(format!("dirule-application-{}-{stamp}", std::process::id()));
-    fs::create_dir_all(&target).expect("create target");
+    let target = TempTarget::new();
     let source = target.join("MyFile.txt");
     fs::write(&source, "content").expect("write source file");
     let config = parse_config(
@@ -27,16 +53,16 @@ to = "builtin:kebab-case"
     )
     .expect("parse config");
 
-    let preview = dirule::application::preview(&config, &target).expect("preview target");
+    let preview = dirule::application::preview(&config, &target.0).expect("preview target");
 
-    assert_eq!(preview.target, target.canonicalize().unwrap());
+    assert_eq!(preview.target, target.0.canonicalize().unwrap());
     assert!(preview.plan.entries.iter().any(|entry| {
         entry.source == Path::new("MyFile.txt") && entry.destination == Path::new("my-file.txt")
     }));
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
 
-    let journal = JournalStore::new(target.with_extension("journal"));
+    let journal = JournalStore::new(target.0.with_extension("journal"));
     let applied = dirule::application::apply_authorized(preview, ConflictPolicy::Abort, &journal)
         .expect("apply authorized plan");
     let run_id = applied.run_id.as_deref().expect("journaled run ID");
@@ -47,7 +73,79 @@ to = "builtin:kebab-case"
     journal.undo(run_id).expect("undo applied plan");
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
+}
 
-    fs::remove_dir_all(&target).expect("remove target");
-    fs::remove_dir_all(target.with_extension("journal")).expect("remove test journal");
+#[test]
+fn sort_by_extension_normalizes_suffixes_and_leaves_dotfiles_alone() {
+    let target = TempTarget::new();
+    fs::write(target.join("archive.tar.GZ"), "archive").expect("write multi-extension file");
+    fs::write(target.join(".profile"), "profile").expect("write dotfile");
+    fs::create_dir_all(target.join("nested")).expect("create nested directory");
+    fs::write(target.join("nested/Report.PDF"), "report").expect("write nested PDF");
+
+    let preview = dirule::application::sort_by_extension_preview(&target.0, true)
+        .expect("preview extension sort");
+
+    assert!(preview.plan.conflicts.is_empty(), "{:#?}", preview.plan);
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("archive.tar.GZ")
+            && entry.destination == Path::new("gzs/archive.tar.GZ")
+    }));
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("nested/Report.PDF")
+            && entry.destination == Path::new("pdfs/Report.PDF")
+    }));
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new(".profile") && entry.destination == Path::new(".profile")
+    }));
+    assert!(target.join("archive.tar.GZ").is_file());
+    assert!(!target.join("gzs/archive.tar.GZ").exists());
+}
+
+#[test]
+fn sort_extension_matches_case_insensitively_without_recursing_by_default() {
+    let target = TempTarget::new();
+    fs::write(target.join("Invoice.PDF"), "invoice").expect("write PDF");
+    fs::create_dir_all(target.join("nested")).expect("create nested directory");
+    fs::write(target.join("nested/Report.pdf"), "report").expect("write nested PDF");
+
+    let preview = dirule::application::sort_extension_preview(&target.0, ".PDF", false)
+        .expect("preview case-insensitive extension sort");
+
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("Invoice.PDF")
+            && entry.destination == Path::new("pdfs/Invoice.PDF")
+    }));
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("nested/Report.pdf")
+            && entry.destination == Path::new("nested/Report.pdf")
+    }));
+    assert!(target.join("Invoice.PDF").is_file());
+    assert!(!target.join("pdfs/Invoice.PDF").exists());
+}
+
+#[test]
+fn rename_preview_uses_shared_transforms_and_inherits_directory_moves() {
+    let target = TempTarget::new();
+    fs::create_dir_all(target.join("HTTPServer")).expect("create source directory");
+    fs::write(target.join("HTTPServer/ReadMe.txt"), "notes").expect("write nested file");
+    fs::write(target.join("MyXMLParser.pdf"), "document").expect("write source file");
+
+    let preview =
+        dirule::application::rename_preview(&target.0, dirule_core::Transform::KebabCase, false)
+            .expect("preview rename operation");
+
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("MyXMLParser.pdf")
+            && entry.destination == Path::new("my-xml-parser.pdf")
+    }));
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("HTTPServer") && entry.destination == Path::new("http-server")
+    }));
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("HTTPServer/ReadMe.txt")
+            && entry.destination == Path::new("http-server/ReadMe.txt")
+    }));
+    assert!(target.join("MyXMLParser.pdf").is_file());
+    assert!(target.join("HTTPServer/ReadMe.txt").is_file());
 }
