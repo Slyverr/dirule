@@ -32,4 +32,6 @@ The `message` is for display and may change between releases. Consumers should b
 
 When `check --format json` finds violations, stdout contains the versioned plan result and stderr contains the `check_failed` document. These are separate streams; Dirule never concatenates multiple JSON documents into one stream.
 
+For `apply --format json`, the apply result is written to stdout. If changes need confirmation and `--yes` was not supplied, Dirule writes a human-readable plan preview to stderr before prompting. In a non-interactive session, the confirmation error is also written to stderr as a JSON error document. Therefore, stderr is not JSON-only in this confirmation-required case. Automation should preview with `plan --format json` and apply with `--yes --format json`.
+
 Plan arrays have deterministic ordering for the same target and configuration. Entries follow planner order, conflicts follow planner order, and findings preserve planner order followed by scanner findings sorted lexically.
