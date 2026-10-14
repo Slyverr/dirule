@@ -1,26 +1,33 @@
-mod json;
-
 use super::args::{ColorChoice, OutputFormat};
-use dirule_core::Plan;
-use dirule_fs::{JournalDetails, JournalRun, JournalStatus};
 use std::ffi::OsStr;
 use std::fmt;
-use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, IsTerminal};
+use std::path::Path;
 
 macro_rules! println {
-    ($($argument:tt)*) => {
-        writeln!(io::stdout().lock(), $($argument)*)?
-    };
+    ($($argument:tt)*) => {{
+        use std::io::Write as _;
+        writeln!(std::io::stdout().lock(), $($argument)*)?
+    }};
 }
 
 macro_rules! eprintln {
-    ($($argument:tt)*) => {
-        writeln!(io::stderr().lock(), $($argument)*)?
-    };
+    ($($argument:tt)*) => {{
+        use std::io::Write as _;
+        writeln!(std::io::stderr().lock(), $($argument)*)?
+    }};
 }
 
 const CURRENT_OUTPUT_VERSION: &str = "1.0";
+
+mod apply;
+mod journal;
+mod json;
+mod plan;
+
+pub(super) use apply::{ApplyStatus, ApplySummary, apply_result};
+pub(super) use journal::{run_details, runs, undo_result};
+pub(super) use plan::{PlanContext, json_apply_preview_needed, plan, plan_to_stderr};
 
 pub(super) fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool {
     error
@@ -80,27 +87,6 @@ impl<T: fmt::Display> fmt::Display for Styled<T> {
 
         Ok(())
     }
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum PlanContext {
-    Preview,
-    Check,
-    Apply,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum ApplyStatus {
-    Applied,
-    NoChanges,
-    Cancelled,
-}
-
-pub(super) struct ApplySummary<'a> {
-    pub(super) status: ApplyStatus,
-    pub(super) moved: usize,
-    pub(super) skipped: usize,
-    pub(super) run_id: Option<&'a str>,
 }
 
 pub(super) fn created_config(path: &Path, color: ColorChoice) -> io::Result<()> {
@@ -243,358 +229,6 @@ pub(super) fn error(
     Ok(())
 }
 
-pub(super) fn plan(
-    target: &Path,
-    plan: &Plan,
-    format: OutputFormat,
-    color: ColorChoice,
-    context: PlanContext,
-    verbose: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if format == OutputFormat::Json {
-        json::write_plan(target, plan)?;
-
-        return Ok(());
-    }
-
-    let stdout = io::stdout();
-    let mut writer = stdout.lock();
-
-    write_text_plan(
-        &mut writer,
-        target,
-        plan,
-        Colorizer::stdout(color),
-        context,
-        verbose,
-    )?;
-
-    Ok(())
-}
-
-pub(super) fn plan_to_stderr(
-    target: &Path,
-    plan: &Plan,
-    color: ColorChoice,
-    context: PlanContext,
-    verbose: bool,
-) -> io::Result<()> {
-    let stderr = io::stderr();
-    let mut writer = stderr.lock();
-
-    write_text_plan(
-        &mut writer,
-        target,
-        plan,
-        Colorizer::stderr(color),
-        context,
-        verbose,
-    )
-}
-
-pub(super) fn json_apply_preview_needed(format: OutputFormat, yes: bool, plan: &Plan) -> bool {
-    format == OutputFormat::Json && !yes && (plan.has_changes() || !plan.is_conflict_free())
-}
-
-fn write_text_plan<W: Write>(
-    writer: &mut W,
-    target: &Path,
-    plan: &Plan,
-    styles: Colorizer,
-    context: PlanContext,
-    verbose: bool,
-) -> io::Result<()> {
-    let changes = plan
-        .entries
-        .iter()
-        .filter(|entry| entry.source != entry.destination)
-        .count();
-    let (label, heading_color) = match context {
-        PlanContext::Preview => ("Plan preview", "36"),
-        PlanContext::Check if changes == 0 && plan.conflicts.is_empty() => ("Check passed", "32"),
-        PlanContext::Check => ("Check failed", "31"),
-        PlanContext::Apply => ("Apply preview", "36"),
-    };
-    writeln!(writer, "{}", styles.style(label, heading_color))?;
-    writeln!(
-        writer,
-        "  {} {}",
-        styles.style("Target:", "36"),
-        styles.style(target.display(), "36")
-    )?;
-    writeln!(
-        writer,
-        "  {} rename(s), {} conflict(s), {} finding(s)",
-        changes,
-        plan.conflicts.len(),
-        plan.findings.len()
-    )?;
-
-    if changes > 0 {
-        writeln!(writer, "\nChanges:")?;
-        for entry in &plan.entries {
-            if entry.source != entry.destination {
-                let attribution = if verbose {
-                    let detail = entry
-                        .rule
-                        .as_deref()
-                        .map(|rule| format!("rule: {rule}"))
-                        .unwrap_or_else(|| "inherited from directory rename".to_owned());
-                    format!(" [{}]", styles.style(&detail, "36"))
-                } else {
-                    String::new()
-                };
-
-                writeln!(
-                    writer,
-                    "  {} -> {}{}",
-                    styles.style(entry.source.display(), "31"),
-                    styles.style(entry.destination.display(), "32"),
-                    attribution
-                )?;
-            }
-        }
-    } else if plan.conflicts.is_empty() && plan.findings.is_empty() {
-        writeln!(writer, "\nNo changes needed.")?;
-    }
-
-    if !plan.conflicts.is_empty() {
-        writeln!(writer, "\nConflicts:")?;
-        for conflict in &plan.conflicts {
-            writeln!(
-                writer,
-                "  {} {} ({})",
-                styles.style("!", "31"),
-                conflict.path.display(),
-                conflict.reason
-            )?;
-        }
-    }
-
-    if !plan.findings.is_empty() {
-        writeln!(writer, "\nFindings:")?;
-        for finding in &plan.findings {
-            writeln!(writer, "  {} {finding}", styles.style("i", "36"))?;
-        }
-    }
-
-    if matches!(context, PlanContext::Check) && changes == 0 && plan.conflicts.is_empty() {
-        writeln!(writer, "Target matches the configured rules.")?;
-    }
-
-    Ok(())
-}
-
-pub(super) fn apply_result(
-    target: &Path,
-    plan: &Plan,
-    summary: ApplySummary<'_>,
-    format: OutputFormat,
-    color: ColorChoice,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if format == OutputFormat::Json {
-        json::write_apply(target, plan, &summary)?;
-
-        return Ok(());
-    }
-
-    let styles = Colorizer::stdout(color);
-
-    match summary.status {
-        ApplyStatus::Applied => {
-            if summary.skipped == 0 {
-                println!(
-                    "{} Applied {} rename(s).",
-                    styles.style("Done.", "32"),
-                    summary.moved
-                );
-            } else {
-                println!(
-                    "{} Applied {} rename(s); skipped {} conflict(s).",
-                    styles.style("Done.", "32"),
-                    summary.moved,
-                    summary.skipped
-                );
-            }
-            if let Some(run_id) = summary.run_id {
-                println!("Undo with: dirule undo {run_id}");
-            }
-        }
-        ApplyStatus::NoChanges => no_changes(color)?,
-        ApplyStatus::Cancelled => cancelled("Apply", color)?,
-    }
-    Ok(())
-}
-
-impl ApplyStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Applied => "applied",
-            Self::NoChanges => "no_changes",
-            Self::Cancelled => "cancelled",
-        }
-    }
-}
-
-pub(super) fn runs(
-    runs: &[JournalRun],
-    format: OutputFormat,
-    color: ColorChoice,
-) -> io::Result<()> {
-    if format == OutputFormat::Json {
-        let value = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "runs": runs.iter().map(|run| serde_json::json!({
-                "id": run.id,
-                "target": run.target,
-                "started_at": run.started_at,
-                "status": status_name(run.status),
-                "operations": run.operations,
-            })).collect::<Vec<_>>(),
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&value).expect("run listing is serializable")
-        );
-        return Ok(());
-    }
-
-    if runs.is_empty() {
-        println!("No apply runs found.");
-        return Ok(());
-    }
-
-    let styles = Colorizer::stdout(color);
-
-    println!("Apply runs");
-    for run in runs {
-        println!(
-            "  {}  {}  {} rename(s)  started {}  {}",
-            styles.style(&run.id, "36"),
-            status_name(run.status),
-            run.operations,
-            run.started_at,
-            run.target.display()
-        );
-    }
-
-    Ok(())
-}
-
-pub(super) fn run_details(
-    details: &JournalDetails,
-    format: OutputFormat,
-    color: ColorChoice,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if format == OutputFormat::Json {
-        let value = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "run": {
-                "id": details.run.id,
-                "target": details.run.target,
-                "started_at": details.run.started_at,
-                "status": status_name(details.run.status),
-                "operations": details.run.operations,
-            },
-            "changes": details.operations.iter().map(|operation| serde_json::json!({
-                "source": portable_path(&operation.source),
-                "destination": portable_path(&operation.destination),
-                "kind": operation.kind,
-            })).collect::<Vec<_>>(),
-        });
-        println!("{}", serde_json::to_string_pretty(&value)?);
-        return Ok(());
-    }
-
-    let styles = Colorizer::stdout(color);
-
-    println!("Apply run {}", styles.style(&details.run.id, "36"));
-    println!("  Status: {}", status_name(details.run.status));
-    println!("  Target: {}", details.run.target.display());
-    println!("  Renames: {}", details.run.operations);
-    if details.operations.is_empty() {
-        println!("\nNo rename operations recorded.");
-    } else {
-        println!("\nChanges:");
-        for operation in &details.operations {
-            println!(
-                "  {} -> {} ({})",
-                styles.style(portable_path(&operation.source), "31"),
-                styles.style(portable_path(&operation.destination), "32"),
-                operation_kind(operation.kind)
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn operation_kind(kind: dirule_core::EntryKind) -> &'static str {
-    match kind {
-        dirule_core::EntryKind::File => "file",
-        dirule_core::EntryKind::Directory => "directory",
-        dirule_core::EntryKind::Symlink => "symlink",
-    }
-}
-
-pub(super) fn undo_result(
-    run_id: &str,
-    status: &str,
-    retained_directories: &[PathBuf],
-    format: OutputFormat,
-    color: ColorChoice,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if format == OutputFormat::Json {
-        let value = serde_json::json!({
-            "schema_version": CURRENT_OUTPUT_VERSION,
-            "run_id": run_id,
-            "status": status,
-            "retained_directories": retained_directories
-                .iter()
-                .map(|path| portable_path(path.as_path()))
-                .collect::<Vec<_>>(),
-        });
-        println!("{}", serde_json::to_string_pretty(&value)?);
-    } else if status == "undone" {
-        let styles = Colorizer::stdout(color);
-
-        println!(
-            "{} Undid run {}.",
-            styles.style("Done.", "32"),
-            styles.style(run_id, "36")
-        );
-        for directory in retained_directories {
-            println!(
-                "{} Left non-empty directory {} in place.",
-                styles.style("Note:", "33"),
-                directory.display()
-            );
-        }
-    } else {
-        cancelled("Undo", color)?;
-    }
-    Ok(())
-}
-
-fn status_name(status: JournalStatus) -> &'static str {
-    match status {
-        JournalStatus::Applying => "applying",
-        JournalStatus::Applied => "applied",
-        JournalStatus::FailedRolledBack => "failed_rolled_back",
-        JournalStatus::Interrupted => "interrupted",
-        JournalStatus::Undoing => "undoing",
-        JournalStatus::PartiallyRecovered => "partially_recovered",
-        JournalStatus::Undone => "undone",
-    }
-}
-
-fn portable_path(path: &Path) -> String {
-    path.components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 pub(super) fn no_changes(color: ColorChoice) -> io::Result<()> {
     let styles = Colorizer::stdout(color);
 
@@ -645,7 +279,7 @@ fn color_enabled_for(
 mod tests {
     use super::{
         ColorChoice, Colorizer, PlanContext, color_enabled_for, json_apply_preview_needed,
-        write_text_plan,
+        plan::write_text_plan,
     };
     use dirule_core::{EntryKind, Plan, PlannedEntry};
     use std::ffi::OsStr;
