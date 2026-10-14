@@ -340,36 +340,40 @@ fn apply_recorded(
         return Err(ApplyError::Conflicts(plan.conflicts.len()));
     }
 
-    let blockers = if policy == ConflictPolicy::Skip {
-        plan.entries
-            .iter()
-            .filter(|entry| {
-                entry.source != entry.destination
-                    && plan
-                        .conflicts
-                        .iter()
-                        .any(|conflict| conflict.path == entry.destination)
-            })
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+    let conflict_paths = plan
+        .conflicts
+        .iter()
+        .map(|conflict| conflict.path.as_path())
+        .collect::<HashSet<_>>();
+    let blockers = plan.entries.iter().filter(|entry| {
+        policy == ConflictPolicy::Skip
+            && entry.source != entry.destination
+            && conflict_paths.contains(entry.destination.as_path())
+    });
+    let blocked_directories = blockers
+        .clone()
+        .filter(|entry| entry.kind == EntryKind::Directory)
+        .map(|entry| entry.source.as_path())
+        .collect::<HashSet<_>>();
+    let blocked_files = blockers
+        .filter(|entry| entry.kind == EntryKind::File)
+        .map(|entry| entry.destination.as_path())
+        .collect::<HashSet<_>>();
 
     let mut entries = plan
         .entries
         .iter()
         .filter(|entry| {
-            !plan
-                .conflicts
-                .iter()
-                .any(|conflict| entry.destination == conflict.path)
-                && !blockers.iter().any(|blocker| match blocker.kind {
-                    EntryKind::Directory => {
-                        entry.source != blocker.source && entry.source.starts_with(&blocker.source)
-                    }
-                    EntryKind::File => entry.destination.starts_with(&blocker.destination),
-                    EntryKind::Symlink => false,
-                })
+            !conflict_paths.contains(entry.destination.as_path())
+                && !entry
+                    .source
+                    .ancestors()
+                    .skip(1)
+                    .any(|ancestor| blocked_directories.contains(ancestor))
+                && !entry
+                    .destination
+                    .ancestors()
+                    .any(|ancestor| blocked_files.contains(ancestor))
         })
         .collect::<Vec<_>>();
 

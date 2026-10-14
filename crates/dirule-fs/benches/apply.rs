@@ -1,7 +1,8 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dirule_core::{EntryKind, Plan, PlannedEntry};
 use dirule_fs::{
-    ConflictPolicy, JournalStore, apply, apply_journaled, scan, validate_destinations,
+    ConflictPolicy, JournalStore, apply, apply_journaled, apply_with_conflict_policy, scan,
+    validate_destinations,
 };
 use std::fs;
 use std::hint::black_box;
@@ -57,6 +58,79 @@ fn benchmark_file_rename_cycles(criterion: &mut Criterion) {
                     },
                     |(target, snapshot, plan)| {
                         black_box(apply(target.path(), &plan, &snapshot).unwrap());
+                        target
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn benchmark_skip_conflicts(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("apply_skip_conflicts");
+
+    for count in [100, 500, 1_000] {
+        group.throughput(Throughput::Elements((count * 2) as u64));
+        group.bench_with_input(
+            BenchmarkId::new("conflicting_and_independent_moves", count),
+            &count,
+            |bencher, &count| {
+                bencher.iter_batched(
+                    || {
+                        let target = tempfile::tempdir().unwrap();
+                        let mut entries = Vec::with_capacity(count * 2);
+                        let mut conflicts = Vec::with_capacity(count);
+
+                        for index in 0..count {
+                            let blocked_source = format!("blocked-source-{index}");
+                            let blocked_destination = format!("blocked-destination-{index}");
+                            let independent_source = format!("independent-source-{index}");
+                            let independent_destination =
+                                format!("independent-destination-{index}");
+
+                            fs::write(target.path().join(&blocked_source), b"blocked").unwrap();
+                            fs::write(target.path().join(&independent_source), b"independent")
+                                .unwrap();
+                            entries.push(PlannedEntry {
+                                source: PathBuf::from(blocked_source),
+                                destination: PathBuf::from(&blocked_destination),
+                                kind: EntryKind::File,
+                                rule: None,
+                            });
+                            entries.push(PlannedEntry {
+                                source: PathBuf::from(independent_source),
+                                destination: PathBuf::from(independent_destination),
+                                kind: EntryKind::File,
+                                rule: None,
+                            });
+                            conflicts.push(dirule_core::Conflict {
+                                path: PathBuf::from(blocked_destination),
+                                reason: "benchmark conflict".into(),
+                            });
+                        }
+
+                        let snapshot = scan(target.path()).unwrap();
+                        let plan = Plan {
+                            entries,
+                            conflicts,
+                            ..Plan::default()
+                        };
+
+                        (target, snapshot, plan)
+                    },
+                    |(target, snapshot, plan)| {
+                        black_box(
+                            apply_with_conflict_policy(
+                                target.path(),
+                                &plan,
+                                &snapshot,
+                                ConflictPolicy::Skip,
+                            )
+                            .unwrap(),
+                        );
                         target
                     },
                     BatchSize::SmallInput,
@@ -146,6 +220,7 @@ criterion_group! {
         .sample_size(20);
     targets = benchmark_destination_validation,
         benchmark_file_rename_cycles,
+        benchmark_skip_conflicts,
         benchmark_journaled_file_rename_cycles
 }
 criterion_main!(benches);
