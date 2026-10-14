@@ -67,7 +67,7 @@ fn starter_configuration_is_created_and_loads_through_the_public_api() {
     assert_eq!(loaded.config().name.as_deref(), Some("Local rules"));
     assert_eq!(loaded.config().target.as_deref(), Some(Path::new(".")));
     assert_eq!(loaded.config().rules.len(), 1);
-    assert_eq!(loaded.config().rules[0].name, "Normalize file names");
+    assert_eq!(loaded.config().rules[0].name, "Normalize names");
 }
 
 #[test]

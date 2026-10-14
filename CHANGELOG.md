@@ -17,6 +17,7 @@
 
 ### Improved
 
+- Name the starter rule accurately for both files and directories.
 - Reduce scan and conflict-planning overhead on large targets and configurations with many path patterns.
 
 ## Version 0.1.0
