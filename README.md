@@ -88,6 +88,19 @@ dirule check --format json
 
 It exits with status `0` when paths comply, `1` when the plan contains changes or conflicts, and `2` when Dirule cannot evaluate the check. JSON results go to stdout; execution errors are versioned JSON on stderr with stable error codes and categories. See the [CLI output contract](docs/specs/cli-output.md) for the output shapes and stable values.
 
+### GitHub Actions
+
+Commit `dirule.toml` at the repository root and run the check from that directory. After checking out the project and setting up Rust, add these steps to a workflow:
+
+```yaml
+- name: Install Dirule
+  run: cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.2.1 dirule
+- name: Check project paths
+  run: dirule check --color never
+```
+
+The pinned tag makes CI reproducible; update it when upgrading Dirule. A failing check exits nonzero and fails the job. `check` only reports planned changes or conflicts; it never renames files.
+
 ### Pre-commit
 
 To check the whole project before each commit, add a local hook to `.pre-commit-config.yaml`:
