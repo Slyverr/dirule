@@ -9,6 +9,14 @@ fn handles_case_boundaries_dotfiles_and_extensions() {
         "my-xml-parser.rs"
     );
     assert_eq!(
+        transform_filename("nobodyknows.rs", Transform::KebabCase, &acronyms),
+        "nobodyknows.rs"
+    );
+    assert_eq!(
+        transform_filename("NobodyKnows.rs", Transform::KebabCase, &acronyms),
+        "nobody-knows.rs"
+    );
+    assert_eq!(
         transform_filename("HTTPServer.pdf", Transform::SnakeCase, &acronyms),
         "http_server.pdf"
     );
