@@ -116,6 +116,24 @@ fn configure_home(command: &mut Command, home: &Path) {
 }
 
 #[test]
+fn cli_accepts_human_output_format_and_rejects_text_alias() {
+    let project = TempProject::new();
+    let init = project.run(&["init"]);
+    assert!(init.status.success());
+
+    let human = project.run(&["plan", "--format", "human"]);
+    assert!(
+        human.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    assert!(String::from_utf8_lossy(&human.stdout).contains("Target:"));
+
+    let text = project.run(&["plan", "--format", "text"]);
+    assert_eq!(text.status.code(), Some(2));
+}
+
+#[test]
 fn cli_initializes_checks_plans_applies_and_emits_json() {
     let project = TempProject::new();
     let canonical_target = project
