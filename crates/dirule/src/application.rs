@@ -1,3 +1,5 @@
+use self::configuration::{ConfigurationLoadError, ConfigurationSource};
+use self::paths::HomeDirectoryUnavailable;
 use dirule_core::{AcronymOptions, Config, Plan, Rule, RuleKind, Transform, plan};
 use dirule_fs::{
     ApplyError, ApplyReport, ConflictPolicy, JournalStore, ScanError, ScanResult, apply_journaled,
@@ -62,6 +64,33 @@ impl Error for PreviewError {
             Self::Scan(source) => Some(source),
             Self::Plan(source) => Some(source),
             Self::Destinations(source) => Some(source),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum PreviewSourceError {
+    Configuration(ConfigurationLoadError),
+    Target(HomeDirectoryUnavailable),
+    Preview(PreviewError),
+}
+
+impl fmt::Display for PreviewSourceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Configuration(source) => fmt::Display::fmt(source, formatter),
+            Self::Target(source) => fmt::Display::fmt(source, formatter),
+            Self::Preview(source) => fmt::Display::fmt(source, formatter),
+        }
+    }
+}
+
+impl Error for PreviewSourceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Configuration(source) => Some(source),
+            Self::Target(source) => Some(source),
+            Self::Preview(source) => Some(source),
         }
     }
 }
@@ -162,6 +191,20 @@ pub fn preview(config: &Config, target: &Path) -> Result<Preview, PreviewError> 
         plan,
         snapshot,
     })
+}
+
+pub fn preview_source(
+    source: &ConfigurationSource,
+    base: &Path,
+    explicit_target: Option<PathBuf>,
+) -> Result<Preview, PreviewSourceError> {
+    let loaded = configuration::load_source(source).map_err(PreviewSourceError::Configuration)?;
+
+    let target =
+        paths::resolve_operation_target(base, explicit_target, loaded.config().target.clone())
+            .map_err(PreviewSourceError::Target)?;
+
+    preview(loaded.config(), &target).map_err(PreviewSourceError::Preview)
 }
 
 pub fn apply_authorized(

@@ -272,6 +272,42 @@ fn configuration_loading_reports_missing_selected_sources() {
 }
 
 #[test]
+fn preview_source_uses_configured_target_and_explicit_override() {
+    let base = TempTarget::new();
+    let configured_target = base.join("configured");
+    let explicit_target = base.join("explicit");
+    fs::create_dir(&configured_target).expect("create configured target");
+    fs::create_dir(&explicit_target).expect("create explicit target");
+    fs::write(configured_target.join("MyFile.txt"), "configured").expect("write source file");
+    fs::write(explicit_target.join("OtherFile.txt"), "explicit").expect("write override file");
+    fs::write(
+        base.join("dirule.toml"),
+        format!(
+            "version = \"{}\"\ntarget = \"configured\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+            dirule_core::CURRENT_CONFIG_VERSION
+        ),
+    )
+    .expect("write project config");
+    let source = dirule::application::configuration::ConfigurationSource::project_default(&base);
+
+    let configured = dirule::application::preview_source(&source, &base, None)
+        .expect("preview configured target");
+    let explicit =
+        dirule::application::preview_source(&source, &base, Some(PathBuf::from("explicit")))
+            .expect("preview explicit target");
+
+    assert_eq!(configured.target, configured_target.canonicalize().unwrap());
+    assert!(configured.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("MyFile.txt") && entry.destination == Path::new("my-file.txt")
+    }));
+    assert_eq!(explicit.target, explicit_target.canonicalize().unwrap());
+    assert!(explicit.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("OtherFile.txt")
+            && entry.destination == Path::new("other-file.txt")
+    }));
+}
+
+#[test]
 fn config_editor_preserves_comments_and_file_permissions() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

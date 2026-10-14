@@ -46,14 +46,7 @@ pub(super) fn evaluate(
 ) -> Result<crate::application::Preview, Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
     let source = config_source(&cwd, options.rules)?;
-    let loaded = load_configuration(&source)?;
-    let config = loaded.config();
-    let target = crate::application::paths::resolve_operation_target(
-        &cwd,
-        options.target,
-        config.target.clone(),
-    )?;
-    Ok(crate::application::preview(config, &target)?)
+    crate::application::preview_source(&source, &cwd, options.target).map_err(preview_source_error)
 }
 
 fn config_source(
@@ -95,5 +88,19 @@ fn missing_config_hint(
         ConfigurationSourceKind::ProjectDefault => "run `dirule init` or pass `--config FILE`",
         ConfigurationSourceKind::ExplicitFile => "pass a valid `--config FILE`",
         ConfigurationSourceKind::Preset => "check `dirule presets list` or create that preset",
+    }
+}
+
+fn preview_source_error(error: crate::application::PreviewSourceError) -> Box<dyn Error> {
+    match error {
+        crate::application::PreviewSourceError::Configuration(
+            ConfigurationLoadError::Missing { source },
+        ) => format!(
+            "configuration not found at {}; {}",
+            source.path().display(),
+            missing_config_hint(source.kind()),
+        )
+        .into(),
+        error => Box::new(error),
     }
 }
