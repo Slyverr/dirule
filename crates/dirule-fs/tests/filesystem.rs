@@ -1,6 +1,4 @@
-use dirule_core::{
-    Conflict, ConflictKind, EntryKind, FindingKind, Plan, PlannedEntry, parse_config, plan,
-};
+use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry, parse_config, plan};
 use dirule_fs::validate_destinations;
 use dirule_fs::{ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan};
 use std::path::{Path, PathBuf};
@@ -1268,7 +1266,7 @@ fn scan_sorts_findings_for_skipped_special_files() {
         result
             .findings
             .iter()
-            .all(|finding| finding.kind == FindingKind::SkippedNonRegularEntry)
+            .all(|finding| finding.kind == dirule_core::FindingKind::SkippedNonRegularEntry)
     );
     assert!(
         result
@@ -1292,7 +1290,10 @@ fn scan_skips_and_reports_non_unicode_paths() {
 
     assert!(result.entries.is_empty());
     assert_eq!(result.findings.len(), 1);
-    assert_eq!(result.findings[0].kind, FindingKind::SkippedNonUnicodePath);
+    assert_eq!(
+        result.findings[0].kind,
+        dirule_core::FindingKind::SkippedNonUnicodePath
+    );
     assert_eq!(result.findings[0].path, None);
     assert!(
         result.findings[0]
