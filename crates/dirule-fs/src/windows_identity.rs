@@ -49,6 +49,8 @@ pub(crate) fn get(path: &Path) -> Option<FileIdentity> {
         .ok()?;
 
     let mut extended = FILE_ID_INFO::default();
+    // SAFETY: `file` owns a live handle for this call, and `extended` is writable,
+    // correctly aligned storage with the exact size required by `FileIdInfo`.
     let has_extended = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
@@ -69,7 +71,11 @@ pub(crate) fn get(path: &Path) -> Option<FileIdentity> {
         });
     }
 
+    // SAFETY: `BY_HANDLE_FILE_INFORMATION` contains only integer fields, so the
+    // all-zero bit pattern is a valid initial value for the output buffer.
     let mut info = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
+    // SAFETY: `file` still owns a live handle, and `info` is writable storage for
+    // the output structure expected by this API.
     let has_legacy = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) != 0 };
 
     let file_index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
