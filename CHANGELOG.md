@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Reject category extensions with multiple leading dots instead of silently normalizing them.
+
 ## Version 0.2.1
 
 ### Fixed
