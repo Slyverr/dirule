@@ -32,7 +32,6 @@ impl Deref for TempTarget {
 impl Drop for TempTarget {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
-        let _ = fs::remove_dir_all(self.0.with_extension("journal"));
     }
 }
 
@@ -62,7 +61,7 @@ to = "builtin:kebab-case"
     assert!(source.is_file());
     assert!(!target.join("my-file.txt").exists());
 
-    let journal = JournalStore::new(target.0.with_extension("journal"));
+    let journal = JournalStore::new(target.join(".journal"));
     let applied = dirule::application::apply_authorized(preview, ConflictPolicy::Abort, &journal)
         .expect("apply authorized plan");
     let run_id = applied.run_id.as_deref().expect("journaled run ID");
