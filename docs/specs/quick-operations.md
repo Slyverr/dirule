@@ -28,7 +28,7 @@ dirule rename TRANSFORM [--target PATH] [--recursive] [--apply] [--yes]
 
 ## Output
 
-Quick operations accept `--format text|json` and the global `--color` option. Preview output uses the same plan schema and exit behavior as `plan`; apply output uses the same apply result schema and confirmation rules as `apply`. JSON output stays on stdout, except a JSON preview displayed before apply confirmation, which goes to stderr.
+Quick operations accept `--format human|json` and the global `--color` option. Preview output uses the same plan schema and exit behavior as `plan`; apply output uses the same apply result schema and confirmation rules as `apply`. JSON output stays on stdout, except a JSON preview displayed before apply confirmation, which goes to stderr.
 
 ## Validation
 
