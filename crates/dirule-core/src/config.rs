@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub name: Option<String>,
     pub target: Option<PathBuf>,
+    pub ignore: Vec<String>,
     pub acronyms: AcronymOptions,
     pub rules: Vec<Rule>,
 }
@@ -20,6 +21,19 @@ pub struct Config {
 pub struct CompiledConfig {
     pub(crate) rules: Vec<CompiledRule>,
     pub(crate) acronyms: AcronymLexicon,
+    ignore: Vec<Matcher>,
+}
+
+impl CompiledConfig {
+    pub fn ignore_patterns(&self) -> &[Matcher] {
+        &self.ignore
+    }
+
+    pub fn ignores_path(&self, path: &str) -> bool {
+        self.ignore
+            .iter()
+            .any(|pattern| pattern.matches_path_or_parent(path))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +93,7 @@ pub fn parse(source: &str) -> Result<Config> {
     let config = Config {
         name: document.name,
         target: document.target,
+        ignore: document.ignore,
         acronyms: document.acronyms,
         rules: document.rules,
     };
@@ -98,6 +113,19 @@ impl Config {
         }
 
         let acronyms = self.acronyms.compile()?;
+        let ignore = self
+            .ignore
+            .iter()
+            .map(|pattern| {
+                if pattern.is_empty() {
+                    return Err(Error::Config("ignore patterns cannot be empty".into()));
+                }
+
+                Matcher::new(pattern).map_err(|error| {
+                    Error::Config(format!("invalid ignore pattern {pattern:?}: {error}"))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut compiled_rules = Vec::with_capacity(self.rules.len());
 
         for (index, rule) in self.rules.iter().enumerate() {
@@ -174,6 +202,7 @@ impl Config {
         Ok(CompiledConfig {
             rules: compiled_rules,
             acronyms,
+            ignore,
         })
     }
 }

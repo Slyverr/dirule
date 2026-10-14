@@ -74,6 +74,7 @@ fn benchmark_planning(criterion: &mut Criterion) {
     let config = Config {
         name: Some("Benchmark".into()),
         target: Some(PathBuf::from(".")),
+        ignore: Vec::new(),
         acronyms: AcronymOptions {
             entries: vec!["API".into(), "HTTP".into(), "XML".into()],
         },
@@ -164,6 +165,7 @@ fn benchmark_acronym_scaling(criterion: &mut Criterion) {
         let config = Config {
             name: Some("Acronym benchmark".into()),
             target: Some(PathBuf::from(".")),
+            ignore: Vec::new(),
             acronyms: AcronymOptions {
                 entries: synthetic_acronyms(count),
             },
@@ -212,6 +214,7 @@ fn exclusion_config(count: usize) -> Config {
     Config {
         name: Some("Exclusion benchmark".into()),
         target: Some(PathBuf::from(".")),
+        ignore: Vec::new(),
         acronyms: AcronymOptions::default(),
         rules: vec![Rule {
             name: "Normalize files".into(),

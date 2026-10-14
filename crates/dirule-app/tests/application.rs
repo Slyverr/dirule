@@ -6,6 +6,7 @@ use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -546,6 +547,31 @@ fn config_editor_preserves_comments_and_file_permissions() {
 }
 
 #[test]
+fn config_editor_sets_hard_ignore_patterns_and_migrates_the_document() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    fs::write(
+        &path,
+        "version = \"1.2\"\n\n[[rules]]\nname = \"Normalize names\"\nmatch = \"**/*\"\nto = \"builtin:kebab-case\"\n",
+    )
+    .expect("write legacy config");
+
+    let mut editor = ConfigEditor::open(&path).expect("open legacy config");
+    editor
+        .set_ignore_patterns(&["generated/**".into(), "vendor".into()])
+        .expect("set target-wide exclusions");
+    let config = editor.save().expect("save migrated config");
+    let saved = fs::read_to_string(path).expect("read saved config");
+
+    assert_eq!(config.ignore, ["generated/**", "vendor"]);
+    assert!(saved.contains(&format!(
+        "version = \"{}\"",
+        dirule_core::CURRENT_CONFIG_VERSION
+    )));
+    assert!(saved.contains("ignore = [\"generated/**\", \"vendor\"]"));
+}
+
+#[test]
 fn config_editor_supports_adding_and_reordering_rules() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");
@@ -776,4 +802,64 @@ fn rename_preview_uses_shared_transforms_and_inherits_directory_moves() {
     }));
     assert!(target.join("MyXMLParser.pdf").is_file());
     assert!(target.join("HTTPServer/ReadMe.txt").is_file());
+}
+
+#[test]
+fn preview_hard_excludes_configured_paths_independent_of_vcs_ignores() {
+    let target = TempTarget::new();
+    fs::create_dir_all(target.join("generated/api")).expect("create generated directory");
+    fs::create_dir_all(target.join("build")).expect("create build directory");
+    fs::write(target.join(".gitignore"), "build/**\n").expect("write Git ignore rules");
+    fs::write(target.join("generated/api/Client.ts"), "generated").expect("write generated source");
+    fs::write(target.join("build/Tracked.ts"), "tracked").expect("write tracked ignored source");
+    fs::write(target.join("VisibleFile.ts"), "visible").expect("write visible source");
+
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&target.0)
+        .status()
+        .expect("initialize Git fixture");
+    assert!(init.success(), "initialize Git fixture");
+    let add = Command::new("git")
+        .args(["add", ".gitignore", "generated/api/Client.ts"])
+        .current_dir(&target.0)
+        .status()
+        .expect("stage generated source");
+    assert!(add.success(), "stage generated source");
+    let add_ignored = Command::new("git")
+        .args(["add", "-f", "build/Tracked.ts"])
+        .current_dir(&target.0)
+        .status()
+        .expect("stage VCS-ignored source");
+    assert!(add_ignored.success(), "stage VCS-ignored source");
+
+    let config = parse_config(
+        r#"
+version = "1.3"
+ignore = ["generated/**", "build/**"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("parse config");
+
+    let preview = dirule_app::preview(&config, &target.0).expect("preview target");
+
+    assert!(
+        preview.snapshot.entries.iter().all(|entry| {
+            !entry.path.starts_with("generated") && !entry.path.starts_with("build")
+        })
+    );
+    assert!(preview.plan.entries.iter().any(|entry| {
+        entry.source == Path::new("VisibleFile.ts")
+            && entry.destination == Path::new("visible-file.ts")
+    }));
+    assert!(!preview
+        .plan
+        .entries
+        .iter()
+        .any(|entry| entry.source.starts_with("generated") || entry.source.starts_with("build")));
 }

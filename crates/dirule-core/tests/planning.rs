@@ -100,6 +100,49 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn planning_hard_excludes_configured_paths_and_directory_descendants() {
+    let config = parse_config(
+        r#"
+version = "1.3"
+ignore = ["generated", "docs/api/*.json"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid config");
+    let entries = [
+        Entry {
+            path: PathBuf::from("generated"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("generated/client/Client.ts"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("docs/api/schema.json"),
+            kind: EntryKind::File,
+        },
+        Entry {
+            path: PathBuf::from("src/KeepThis.ts"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert_eq!(planned.entries.len(), 1);
+    assert_eq!(planned.entries[0].source, Path::new("src/KeepThis.ts"));
+    assert_eq!(
+        planned.entries[0].destination,
+        Path::new("src/keep-this.ts")
+    );
+}
+
+#[test]
 fn template_parent_uses_the_planned_directory_name() {
     let config = parse_config(
         r#"
@@ -553,6 +596,7 @@ fn planning_propagates_directory_names_from_unsorted_entries() {
     let config = Config {
         name: None,
         target: None,
+        ignore: Vec::new(),
         acronyms: AcronymOptions::default(),
         rules: vec![
             Rule {

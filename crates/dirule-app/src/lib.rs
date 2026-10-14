@@ -1,9 +1,9 @@
 use self::configuration::{ConfigurationLoadError, ConfigurationSource};
 use self::paths::HomeDirectoryUnavailable;
-use dirule_core::{AcronymOptions, Config, Plan, Rule, RuleKind, Transform, plan};
+use dirule_core::{AcronymOptions, Config, Plan, Rule, RuleKind, Transform, plan_compiled};
 use dirule_fs::{
-    ApplyError, ApplyReport, ConflictPolicy, ScanError, ScanResult, apply_journaled, scan,
-    validate_destinations,
+    ApplyError, ApplyReport, ConflictPolicy, ScanError, ScanResult, apply_journaled,
+    scan_with_ignores, validate_destinations,
 };
 use std::error::Error;
 use std::fmt;
@@ -170,6 +170,7 @@ fn quick_config(rules: Vec<Rule>) -> Config {
     Config {
         name: Some("Quick operation".into()),
         target: None,
+        ignore: Vec::new(),
         acronyms: AcronymOptions::default(),
         rules,
     }
@@ -182,8 +183,10 @@ pub fn preview(config: &Config, target: &Path) -> Result<Preview, PreviewError> 
             path: target.to_path_buf(),
             source,
         })?;
-    let mut snapshot = scan(&target).map_err(PreviewError::Scan)?;
-    let mut plan = plan(config, &snapshot.entries).map_err(PreviewError::Plan)?;
+    let compiled = config.compile().map_err(PreviewError::Plan)?;
+    let mut snapshot =
+        scan_with_ignores(&target, compiled.ignore_patterns()).map_err(PreviewError::Scan)?;
+    let mut plan = plan_compiled(&compiled, &snapshot.entries).map_err(PreviewError::Plan)?;
     validate_destinations(&target, &mut plan).map_err(PreviewError::Destinations)?;
     plan.findings.append(&mut snapshot.findings);
 

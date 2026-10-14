@@ -61,6 +61,16 @@ fn tree_globs_match_root_and_nested_paths_case_sensitively() {
 }
 
 #[test]
+fn path_exclusion_matching_includes_matching_ancestor_directories() {
+    let matcher = Matcher::new("generated").expect("valid exclusion pattern");
+
+    assert!(matcher.matches_path_or_parent("generated"));
+    assert!(matcher.matches_path_or_parent("generated/api/client.ts"));
+    assert!(!matcher.matches_path_or_parent("src/generated/client.ts"));
+    assert!(!matcher.matches_path_or_parent("generated-files/client.ts"));
+}
+
+#[test]
 fn matching_flags_can_select_case_insensitive_components() {
     let matcher = Matcher::new("**/*.(?i)pdf").expect("valid glob pattern");
 

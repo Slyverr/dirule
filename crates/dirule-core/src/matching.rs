@@ -65,6 +65,12 @@ impl Matcher {
         })
     }
 
+    pub fn matches_path_or_parent(&self, path: &str) -> bool {
+        path.match_indices('/')
+            .any(|(index, _)| self.is_match(&path[..index]))
+            || self.is_match(path)
+    }
+
     pub fn capture_names(&self) -> impl Iterator<Item = &str> {
         self.capture_indexes.iter().map(|(name, _)| name.as_str())
     }

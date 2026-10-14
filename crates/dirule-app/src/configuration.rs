@@ -1,4 +1,4 @@
-use dirule_core::{Config, Rule, RuleKind, parse_config};
+use dirule_core::{CURRENT_CONFIG_VERSION, Config, Rule, RuleKind, parse_config};
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, Metadata};
@@ -166,6 +166,18 @@ impl ConfigEditor {
             let rule = rules.remove(from);
             rules.insert(to, rule);
         }
+
+        self.validate_or_restore(original)
+    }
+
+    pub fn set_ignore_patterns(&mut self, patterns: &[String]) -> Result<(), ConfigEditorError> {
+        let original = self.document.clone();
+        let mut ignore = toml_edit::Array::new();
+        for pattern in patterns {
+            ignore.push(pattern.as_str());
+        }
+        self.document["version"] = toml_edit::value(CURRENT_CONFIG_VERSION.to_string());
+        self.document["ignore"] = toml_edit::value(ignore);
 
         self.validate_or_restore(original)
     }

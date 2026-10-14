@@ -10,6 +10,8 @@ pub(super) struct ConfigDocument {
     pub name: Option<String>,
     pub target: Option<PathBuf>,
     #[serde(default)]
+    pub ignore: Vec<String>,
+    #[serde(default)]
     pub acronyms: AcronymOptions,
     #[serde(default)]
     pub rules: Vec<Rule>,

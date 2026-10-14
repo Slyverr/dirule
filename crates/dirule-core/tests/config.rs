@@ -25,6 +25,50 @@ to = "template:Archive/${year}/${vendor|kebab-case}/${title}.pdf"
 }
 
 #[test]
+fn parses_and_validates_hard_ignore_patterns() {
+    let config = parse_config(
+        r#"
+version = "1.3"
+ignore = ["generated/**", "vendor"]
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid target-wide exclusions");
+
+    assert_eq!(config.ignore, ["generated/**", "vendor"]);
+
+    for pattern in ["", "["] {
+        let source = format!(
+            "version = '1.3'\nignore = ['{pattern}']\n[[rules]]\nname = 'Normalize names'\nmatch = '**/*'\nto = 'builtin:kebab-case'"
+        );
+        let error = parse_config(&source).expect_err("invalid ignore pattern is rejected");
+
+        assert!(error.to_string().contains("ignore"));
+    }
+}
+
+#[test]
+fn version_1_2_migrates_with_no_hard_ignore_patterns() {
+    let config = parse_config(
+        r#"
+version = "1.2"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("legacy configuration migrates");
+
+    assert!(config.ignore.is_empty());
+}
+
+#[test]
 fn version_1_0_migrates_to_the_default_rule_kind() {
     let config = parse_config(
         r#"

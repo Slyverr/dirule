@@ -14,7 +14,7 @@ A migration must preserve the document's meaning, update its version, and produc
 
 ## Configuration shape
 
-`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `ignore` is an optional list of target-relative path patterns that exclude matching paths from this configuration entirely. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. The optional per-rule `exclude` list skips entries from that rule while allowing later rules to match. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
+`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `ignore` is an optional list of target-relative path patterns that excludes matching source paths before rule matching. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. The optional per-rule `exclude` list skips entries from that rule while allowing later rules to match. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
 
 ```toml
 version = "1.3"
@@ -39,7 +39,7 @@ exclude = ["**/*.md"]
 to = "builtin:kebab-case"
 ```
 
-Top-level `ignore` patterns are evaluated against original target-relative paths before rule matching. A matching directory and all of its descendants are excluded. These exclusions are hard: they apply even when a path is tracked by Git, and no rule can claim an excluded path. They add to VCS ignore handling and do not edit `.gitignore`, `.ignore`, or any other project file. Quick operations do not load a configuration and therefore do not use its `ignore` list.
+Top-level `ignore` patterns are evaluated against original target-relative source paths before rule matching. A matching directory and all of its descendants are excluded from scanning and planning, including when Git tracks them; no rule can claim an excluded source. This setting does not prevent a rule from choosing a destination under a matching path. The patterns add to VCS ignore handling and do not edit `.gitignore`, `.ignore`, or any other project file. Quick operations do not load a configuration and therefore do not use its `ignore` list.
 
 Rules are evaluated in declaration order. The first rule matching both the entry's kind and path owns it. A kind mismatch or matching per-rule exclusion does not claim the entry, so later rules can still match it. Per-rule exclusions use the same path-relative glob syntax as `match`, inspect original paths, and apply only to their containing rule; excluding a directory from one rule does not automatically exclude its descendants. The parser splits `to` at its first colon, so colons later in a value remain part of that value. Unknown fields, kinds, namespaces, transformations, malformed patterns, exclusions, and invalid templates are configuration errors with the relevant field or rule identified.
 
@@ -149,7 +149,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 ## Evaluation and filesystem safety
 
 - Scan files and directories below the selected target; do not rename the target directory itself.
-- Apply configured `ignore` patterns and VCS ignore filters before matching. Configured `ignore` patterns always exclude matching paths, including Git-tracked paths. In Git repositories, respect nested `.gitignore` files, `.git/info/exclude`, and the configured global Git ignore file. Git-tracked paths remain eligible despite VCS ignore rules; VCS ignore rules exclude untracked paths. Obtain tracked paths from the Git index and combine them with the ignore-aware filesystem walk. Outside Git, support `.ignore` files with the same pattern syntax.
+- Apply configured `ignore` patterns and VCS ignore filters before matching. Configured `ignore` patterns always exclude matching source paths, including Git-tracked paths. In Git repositories, respect nested `.gitignore` files, `.git/info/exclude`, and the configured global Git ignore file. Git-tracked paths remain eligible despite VCS ignore rules; VCS ignore rules exclude untracked paths. Obtain tracked paths from the Git index and combine them with the ignore-aware filesystem walk. Outside Git, support `.ignore` files with the same pattern syntax.
 - If the Git executable is unavailable inside a Git repository, fail planning instead of silently omitting tracked paths.
 - Do not hardcode exclusions such as `node_modules` or `build`. Do not exclude hidden files just for being hidden.
 - Never scan Git metadata entries named `.git`, whether a directory or a linked-worktree metadata file, at any depth. Reject a target equal to or inside a `.git` metadata path.

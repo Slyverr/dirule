@@ -17,12 +17,33 @@ const MIGRATIONS: &[Migration] = &[
         to: ConfigVersion::new(1, 2),
         apply: advance_version,
     },
+    Migration {
+        from: ConfigVersion::new(1, 2),
+        to: ConfigVersion::new(1, 3),
+        apply: add_ignore_defaults,
+    },
 ];
 
 fn advance_version(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
     let document_table = document
         .as_table_mut()
         .ok_or_else(|| Error::Config("configuration document must be a table".into()))?;
+    document_table.insert("version".into(), toml::Value::String(version.to_string()));
+
+    Ok(document)
+}
+
+fn add_ignore_defaults(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
+    let document_table = document
+        .as_table_mut()
+        .ok_or_else(|| Error::Config("configuration document must be a table".into()))?;
+    if document_table.contains_key("ignore") {
+        return Err(Error::Config(format!(
+            "`ignore` requires configuration version {version}"
+        )));
+    }
+
+    document_table.insert("ignore".into(), toml::Value::Array(Vec::new()));
     document_table.insert("version".into(), toml::Value::String(version.to_string()));
 
     Ok(document)

@@ -104,7 +104,7 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
                     entry.path.display()
                 ),
             ));
-        } else {
+        } else if !config.ignores_path(&display_path(&clean_path(&entry.path)?)) {
             ordered.push(entry);
         }
     }

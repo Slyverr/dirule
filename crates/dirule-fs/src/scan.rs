@@ -1,4 +1,4 @@
-use dirule_core::{Entry, EntryKind, Finding, FindingKind};
+use dirule_core::{Entry, EntryKind, Finding, FindingKind, Matcher};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -67,6 +67,10 @@ pub enum ScanError {
 }
 
 pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
+    scan_with_ignores(target, &[])
+}
+
+pub fn scan_with_ignores(target: &Path, ignores: &[Matcher]) -> Result<ScanResult, ScanError> {
     let target = target
         .canonicalize()
         .map_err(|source| ScanError::Metadata {
@@ -102,6 +106,8 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
     }
 
     let mut builder = ignore::WalkBuilder::new(&target);
+    let ignore_root = target.clone();
+    let ignore_patterns = ignores.to_vec();
     builder
         .hidden(false)
         .ignore(true)
@@ -111,7 +117,10 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         .parents(true)
         .require_git(false)
         .follow_links(false)
-        .filter_entry(|entry| entry.depth() == 0 || entry.file_name() != OsStr::new(".git"));
+        .filter_entry(move |entry| {
+            (entry.depth() == 0 || entry.file_name() != OsStr::new(".git"))
+                && !entry_is_ignored(&ignore_root, entry.path(), &ignore_patterns)
+        });
 
     let mut paths = HashMap::<PathBuf, ScannedEntry>::new();
     let mut findings = Vec::new();
@@ -177,6 +186,10 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
     let (tracked, tracked_findings) = git::tracked_paths(&target)?;
     findings.extend(tracked_findings);
     for tracked in tracked {
+        if is_ignored_path(&tracked, ignores) {
+            continue;
+        }
+
         if !paths.contains_key(&tracked) {
             let absolute = target.join(&tracked);
             let metadata = match std::fs::symlink_metadata(&absolute) {
@@ -260,6 +273,34 @@ pub fn scan(target: &Path) -> Result<ScanResult, ScanError> {
         target_identity: Some(target_identity),
         identities,
     })
+}
+
+fn entry_is_ignored(root: &Path, path: &Path, ignores: &[Matcher]) -> bool {
+    if path == root {
+        return false;
+    }
+
+    relative_unicode(root, path)
+        .and_then(|path| path.to_str().map(str::to_owned))
+        .map(|path| is_ignored_path(Path::new(&path), ignores))
+        .unwrap_or(false)
+}
+
+fn is_ignored_path(path: &Path, ignores: &[Matcher]) -> bool {
+    let Some(path) = slash_path(path) else {
+        return false;
+    };
+
+    ignores
+        .iter()
+        .any(|pattern| pattern.matches_path_or_parent(&path))
+}
+
+fn slash_path(path: &Path) -> Option<String> {
+    path.components()
+        .map(|component| component.as_os_str().to_str())
+        .collect::<Option<Vec<_>>>()
+        .map(|components| components.join("/"))
 }
 
 fn validate_ignore_files(directory: &Path) -> Result<(), ScanError> {
