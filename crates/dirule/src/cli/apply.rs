@@ -14,8 +14,8 @@ pub(super) fn execute(
     preview: dirule_app::Preview,
     options: ApplyOptions,
 ) -> Result<(), Box<dyn Error>> {
-    let target = &preview.target;
-    let plan = &preview.plan;
+    let target = preview.target();
+    let plan = preview.plan();
 
     if options.format == args::OutputFormat::Human {
         output::plan(

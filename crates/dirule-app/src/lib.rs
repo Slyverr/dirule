@@ -34,14 +34,32 @@ pub use sort::{sort_by_extension_preview, sort_extension_preview, sort_selectors
 /// A read-only scan and validated plan for one target.
 ///
 /// The plan and scan snapshot are paired so applying the plan can revalidate the
-/// same sources and destinations. Creating a preview does not mutate the target.
+/// same sources and destinations. Creating a preview does not mutate the target,
+/// and callers cannot replace its plan or snapshot independently.
 pub struct Preview {
     /// Canonical target directory used for the scan.
-    pub target: PathBuf,
+    target: PathBuf,
     /// Proposed renames and any conflicts or findings.
-    pub plan: Plan,
+    plan: Plan,
     /// Scanned entries and findings used to validate an apply operation.
-    pub snapshot: ScanResult,
+    snapshot: ScanResult,
+}
+
+impl Preview {
+    /// Return the canonical target directory used for the scan.
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
+    /// Return the proposed renames, conflicts, and findings.
+    pub fn plan(&self) -> &Plan {
+        &self.plan
+    }
+
+    /// Return the scan snapshot paired with the plan for apply revalidation.
+    pub fn snapshot(&self) -> &ScanResult {
+        &self.snapshot
+    }
 }
 
 /// The result of applying a previously reviewed preview.

@@ -170,7 +170,7 @@ fn sort_resolves_multiple_extensions_and_categories_through_rules() {
         .expect("preview mixed selectors");
 
     let destinations = plan
-        .plan
+        .plan()
         .entries
         .iter()
         .map(|entry| {
@@ -203,7 +203,7 @@ fn category_overrides_control_extensions_and_destinations() {
     let plan = sort_selectors_preview(&target, &selectors, &catalog, false)
         .expect("preview overridden category");
 
-    assert!(plan.plan.entries.iter().any(|entry| {
+    assert!(plan.plan().entries.iter().any(|entry| {
         entry.source == Path::new("Camera.RAW")
             && entry.destination == Path::new("photos/Camera.RAW")
     }));
@@ -217,7 +217,7 @@ fn single_extension_preview_keeps_extension_semantics_for_category_names() {
     let preview =
         sort_extension_preview(&target, "images", false).expect("sort the literal extension name");
 
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("Artwork.images")
             && entry.destination == Path::new("imagess/Artwork.images")
     }));

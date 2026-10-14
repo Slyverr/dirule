@@ -144,8 +144,8 @@ to = "builtin:kebab-case"
 
     let preview = dirule_app::preview(&config, &target.0).expect("preview target");
 
-    assert_eq!(preview.target, target.0.canonicalize().unwrap());
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert_eq!(preview.target(), target.0.canonicalize().unwrap());
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("MyFile.txt") && entry.destination == Path::new("my-file.txt")
     }));
     assert!(source.is_file());
@@ -566,12 +566,15 @@ fn preview_source_uses_configured_target_and_explicit_override() {
     let explicit = dirule_app::preview_source(&source, &base, Some(PathBuf::from("explicit")))
         .expect("preview explicit target");
 
-    assert_eq!(configured.target, configured_target.canonicalize().unwrap());
-    assert!(configured.plan.entries.iter().any(|entry| {
+    assert_eq!(
+        configured.target(),
+        configured_target.canonicalize().unwrap()
+    );
+    assert!(configured.plan().entries.iter().any(|entry| {
         entry.source == Path::new("MyFile.txt") && entry.destination == Path::new("my-file.txt")
     }));
-    assert_eq!(explicit.target, explicit_target.canonicalize().unwrap());
-    assert!(explicit.plan.entries.iter().any(|entry| {
+    assert_eq!(explicit.target(), explicit_target.canonicalize().unwrap());
+    assert!(explicit.plan().entries.iter().any(|entry| {
         entry.source == Path::new("OtherFile.txt")
             && entry.destination == Path::new("other-file.txt")
     }));
@@ -982,16 +985,16 @@ fn sort_by_extension_normalizes_suffixes_and_leaves_dotfiles_alone() {
     let preview =
         dirule_app::sort_by_extension_preview(&target.0, true).expect("preview extension sort");
 
-    assert!(preview.plan.conflicts.is_empty(), "{:#?}", preview.plan);
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().conflicts.is_empty(), "{:#?}", preview.plan());
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("archive.tar.GZ")
             && entry.destination == Path::new("gzs/archive.tar.GZ")
     }));
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("nested/Report.PDF")
             && entry.destination == Path::new("pdfs/Report.PDF")
     }));
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new(".profile") && entry.destination == Path::new(".profile")
     }));
     assert!(target.join("archive.tar.GZ").is_file());
@@ -1008,11 +1011,11 @@ fn sort_extension_matches_case_insensitively_without_recursing_by_default() {
     let preview = dirule_app::sort_extension_preview(&target.0, ".PDF", false)
         .expect("preview case-insensitive extension sort");
 
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("Invoice.PDF")
             && entry.destination == Path::new("pdfs/Invoice.PDF")
     }));
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("nested/Report.pdf")
             && entry.destination == Path::new("nested/Report.pdf")
     }));
@@ -1030,14 +1033,14 @@ fn rename_preview_uses_shared_transforms_and_inherits_directory_moves() {
     let preview = dirule_app::rename_preview(&target.0, dirule_core::Transform::KebabCase, false)
         .expect("preview rename operation");
 
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("MyXMLParser.pdf")
             && entry.destination == Path::new("my-xml-parser.pdf")
     }));
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("HTTPServer") && entry.destination == Path::new("http-server")
     }));
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("HTTPServer/ReadMe.txt")
             && entry.destination == Path::new("http-server/ReadMe.txt")
     }));
@@ -1090,16 +1093,16 @@ to = "builtin:kebab-case"
     let preview = dirule_app::preview(&config, &target.0).expect("preview target");
 
     assert!(
-        preview.snapshot.entries.iter().all(|entry| {
+        preview.snapshot().entries.iter().all(|entry| {
             !entry.path.starts_with("generated") && !entry.path.starts_with("build")
         })
     );
-    assert!(preview.plan.entries.iter().any(|entry| {
+    assert!(preview.plan().entries.iter().any(|entry| {
         entry.source == Path::new("VisibleFile.ts")
             && entry.destination == Path::new("visible-file.ts")
     }));
     assert!(!preview
-        .plan
+        .plan()
         .entries
         .iter()
         .any(|entry| entry.source.starts_with("generated") || entry.source.starts_with("build")));

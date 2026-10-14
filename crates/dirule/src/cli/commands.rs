@@ -25,8 +25,8 @@ pub(super) fn run(
             let format = options.format;
             let verbose = options.verbose;
             let preview = config::evaluate(options)?;
-            let target = &preview.target;
-            let result = &preview.plan;
+            let target = preview.target();
+            let result = preview.plan();
 
             output::plan(
                 target,
@@ -47,8 +47,8 @@ pub(super) fn run(
             let format = options.format;
             let verbose = options.verbose;
             let preview = config::evaluate(options)?;
-            let target = &preview.target;
-            let result = &preview.plan;
+            let target = preview.target();
+            let result = preview.plan();
 
             output::plan(
                 target,

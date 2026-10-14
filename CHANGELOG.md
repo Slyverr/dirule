@@ -6,6 +6,10 @@
 
 - Reject category extensions with multiple leading dots instead of silently normalizing them.
 
+### Improved
+
+- Expose application previews through read-only accessors so callers cannot replace the reviewed plan or its paired scan snapshot.
+
 ## Version 0.2.1
 
 ### Fixed

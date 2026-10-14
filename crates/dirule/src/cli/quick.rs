@@ -61,8 +61,8 @@ fn execute(
         ..
     } = options;
     if !apply {
-        let target = &preview.target;
-        let plan = &preview.plan;
+        let target = preview.target();
+        let plan = preview.plan();
         output::plan(
             target,
             plan,
