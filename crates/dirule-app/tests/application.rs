@@ -1,7 +1,7 @@
 use dirule_app::configuration::{ConfigEditor, ConfigEditorError};
 use dirule_app::journal::JournalService;
 use dirule_app::presets::{PresetError, PresetStore};
-use dirule_core::parse_config;
+use dirule_core::{Rule, RuleKind, parse_config};
 use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
 use std::ops::Deref;
@@ -556,17 +556,24 @@ fn config_editor_supports_adding_and_reordering_rules() {
     fs::write(&path, contents).expect("write project config");
 
     let mut editor = ConfigEditor::open(&path).expect("open project config");
-    let rules = editor.document_mut()["rules"]
-        .as_array_of_tables_mut()
-        .expect("get rule array");
-    let mut third_rule = toml_edit::Table::new();
-    third_rule["name"] = toml_edit::value("Third rule");
-    third_rule["match"] = toml_edit::value("**/*.txt");
-    third_rule["to"] = toml_edit::value("builtin:pascal-case");
-    rules.push(third_rule);
+    editor
+        .add_rule(Rule {
+            name: "Third rule".into(),
+            pattern: "**/*.txt".into(),
+            kind: RuleKind::File,
+            exclude: vec!["**/drafts/**".into()],
+            to: "builtin:pascal-case".into(),
+        })
+        .expect("add a rule");
+    editor.move_rule(2, 0).expect("reorder rules");
 
-    let moved_rule = rules.remove(2);
-    rules.insert(0, moved_rule);
+    let mut updated_rule = editor.config().expect("read configured rules").rules[0].clone();
+    updated_rule.to = "builtin:camel-case".into();
+    editor.update_rule(0, updated_rule).expect("update a rule");
+    assert_eq!(
+        editor.remove_rule(1).expect("remove a rule").name,
+        "First rule"
+    );
 
     let edited = editor.config().expect("validate edited config");
     assert_eq!(
@@ -575,12 +582,15 @@ fn config_editor_supports_adding_and_reordering_rules() {
             .iter()
             .map(|rule| rule.name.as_str())
             .collect::<Vec<_>>(),
-        ["Third rule", "First rule", "Second rule"]
+        ["Third rule", "Second rule"]
     );
+    assert_eq!(edited.rules[0].to, "builtin:camel-case");
+    assert_eq!(edited.rules[0].kind, RuleKind::File);
+    assert_eq!(edited.rules[0].exclude, ["**/drafts/**"]);
 
     editor.save().expect("save edited project config");
     let saved = fs::read_to_string(&path).expect("read edited project config");
-    assert!(saved.contains("# first rule note"));
+    assert!(!saved.contains("# first rule note"));
     assert!(saved.contains("# second rule note"));
     let reloaded = parse_config(&saved).expect("parse saved project config");
     assert_eq!(
@@ -589,8 +599,29 @@ fn config_editor_supports_adding_and_reordering_rules() {
             .iter()
             .map(|rule| rule.name.as_str())
             .collect::<Vec<_>>(),
-        ["Third rule", "First rule", "Second rule"]
+        ["Third rule", "Second rule"]
     );
+}
+
+#[test]
+fn config_editor_rejects_invalid_rule_edits_without_losing_valid_state() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    fs::write(&path, config_with_target(None)).expect("write project config");
+
+    let mut editor = ConfigEditor::open(&path).expect("open project config");
+    let mut invalid_rule = editor.config().expect("read configuration").rules[0].clone();
+    invalid_rule.to = "unknown:transform".into();
+
+    assert!(matches!(
+        editor.update_rule(0, invalid_rule),
+        Err(ConfigEditorError::Configuration { .. })
+    ));
+    assert_eq!(editor.config().unwrap().rules[0].to, "builtin:kebab-case");
+    assert!(matches!(
+        editor.move_rule(0, 1),
+        Err(ConfigEditorError::InvalidRuleIndex { .. })
+    ));
 }
 
 #[test]

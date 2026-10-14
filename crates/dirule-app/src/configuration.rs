@@ -1,4 +1,4 @@
-use dirule_core::{Config, parse_config};
+use dirule_core::{Config, Rule, RuleKind, parse_config};
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, Metadata};
@@ -26,6 +26,10 @@ pub enum ConfigEditorError {
     RelativePath(PathBuf),
     NotRegularFile(PathBuf),
     ConcurrentModification(PathBuf),
+    InvalidRuleIndex {
+        index: usize,
+        rule_count: usize,
+    },
     Io {
         action: &'static str,
         path: PathBuf,
@@ -96,6 +100,91 @@ impl ConfigEditor {
             path: self.path.clone(),
             source,
         })
+    }
+
+    pub fn add_rule(&mut self, rule: Rule) -> Result<(), ConfigEditorError> {
+        let original = self.document.clone();
+        let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
+            return Err(self.invalid_config("rules must be an array of tables"));
+        };
+        rules.push(rule_table(&rule));
+
+        self.validate_or_restore(original)
+    }
+
+    pub fn update_rule(&mut self, index: usize, rule: Rule) -> Result<(), ConfigEditorError> {
+        let original = self.document.clone();
+        let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
+            return Err(self.invalid_config("rules must be an array of tables"));
+        };
+        let rule_count = rules.len();
+        let Some(table) = rules.get_mut(index) else {
+            return Err(ConfigEditorError::InvalidRuleIndex { index, rule_count });
+        };
+        update_rule_table(table, &rule);
+
+        self.validate_or_restore(original)
+    }
+
+    pub fn remove_rule(&mut self, index: usize) -> Result<Rule, ConfigEditorError> {
+        let original_config = self.config()?;
+        let rule_count = original_config.rules.len();
+        let Some(rule) = original_config.rules.get(index).cloned() else {
+            return Err(ConfigEditorError::InvalidRuleIndex { index, rule_count });
+        };
+        let original = self.document.clone();
+        let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
+            return Err(self.invalid_config("rules must be an array of tables"));
+        };
+        rules.remove(index);
+
+        self.validate_or_restore(original)?;
+
+        Ok(rule)
+    }
+
+    pub fn move_rule(&mut self, from: usize, to: usize) -> Result<(), ConfigEditorError> {
+        let original = self.document.clone();
+        let Some(rules) = self.document["rules"].as_array_of_tables_mut() else {
+            return Err(self.invalid_config("rules must be an array of tables"));
+        };
+        let rule_count = rules.len();
+        if from >= rule_count {
+            return Err(ConfigEditorError::InvalidRuleIndex {
+                index: from,
+                rule_count,
+            });
+        }
+        if to >= rule_count {
+            return Err(ConfigEditorError::InvalidRuleIndex {
+                index: to,
+                rule_count,
+            });
+        }
+
+        if from != to {
+            let rule = rules.remove(from);
+            rules.insert(to, rule);
+        }
+
+        self.validate_or_restore(original)
+    }
+
+    fn validate_or_restore(&mut self, original: DocumentMut) -> Result<(), ConfigEditorError> {
+        if let Err(error) = self.config() {
+            self.document = original;
+
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    fn invalid_config(&self, message: &str) -> ConfigEditorError {
+        ConfigEditorError::Configuration {
+            path: self.path.clone(),
+            source: dirule_core::Error::Config(message.into()),
+        }
     }
 
     pub fn save(&mut self) -> Result<Config, ConfigEditorError> {
@@ -197,6 +286,35 @@ fn regular_file_metadata(path: &Path) -> Result<Metadata, ConfigEditorError> {
     Ok(metadata)
 }
 
+fn rule_table(rule: &Rule) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    update_rule_table(&mut table, rule);
+
+    table
+}
+
+fn update_rule_table(table: &mut toml_edit::Table, rule: &Rule) {
+    table["name"] = toml_edit::value(&rule.name);
+    table["match"] = toml_edit::value(&rule.pattern);
+    table["to"] = toml_edit::value(&rule.to);
+    match rule.kind {
+        RuleKind::Any => {
+            table.remove("kind");
+        }
+        RuleKind::File => table["kind"] = toml_edit::value("file"),
+        RuleKind::Directory => table["kind"] = toml_edit::value("directory"),
+    }
+    if rule.exclude.is_empty() {
+        table.remove("exclude");
+    } else {
+        let mut exclude = toml_edit::Array::new();
+        for pattern in &rule.exclude {
+            exclude.push(pattern.as_str());
+        }
+        table["exclude"] = toml_edit::value(exclude);
+    }
+}
+
 impl fmt::Display for ConfigEditorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -216,6 +334,10 @@ impl fmt::Display for ConfigEditorError {
                 formatter,
                 "configuration changed after it was opened: {}",
                 path.display()
+            ),
+            Self::InvalidRuleIndex { index, rule_count } => write!(
+                formatter,
+                "rule index {index} is out of range for {rule_count} rule(s)"
             ),
             Self::Io {
                 action,
@@ -242,9 +364,10 @@ impl Error for ConfigEditorError {
             Self::Io { source, .. } => Some(source),
             Self::Toml { source, .. } => Some(source),
             Self::Configuration { source, .. } => Some(source),
-            Self::RelativePath(_) | Self::NotRegularFile(_) | Self::ConcurrentModification(_) => {
-                None
-            }
+            Self::RelativePath(_)
+            | Self::NotRegularFile(_)
+            | Self::ConcurrentModification(_)
+            | Self::InvalidRuleIndex { .. } => None,
         }
     }
 }
