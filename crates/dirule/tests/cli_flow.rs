@@ -2520,7 +2520,7 @@ fn plan_json_reports_non_regular_entry_diagnostics() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn plan_json_reports_non_unicode_path_diagnostics() {
     use std::os::unix::ffi::OsStringExt;
@@ -2545,7 +2545,7 @@ fn plan_json_reports_non_unicode_path_diagnostics() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn plan_json_reports_git_tracked_non_unicode_path_diagnostics() {
     use std::os::unix::ffi::OsStringExt;
