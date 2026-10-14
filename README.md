@@ -92,6 +92,26 @@ dirule check --format json
 
 It exits with status `0` when paths comply, `1` when the plan contains changes or conflicts, and `2` when Dirule cannot evaluate the check. JSON results go to stdout; execution errors are versioned JSON on stderr. See the [CLI output contract](docs/specs/cli-output.md) for the error shape and stable codes.
 
+### Pre-commit
+
+To check the whole project before each commit, add a local hook to `.pre-commit-config.yaml`:
+
+```yaml
+minimum_pre_commit_version: "4.4.0"
+repos:
+  - repo: local
+    hooks:
+      - id: dirule-check
+        name: Check project paths with Dirule
+        entry: dirule check --color never
+        language: unsupported
+        types: [file]
+        always_run: true
+        pass_filenames: false
+```
+
+Install Dirule separately and make sure it is on `PATH`. The hook checks the configured target as a whole; it does not limit the check to staged paths.
+
 ## Rules
 
 `dirule init` creates a starter `dirule.toml`. Put project-specific rules before its general `**/*` rule: rules run in order, and the first match owns each original path.
