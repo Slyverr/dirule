@@ -595,7 +595,11 @@ fn config_editor_preserves_comments_and_file_permissions() {
     }
 
     let mut editor = ConfigEditor::open(&path).expect("open project config");
-    editor.document_mut()["rules"][0]["to"] = toml_edit::value("builtin:snake-case");
+    let mut rule = editor.config().expect("read project rules").rules[0].clone();
+    rule.to = "builtin:snake-case".into();
+    editor
+        .update_rule(0, rule)
+        .expect("update the project rule");
     let config = editor.save().expect("save edited project config");
     let saved = fs::read_to_string(&path).expect("read edited project config");
 
@@ -894,7 +898,9 @@ fn config_editor_refuses_to_overwrite_external_changes() {
     );
     fs::write(&path, &contents).expect("write project config");
     let mut editor = ConfigEditor::open(&path).expect("open project config");
-    editor.document_mut()["name"] = toml_edit::value("Edited rules");
+    editor
+        .set_name(Some("Edited rules"))
+        .expect("edit project name");
     let external = format!("{contents}\n# changed by another editor\n");
     fs::write(&path, &external).expect("write external change");
 
@@ -915,10 +921,11 @@ fn config_editor_rejects_invalid_edits_without_writing() {
     );
     fs::write(&path, &contents).expect("write project config");
     let mut editor = ConfigEditor::open(&path).expect("open project config");
-    editor.document_mut()["rules"][0]["to"] = toml_edit::value("unknown:transform");
+    let mut rule = editor.config().expect("read project rules").rules[0].clone();
+    rule.to = "unknown:transform".into();
 
     assert!(matches!(
-        editor.save(),
+        editor.update_rule(0, rule),
         Err(ConfigEditorError::Configuration { .. })
     ));
     assert_eq!(fs::read_to_string(&path).unwrap(), contents);

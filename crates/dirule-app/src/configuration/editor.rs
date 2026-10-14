@@ -74,14 +74,6 @@ impl ConfigEditor {
         &self.path
     }
 
-    pub fn document(&self) -> &DocumentMut {
-        &self.document
-    }
-
-    pub fn document_mut(&mut self) -> &mut DocumentMut {
-        &mut self.document
-    }
-
     pub fn set_name(&mut self, name: Option<&str>) -> Result<(), ConfigEditorError> {
         self.set_optional_string("name", name)
     }
