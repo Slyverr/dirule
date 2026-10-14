@@ -1,4 +1,4 @@
-use super::{args, config, output, prompt};
+use super::{args, output, prompt};
 use crate::application::presets::PresetStore;
 use std::error::Error;
 use std::io::{self, Write};
@@ -18,7 +18,7 @@ pub(super) fn save(
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
-    let source_path = config::resolve(
+    let source_path = crate::application::paths::resolve_from(
         &cwd,
         options
             .config

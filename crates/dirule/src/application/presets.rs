@@ -38,7 +38,8 @@ pub enum PresetError {
 
 impl PresetStore {
     pub fn user() -> Result<Self, PresetError> {
-        let base = user_config_directory().ok_or(PresetError::UserDirectoryUnavailable)?;
+        let base =
+            super::paths::user_config_directory().ok_or(PresetError::UserDirectoryUnavailable)?;
 
         Self::new(base.join("dirule").join("presets"))
     }
@@ -265,25 +266,4 @@ fn valid_name(name: &str) -> bool {
         && name
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-}
-
-fn user_config_directory() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    let base = absolute_env_path("APPDATA");
-    #[cfg(target_os = "macos")]
-    let base = absolute_env_path("HOME").map(|home| home.join("Library/Application Support"));
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let base = absolute_env_path("XDG_CONFIG_HOME")
-        .or_else(|| absolute_env_path("HOME").map(|home| home.join(".config")));
-    #[cfg(not(any(unix, target_os = "windows")))]
-    let base = absolute_env_path("HOME");
-
-    base
-}
-
-fn absolute_env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
 }

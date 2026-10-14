@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub mod configuration;
+pub mod paths;
 pub mod presets;
 
 pub struct Preview {

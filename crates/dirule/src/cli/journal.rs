@@ -1,4 +1,4 @@
-use super::{args, output, paths, prompt};
+use super::{args, output, prompt};
 use dirule_fs::JournalStore;
 use std::error::Error;
 
@@ -46,5 +46,5 @@ pub(super) fn undo(
 }
 
 pub(super) fn store() -> Result<JournalStore, Box<dyn Error>> {
-    Ok(JournalStore::new(paths::journal_directory()?))
+    Ok(crate::application::paths::user_journal_store()?)
 }

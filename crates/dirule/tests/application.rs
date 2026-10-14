@@ -138,6 +138,27 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn application_path_resolution_keeps_absolute_paths_and_anchors_relative_paths() {
+    let base = TempTarget::new();
+    let relative = PathBuf::from("nested/project");
+    let absolute = base.join("other-project");
+
+    assert_eq!(
+        dirule::application::paths::resolve_from(&base, relative.clone()),
+        base.join(relative)
+    );
+    assert_eq!(
+        dirule::application::paths::resolve_from(&base, absolute.clone()),
+        absolute
+    );
+    assert_eq!(
+        dirule::application::paths::resolve_target(&base, "nested/project".into())
+            .expect("resolve relative target"),
+        base.join("nested/project")
+    );
+}
+
+#[test]
 fn config_editor_preserves_comments_and_file_permissions() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

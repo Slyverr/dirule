@@ -52,8 +52,13 @@ pub(super) fn evaluate(
     let (config, _) = load_config(&source.path)?;
     let target = options
         .target
-        .map(|path| resolve_target(&cwd, path))
-        .or_else(|| config.target.clone().map(|path| resolve_target(&cwd, path)))
+        .map(|path| crate::application::paths::resolve_target(&cwd, path))
+        .or_else(|| {
+            config
+                .target
+                .clone()
+                .map(|path| crate::application::paths::resolve_target(&cwd, path))
+        })
         .transpose()?
         .unwrap_or(cwd);
     Ok(crate::application::preview(&config, &target)?)
@@ -71,7 +76,7 @@ fn config_source(cwd: &Path, rules: args::RuleSourceArgs) -> Result<ConfigSource
         let name = path.display().to_string();
 
         return Ok(ConfigSource {
-            path: resolve(cwd, path),
+            path: crate::application::paths::resolve_from(cwd, path),
             kind: "config",
             name,
             missing_hint: "pass a valid `--config FILE`",
@@ -115,50 +120,4 @@ pub(super) fn load_config(path: &Path) -> Result<(Config, String), Box<dyn Error
         .map_err(|error| format!("invalid configuration {}: {error}", path.display()))?;
 
     Ok((config, contents))
-}
-
-pub(super) fn resolve(base: &Path, path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
-        path
-    } else {
-        base.join(path)
-    }
-}
-
-fn resolve_target(base: &Path, path: PathBuf) -> Result<PathBuf, Box<dyn Error>> {
-    let Some(path_text) = path.to_str() else {
-        return Ok(resolve(base, path));
-    };
-    let home_relative = if path_text == "~" {
-        Some("")
-    } else {
-        #[cfg(windows)]
-        {
-            path_text
-                .strip_prefix("~/")
-                .or_else(|| path_text.strip_prefix("~\\"))
-        }
-        #[cfg(not(windows))]
-        {
-            path_text.strip_prefix("~/")
-        }
-    };
-    let Some(home_relative) = home_relative else {
-        return Ok(resolve(base, path));
-    };
-
-    let home = super::paths::home_directory()
-        .ok_or("cannot expand target: user home directory is unavailable")?;
-    let home_relative = home_relative.trim_start_matches(|separator| {
-        #[cfg(windows)]
-        {
-            matches!(separator, '/' | '\\')
-        }
-        #[cfg(not(windows))]
-        {
-            separator == '/'
-        }
-    });
-
-    Ok(home.join(home_relative))
 }

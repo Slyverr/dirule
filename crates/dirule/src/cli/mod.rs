@@ -4,7 +4,6 @@ mod commands;
 mod config;
 mod journal;
 mod output;
-mod paths;
 mod presets;
 mod prompt;
 mod quick;
