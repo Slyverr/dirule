@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+## Version 0.2.0
+
 ### Added
 
 - Preview-first `sort` and `rename` commands that reuse the existing planner, apply flow, and undo journal.
+- Multi-selector sorting with built-in and user-configurable file categories.
 - Target-aware configuration discovery from a local `dirule.toml` or one global preset bound to the exact target.
 - Target-wide `ignore` patterns that exclude matching paths even when Git tracks them.
 - Project-level `.diruleignore` exclusions for tracked and untracked paths, while VCS-ignored untracked paths remain excluded.
