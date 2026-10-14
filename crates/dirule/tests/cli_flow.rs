@@ -560,6 +560,25 @@ fn common_short_options_work_through_the_public_cli() {
 }
 
 #[test]
+fn plan_json_output_is_stable_across_repeated_scans() {
+    let project = TempProject::new();
+    assert!(project.run(&["init"]).status.success());
+    for name in ["ZebraFile.txt", "AppleFile.txt", "MiddleFile.txt"] {
+        fs::write(project.0.join(name), name).expect("write source file");
+    }
+
+    let first = project.run(&["plan", "--format", "json"]);
+    let second = project.run(&["plan", "--format", "json"]);
+
+    assert!(first.status.success());
+    assert!(second.status.success());
+    assert_eq!(first.stdout, second.stdout);
+    for name in ["ZebraFile.txt", "AppleFile.txt", "MiddleFile.txt"] {
+        assert!(project.0.join(name).is_file());
+    }
+}
+
+#[test]
 fn plan_exits_cleanly_when_a_piped_reader_closes_early() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());
