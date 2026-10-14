@@ -1,11 +1,11 @@
 use super::{args, output};
-use crate::application::configuration;
+use crate::application::configuration::{self, ConfigurationSource};
 use crate::application::presets::PresetStore;
 use dirule_core::CURRENT_CONFIG_VERSION;
 use std::error::Error;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(super) fn initialize(color: args::ColorChoice) -> Result<(), Box<dyn Error>> {
     let path = std::env::current_dir()?.join("dirule.toml");
@@ -31,10 +31,10 @@ pub(super) fn validate(
     let source = config_source(&cwd, options.rules)?;
     ensure_config_exists(&source)?;
 
-    let loaded = configuration::load(&source.path)?;
+    let loaded = configuration::load(source.path())?;
     output::validated_config(
-        source.kind,
-        &source.name,
+        source.kind().as_str(),
+        source.name(),
         loaded.config().rules.len(),
         options.format,
         color,
@@ -50,7 +50,7 @@ pub(super) fn evaluate(
     let source = config_source(&cwd, options.rules)?;
     ensure_config_exists(&source)?;
 
-    let loaded = configuration::load(&source.path)?;
+    let loaded = configuration::load(source.path())?;
     let config = loaded.config();
     let target = crate::application::paths::resolve_operation_target(
         &cwd,
@@ -60,51 +60,42 @@ pub(super) fn evaluate(
     Ok(crate::application::preview(config, &target)?)
 }
 
-struct ConfigSource {
-    path: PathBuf,
-    kind: &'static str,
-    name: String,
-    missing_hint: &'static str,
-}
-
-fn config_source(cwd: &Path, rules: args::RuleSourceArgs) -> Result<ConfigSource, Box<dyn Error>> {
+fn config_source(
+    cwd: &Path,
+    rules: args::RuleSourceArgs,
+) -> Result<ConfigurationSource, Box<dyn Error>> {
     if let Some(path) = rules.config {
-        let name = path.display().to_string();
-
-        return Ok(ConfigSource {
-            path: crate::application::paths::resolve_from(cwd, path),
-            kind: "config",
-            name,
-            missing_hint: "pass a valid `--config FILE`",
-        });
+        return Ok(ConfigurationSource::explicit_file(cwd, path));
     }
 
     if let Some(name) = rules.preset {
-        return Ok(ConfigSource {
-            path: PresetStore::user()?.path(&name)?,
-            kind: "preset",
-            name,
-            missing_hint: "check `dirule presets list` or create that preset",
-        });
+        return ConfigurationSource::preset(&PresetStore::user()?, &name).map_err(Into::into);
     }
 
-    Ok(ConfigSource {
-        path: cwd.join("dirule.toml"),
-        kind: "config",
-        name: "dirule.toml".to_owned(),
-        missing_hint: "run `dirule init` or pass `--config FILE`",
-    })
+    Ok(ConfigurationSource::project_default(cwd))
 }
 
-fn ensure_config_exists(source: &ConfigSource) -> Result<(), Box<dyn Error>> {
-    if !source.path.is_file() {
+fn ensure_config_exists(source: &ConfigurationSource) -> Result<(), Box<dyn Error>> {
+    if !source.path().is_file() {
         return Err(format!(
             "configuration not found at {}; {}",
-            source.path.display(),
-            source.missing_hint,
+            source.path().display(),
+            missing_config_hint(source.kind()),
         )
         .into());
     }
 
     Ok(())
+}
+
+fn missing_config_hint(
+    kind: crate::application::configuration::ConfigurationSourceKind,
+) -> &'static str {
+    use crate::application::configuration::ConfigurationSourceKind;
+
+    match kind {
+        ConfigurationSourceKind::ProjectDefault => "run `dirule init` or pass `--config FILE`",
+        ConfigurationSourceKind::ExplicitFile => "pass a valid `--config FILE`",
+        ConfigurationSourceKind::Preset => "check `dirule presets list` or create that preset",
+    }
 }

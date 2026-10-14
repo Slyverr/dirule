@@ -218,6 +218,42 @@ fn configuration_loader_errors_include_the_source_path() {
 }
 
 #[test]
+fn configuration_sources_resolve_project_files_and_named_presets() {
+    let base = TempTarget::new();
+    let default = dirule::application::configuration::ConfigurationSource::project_default(&base);
+
+    assert_eq!(default.path(), base.join("dirule.toml"));
+    assert_eq!(default.name(), "dirule.toml");
+    assert_eq!(
+        default.kind(),
+        dirule::application::configuration::ConfigurationSourceKind::ProjectDefault
+    );
+
+    let explicit = dirule::application::configuration::ConfigurationSource::explicit_file(
+        &base,
+        PathBuf::from("config/rules.toml"),
+    );
+    assert_eq!(explicit.path(), base.join("config/rules.toml"));
+    assert_eq!(explicit.name(), "config/rules.toml");
+    assert_eq!(
+        explicit.kind(),
+        dirule::application::configuration::ConfigurationSourceKind::ExplicitFile
+    );
+
+    let store = PresetStore::new(base.join("presets")).expect("create preset store");
+    let preset =
+        dirule::application::configuration::ConfigurationSource::preset(&store, "downloads")
+            .expect("resolve preset");
+
+    assert_eq!(preset.path(), store.directory().join("downloads.toml"));
+    assert_eq!(preset.name(), "downloads");
+    assert_eq!(
+        preset.kind(),
+        dirule::application::configuration::ConfigurationSourceKind::Preset
+    );
+}
+
+#[test]
 fn config_editor_preserves_comments_and_file_permissions() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

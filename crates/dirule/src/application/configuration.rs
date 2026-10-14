@@ -8,8 +8,10 @@ use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, TomlError};
 
 mod loader;
+mod source;
 
 pub use loader::{ConfigurationLoadError, LoadedConfiguration, load};
+pub use source::{ConfigurationSource, ConfigurationSourceKind};
 
 pub struct ConfigEditor {
     path: PathBuf,
