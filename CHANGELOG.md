@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+
+- Speed up large directory scans by reducing path-indexing overhead.
+
 ## Version 0.1.0
 
 ### Added
