@@ -142,10 +142,22 @@ fn benchmark_exclusion_scaling(criterion: &mut Criterion) {
 }
 
 fn benchmark_acronym_scaling(criterion: &mut Criterion) {
-    let entries = [Entry {
-        path: PathBuf::from("AThingFile.pdf"),
-        kind: EntryKind::File,
-    }];
+    let cases = [
+        (
+            "miss",
+            vec![Entry {
+                path: PathBuf::from("AThingFile.pdf"),
+                kind: EntryKind::File,
+            }],
+        ),
+        (
+            "match",
+            vec![Entry {
+                path: PathBuf::from("AaThingFile.pdf"),
+                kind: EntryKind::File,
+            }],
+        ),
+    ];
     let mut group = criterion.benchmark_group("planning/acronym_lexicon");
 
     for count in [0, 16, 256, 4_096] {
@@ -165,13 +177,15 @@ fn benchmark_acronym_scaling(criterion: &mut Criterion) {
         };
         let compiled = config.compile().unwrap();
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &compiled,
-            |bencher, compiled| {
-                bencher.iter(|| plan_compiled(black_box(compiled), black_box(&entries)).unwrap())
-            },
-        );
+        for (scenario, entries) in &cases {
+            group.bench_with_input(
+                BenchmarkId::new(*scenario, count),
+                &compiled,
+                |bencher, compiled| {
+                    bencher.iter(|| plan_compiled(black_box(compiled), black_box(entries)).unwrap())
+                },
+            );
+        }
     }
 
     group.finish();
