@@ -8,19 +8,24 @@ pub(super) fn sort(
     color: args::ColorChoice,
 ) -> Result<(), Box<dyn Error>> {
     let args::SortArgs {
-        extension,
+        selectors,
         by,
         operation,
     } = options;
     let target = target(operation.target.as_deref())?;
-    let preview = match (extension, by) {
-        (Some(extension), None) => {
-            dirule_app::sort_extension_preview(&target, &extension, operation.recursive)?
-        }
-        (None, Some(args::SortBy::Extension)) => {
+    let preview = match by {
+        Some(args::SortBy::Extension) => {
             dirule_app::sort_by_extension_preview(&target, operation.recursive)?
         }
-        _ => return Err("choose one extension or a supported --by value".into()),
+        None => {
+            let categories = dirule_app::CategoryCatalog::user_if_available()?;
+            dirule_app::sort_selectors_preview(
+                &target,
+                &selectors,
+                &categories,
+                operation.recursive,
+            )?
+        }
     };
 
     execute(preview, operation, color)

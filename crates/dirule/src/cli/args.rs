@@ -30,7 +30,7 @@ pub(super) enum CliCommand {
     Plan(OperationArgs),
     /// Review and apply a plan.
     Apply(ApplyArgs),
-    /// Sort files into extension-based directories.
+    /// Sort files by extension or category.
     Sort(SortArgs),
     /// Rename entry names with a built-in transformation.
     Rename(RenameArgs),
@@ -127,16 +127,17 @@ pub(super) struct ApplyArgs {
 
 #[derive(Debug, Args)]
 pub(super) struct SortArgs {
-    /// Match this extension, case-insensitively.
+    /// One or more extensions or category names (images, videos, audio, documents, or a user category).
     #[arg(
-        value_name = "EXTENSION",
+        value_name = "SELECTOR",
+        num_args = 1..,
         conflicts_with = "by",
         required_unless_present = "by"
     )]
-    pub(super) extension: Option<String>,
+    pub(super) selectors: Vec<String>,
 
-    /// Sort by a supported file property.
-    #[arg(long, value_enum, conflicts_with = "extension")]
+    /// Sort by a supported file property instead of selected extensions or categories.
+    #[arg(long, value_enum, conflicts_with = "selectors")]
     pub(super) by: Option<SortBy>,
 
     #[command(flatten)]
@@ -438,6 +439,7 @@ mod tests {
             panic!("expected sort command");
         };
         assert_eq!(sort.by, Some(super::SortBy::Extension));
+        assert!(sort.selectors.is_empty());
         assert!(sort.operation.recursive);
         assert!(sort.operation.apply);
         assert!(sort.operation.yes);
@@ -451,6 +453,19 @@ mod tests {
         };
         assert_eq!(rename.transform, super::NameTransform::Kebab);
         assert!(!rename.operation.apply);
+    }
+
+    #[test]
+    fn sort_parses_multiple_extension_and_category_selectors() {
+        let cli = Cli::try_parse_from(["dirule", "sort", "pdf", "images", "videos", "--recursive"])
+            .expect("valid sort selectors");
+        let CliCommand::Sort(sort) = cli.command else {
+            panic!("expected sort command");
+        };
+
+        assert_eq!(sort.selectors, ["pdf", "images", "videos"]);
+        assert_eq!(sort.by, None);
+        assert!(sort.operation.recursive);
     }
 
     #[test]

@@ -34,6 +34,7 @@ impl TempProject {
         command.env("HOME", self.0.with_extension("home"));
         #[cfg(all(unix, not(target_os = "macos")))]
         command.env("XDG_STATE_HOME", self.0.with_extension("state"));
+        configure_preset_environment(&mut command, self);
         command.args(args).current_dir(&self.0);
 
         command
@@ -769,6 +770,151 @@ fn quick_sort_matches_extension_case_insensitively_and_defaults_to_preview() {
         String::from_utf8_lossy(&undo.stderr)
     );
     assert!(project.0.join("Invoice.PDF").is_file());
+}
+
+#[test]
+fn quick_sort_accepts_multiple_extensions_and_builtin_categories() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Portrait.JPG"), "image").expect("write image");
+    fs::write(project.0.join("Clip.MP4"), "video").expect("write video");
+    fs::write(project.0.join("Guide.PDF"), "document").expect("write document");
+    fs::write(project.0.join("Notes.TXT"), "text").expect("write text");
+
+    let preview = project.run(&["sort", "images", "videos", "pdf", "txt", "--format", "json"]);
+
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid categorized sort preview");
+    let entries = preview["entries"].as_array().expect("plan entries");
+    for (source, destination) in [
+        ("Portrait.JPG", "media/images/Portrait.JPG"),
+        ("Clip.MP4", "media/videos/Clip.MP4"),
+        ("Guide.PDF", "pdfs/Guide.PDF"),
+        ("Notes.TXT", "txts/Notes.TXT"),
+    ] {
+        assert!(
+            entries
+                .iter()
+                .any(|entry| { entry["source"] == source && entry["destination"] == destination })
+        );
+    }
+    assert!(project.0.join("Portrait.JPG").is_file());
+    assert!(!project.0.join("media/images/Portrait.JPG").exists());
+
+    let apply = project.run(&[
+        "sort", "images", "videos", "pdf", "txt", "--apply", "--yes", "--format", "json",
+    ]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("valid apply result");
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    assert!(project.0.join("media/images/Portrait.JPG").is_file());
+    assert!(project.0.join("media/videos/Clip.MP4").is_file());
+    assert!(project.0.join("pdfs/Guide.PDF").is_file());
+    assert!(project.0.join("txts/Notes.TXT").is_file());
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert!(project.0.join("Portrait.JPG").is_file());
+}
+
+#[test]
+fn quick_sort_loads_user_category_catalog_and_overrides_built_ins() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Camera.RAW"), "raw").expect("write raw image");
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create Dirule config directory");
+    fs::write(
+        config_directory.join("categories.toml"),
+        format!(
+            "version = \"{}\"\n\
+             [[categories]]\nname = 'images'\nextensions = ['raw']\ndestination = 'photos'\n\
+             [[categories]]\nname = 'ebooks'\nextensions = ['epub']\ndestination = 'reading/books'\n",
+            dirule_app::CURRENT_CATEGORY_CATALOG_VERSION
+        ),
+    )
+    .expect("write user category catalog");
+
+    let mut command = project.command(&["sort", "images", "--format", "json"]);
+    configure_preset_environment(&mut command, &project);
+    let output = command.output().expect("run category sort");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan");
+    assert!(plan["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Camera.RAW" && entry["destination"] == "photos/Camera.RAW"
+    }));
+}
+
+#[test]
+fn quick_sort_rejects_selected_categories_with_overlapping_extensions() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Photo.PNG"), "image").expect("write image");
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create Dirule config directory");
+    fs::write(
+        config_directory.join("categories.toml"),
+        format!(
+            "version = \"{}\"\n\
+             [[categories]]\nname = 'pictures'\nextensions = ['png']\ndestination = 'pictures'\n",
+            dirule_app::CURRENT_CATEGORY_CATALOG_VERSION
+        ),
+    )
+    .expect("write overlapping category");
+
+    let mut command = project.command(&["sort", "images", "pictures", "--format", "json"]);
+    configure_preset_environment(&mut command, &project);
+    let output = command.output().expect("run overlapping category sort");
+
+    assert_eq!(output.status.code(), Some(2));
+    let error: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("valid error document");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("overlap")
+    );
+    assert!(project.0.join("Photo.PNG").is_file());
+}
+
+#[test]
+fn quick_sort_reports_invalid_category_catalog_as_configuration_error() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Photo.PNG"), "image").expect("write image");
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create Dirule config directory");
+    fs::write(
+        config_directory.join("categories.toml"),
+        "version = '2.0'\n[[categories]]\nname = 'books'\nextensions = ['epub']\ndestination = 'books'\n",
+    )
+    .expect("write unsupported category catalog");
+
+    let output = project.run(&["sort", "images", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let error: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("valid error document");
+    assert_eq!(error["error"]["kind"], "configuration");
+    assert!(project.0.join("Photo.PNG").is_file());
 }
 
 #[test]

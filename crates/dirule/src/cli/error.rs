@@ -166,6 +166,7 @@ fn classify_error_category(error: &(dyn Error + 'static)) -> CliErrorCategory {
 
         if source.is::<dirule_app::configuration::ConfigurationLoadError>()
             || source.is::<dirule_app::configuration::ConfigEditorError>()
+            || source.is::<dirule_app::CategoryCatalogError>()
             || source.is::<dirule_core::Error>()
         {
             return CliErrorCategory::Configuration;
