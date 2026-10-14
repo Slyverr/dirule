@@ -4,6 +4,7 @@ use dirule_fs::{scan, scan_with_ignore_set};
 use std::fs;
 use std::hint::black_box;
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -146,6 +147,29 @@ fn benchmark_configured_ignore_pruning(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_configured_ignore_skips_tracked_paths(criterion: &mut Criterion) {
+    let target = tracked_ignored_fixture(1_000);
+    let ignores = MatcherSet::new([Matcher::new("generated/**").unwrap()]);
+    let result = scan_with_ignore_set(target.path(), &ignores).unwrap();
+
+    assert!(
+        result
+            .entries
+            .iter()
+            .all(|entry| !entry.path.starts_with("generated"))
+    );
+
+    let mut group = criterion.benchmark_group("scan/configured_ignore_skips_tracked_paths");
+    group.measurement_time(Duration::from_secs(1));
+    group.sample_size(10);
+    group.bench_function("large_diruleignore", |bencher| {
+        bencher.iter(|| {
+            black_box(scan_with_ignore_set(black_box(target.path()), black_box(&ignores)).unwrap())
+        })
+    });
+    group.finish();
+}
+
 fn fixture(visible_files: usize) -> TempDir {
     let target = tempfile::tempdir().unwrap();
     fs::write(target.path().join(".ignore"), "ignored/\n").unwrap();
@@ -169,6 +193,37 @@ fn configured_ignore_fixture(visible_files: usize) -> TempDir {
     for index in 0..visible_files / 10 {
         fs::write(generated.join(format!("Client-{index}.ts")), b"").unwrap();
     }
+
+    target
+}
+
+fn tracked_ignored_fixture(tracked_files: usize) -> TempDir {
+    let target = tempfile::tempdir().unwrap();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(target.path())
+        .status()
+        .unwrap();
+    assert!(init.success());
+
+    let mut patterns = String::new();
+    for index in 0..1_000 {
+        patterns.push_str(&format!("unmatched-{index}/**\n"));
+    }
+    fs::write(target.path().join(".diruleignore"), patterns).unwrap();
+
+    let generated = target.path().join("generated");
+    fs::create_dir(&generated).unwrap();
+    for index in 0..tracked_files {
+        fs::write(generated.join(format!("entry-{index}.txt")), b"").unwrap();
+    }
+
+    let add = Command::new("git")
+        .args(["add", "--", "generated"])
+        .current_dir(target.path())
+        .status()
+        .unwrap();
+    assert!(add.success());
 
     target
 }
@@ -197,6 +252,6 @@ criterion_group! {
         .measurement_time(Duration::from_secs(3))
         .sample_size(20);
     targets = benchmark_scan, benchmark_configured_ignore_overhead,
-        benchmark_configured_ignore_pruning
+        benchmark_configured_ignore_pruning, benchmark_configured_ignore_skips_tracked_paths
 }
 criterion_main!(benches);
