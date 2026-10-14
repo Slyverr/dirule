@@ -32,14 +32,7 @@ On Windows, run the PowerShell installer:
 powershell -c "irm https://github.com/Slyverr/dirule/releases/latest/download/dirule-installer.ps1 | iex"
 ```
 
-Run or install Dirule directly from GitHub:
-
-```sh
-nix run github:Slyverr/dirule -- --help
-nix profile install github:Slyverr/dirule
-```
-
-The shell installer does not support NixOS; use the flake there. The generated shell and PowerShell installers do not verify checksums. Releases also include archives and SHA-256 checksum files for manual installation. After downloading an archive and its matching `.sha256` file into the same directory, verify it with:
+The generated shell and PowerShell installers do not verify checksums. Releases also include archives and SHA-256 checksum files for manual installation. After downloading an archive and its matching `.sha256` file into the same directory, verify it with:
 
 ```sh
 sha256sum -c dirule-x86_64-unknown-linux-gnu.tar.xz.sha256
@@ -202,7 +195,14 @@ If you set `XDG_DATA_HOME` or `XDG_CONFIG_HOME`, use the corresponding directory
 
 ## Nix
 
-Run Dirule from the checkout with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`. The GitHub flake commands in [Install](#install) fetch the source from the public repository.
+Run or install Dirule directly from GitHub:
+
+```sh
+nix run github:Slyverr/dirule -- --help
+nix profile install github:Slyverr/dirule
+```
+
+The flake is the installation path for NixOS; the shell installer does not support it. From a checkout, run Dirule with `nix run . -- --help`, enter the development shell with `nix develop`, or install it to your user profile with `nix profile add .`.
 
 The flake supports x86_64 and ARM64 Linux, plus ARM64 macOS. On Intel macOS, install from source with Cargo or use a release archive.
 
