@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_TEMP_PROJECT: AtomicU64 = AtomicU64::new(0);
 
 struct TempProject {
     root: PathBuf,
@@ -14,9 +17,13 @@ impl TempProject {
             .duration_since(UNIX_EPOCH)
             .expect("clock is after Unix epoch")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("dirule-swap-{}-{stamp}", std::process::id()));
+        let sequence = NEXT_TEMP_PROJECT.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "dirule-swap-{}-{stamp}-{sequence}",
+            std::process::id()
+        ));
         let state = root.with_extension("state");
-        fs::create_dir_all(&root).expect("create test project");
+        fs::create_dir(&root).expect("create test project");
 
         Self { root, state }
     }
