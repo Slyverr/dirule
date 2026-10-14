@@ -1,3 +1,4 @@
+use super::ConfigurationSource;
 use dirule_core::{Config, parse_config};
 use std::error::Error;
 use std::fmt;
@@ -7,6 +8,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub enum ConfigurationLoadError {
+    Missing {
+        source: ConfigurationSource,
+    },
     Io {
         path: PathBuf,
         source: io::Error,
@@ -47,9 +51,26 @@ pub fn load(path: impl Into<PathBuf>) -> Result<LoadedConfiguration, Configurati
     Ok(LoadedConfiguration { path, config })
 }
 
+pub fn load_source(
+    source: &ConfigurationSource,
+) -> Result<LoadedConfiguration, ConfigurationLoadError> {
+    if !source.path().is_file() {
+        return Err(ConfigurationLoadError::Missing {
+            source: source.clone(),
+        });
+    }
+
+    load(source.path())
+}
+
 impl fmt::Display for ConfigurationLoadError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Missing { source } => write!(
+                formatter,
+                "configuration not found at {}",
+                source.path().display()
+            ),
             Self::Io { path, source } => {
                 write!(
                     formatter,
@@ -71,6 +92,7 @@ impl fmt::Display for ConfigurationLoadError {
 impl Error for ConfigurationLoadError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Missing { .. } => None,
             Self::Io { source, .. } => Some(source),
             Self::Invalid { source, .. } => Some(source),
         }

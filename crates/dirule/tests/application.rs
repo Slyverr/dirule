@@ -254,6 +254,24 @@ fn configuration_sources_resolve_project_files_and_named_presets() {
 }
 
 #[test]
+fn configuration_loading_reports_missing_selected_sources() {
+    let target = TempTarget::new();
+    let source = dirule::application::configuration::ConfigurationSource::project_default(&target);
+
+    let error = dirule::application::configuration::load_source(&source).unwrap_err();
+
+    assert!(matches!(
+        error,
+        dirule::application::configuration::ConfigurationLoadError::Missing { .. }
+    ));
+    assert!(
+        error
+            .to_string()
+            .contains(&source.path().display().to_string())
+    );
+}
+
+#[test]
 fn config_editor_preserves_comments_and_file_permissions() {
     let target = TempTarget::new();
     let path = target.join("dirule.toml");

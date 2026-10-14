@@ -1,5 +1,5 @@
 use super::{args, output};
-use crate::application::configuration::{self, ConfigurationSource};
+use crate::application::configuration::{self, ConfigurationLoadError, ConfigurationSource};
 use crate::application::presets::PresetStore;
 use dirule_core::CURRENT_CONFIG_VERSION;
 use std::error::Error;
@@ -29,9 +29,7 @@ pub(super) fn validate(
 ) -> Result<(), Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
     let source = config_source(&cwd, options.rules)?;
-    ensure_config_exists(&source)?;
-
-    let loaded = configuration::load(source.path())?;
+    let loaded = load_configuration(&source)?;
     output::validated_config(
         source.kind().as_str(),
         source.name(),
@@ -48,9 +46,7 @@ pub(super) fn evaluate(
 ) -> Result<crate::application::Preview, Box<dyn Error>> {
     let cwd = std::env::current_dir()?;
     let source = config_source(&cwd, options.rules)?;
-    ensure_config_exists(&source)?;
-
-    let loaded = configuration::load(source.path())?;
+    let loaded = load_configuration(&source)?;
     let config = loaded.config();
     let target = crate::application::paths::resolve_operation_target(
         &cwd,
@@ -75,17 +71,19 @@ fn config_source(
     Ok(ConfigurationSource::project_default(cwd))
 }
 
-fn ensure_config_exists(source: &ConfigurationSource) -> Result<(), Box<dyn Error>> {
-    if !source.path().is_file() {
-        return Err(format!(
+fn load_configuration(
+    source: &ConfigurationSource,
+) -> Result<configuration::LoadedConfiguration, Box<dyn Error>> {
+    match configuration::load_source(source) {
+        Ok(loaded) => Ok(loaded),
+        Err(ConfigurationLoadError::Missing { source }) => Err(format!(
             "configuration not found at {}; {}",
             source.path().display(),
             missing_config_hint(source.kind()),
         )
-        .into());
+        .into()),
+        Err(error) => Err(Box::new(error)),
     }
-
-    Ok(())
 }
 
 fn missing_config_hint(

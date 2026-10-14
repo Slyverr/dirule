@@ -10,7 +10,7 @@ use toml_edit::{DocumentMut, TomlError};
 mod loader;
 mod source;
 
-pub use loader::{ConfigurationLoadError, LoadedConfiguration, load};
+pub use loader::{ConfigurationLoadError, LoadedConfiguration, load, load_source};
 pub use source::{ConfigurationSource, ConfigurationSourceKind};
 
 pub struct ConfigEditor {
