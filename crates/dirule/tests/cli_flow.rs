@@ -277,10 +277,81 @@ fn quick_rename_previews_applies_and_undoes_without_a_config() {
 }
 
 #[test]
+fn quick_recursive_rename_transforms_directories_and_undoes() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join("HTTPServer/NestedFolder"))
+        .expect("create nested source directories");
+    fs::write(project.0.join("HTTPServer/ReadMeFile.txt"), "notes")
+        .expect("write nested source file");
+    fs::write(
+        project.0.join("HTTPServer/NestedFolder/MyXMLParser.pdf"),
+        "document",
+    )
+    .expect("write deeply nested source file");
+
+    let preview = project.run(&["rename", "kebab-case", "--recursive", "--format", "json"]);
+    assert!(preview.status.success());
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid recursive rename preview");
+    assert!(
+        preview["entries"].as_array().unwrap().iter().any(|entry| {
+            entry["source"] == "HTTPServer" && entry["destination"] == "http-server"
+        })
+    );
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "HTTPServer/NestedFolder/MyXMLParser.pdf"
+            && entry["destination"] == "http-server/nested-folder/my-xml-parser.pdf"
+    }));
+    assert!(
+        project
+            .0
+            .join("HTTPServer/NestedFolder/MyXMLParser.pdf")
+            .is_file()
+    );
+
+    let apply = project.run(&[
+        "rename",
+        "kebab-case",
+        "--recursive",
+        "--apply",
+        "--yes",
+        "--format",
+        "json",
+    ]);
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply: serde_json::Value =
+        serde_json::from_slice(&apply.stdout).expect("valid recursive rename apply result");
+    let run_id = apply["execution"]["run_id"]
+        .as_str()
+        .expect("journal run ID");
+    assert!(
+        project
+            .0
+            .join("http-server/nested-folder/my-xml-parser.pdf")
+            .is_file()
+    );
+
+    let undo = project.run(&["undo", run_id, "--yes"]);
+    assert!(undo.status.success());
+    assert!(
+        project
+            .0
+            .join("HTTPServer/NestedFolder/MyXMLParser.pdf")
+            .is_file()
+    );
+}
+
+#[test]
 fn quick_sort_matches_extension_case_insensitively_and_defaults_to_preview() {
     let project = TempProject::new();
     fs::write(project.0.join("Invoice.PDF"), "invoice").expect("write uppercase extension");
     fs::write(project.0.join("notes.txt"), "notes").expect("write unrelated file");
+    fs::create_dir(project.0.join("docs")).expect("create nested directory");
+    fs::write(project.0.join("docs/Guide.PDF"), "guide").expect("write nested PDF");
 
     let preview = project.run(&["sort", "pdf", "--format", "json"]);
     assert!(
@@ -292,6 +363,9 @@ fn quick_sort_matches_extension_case_insensitively_and_defaults_to_preview() {
         serde_json::from_slice(&preview.stdout).expect("valid sort preview");
     assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
         entry["source"] == "Invoice.PDF" && entry["destination"] == "pdfs/Invoice.PDF"
+    }));
+    assert!(preview["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "docs/Guide.PDF" && entry["destination"] == "docs/Guide.PDF"
     }));
     assert!(project.0.join("Invoice.PDF").is_file());
     assert!(!project.0.join("pdfs/Invoice.PDF").exists());
@@ -308,6 +382,7 @@ fn quick_sort_matches_extension_case_insensitively_and_defaults_to_preview() {
         .as_str()
         .expect("journal run ID");
     assert!(project.0.join("pdfs/Invoice.PDF").is_file());
+    assert!(project.0.join("docs/Guide.PDF").is_file());
 
     let undo = project.run(&["undo", run_id, "--yes"]);
     assert!(
@@ -316,6 +391,24 @@ fn quick_sort_matches_extension_case_insensitively_and_defaults_to_preview() {
         String::from_utf8_lossy(&undo.stderr)
     );
     assert!(project.0.join("Invoice.PDF").is_file());
+}
+
+#[test]
+fn quick_sort_respects_project_ignore_files() {
+    let project = TempProject::new();
+    fs::write(project.0.join(".ignore"), "Invoice.PDF\n").expect("write ignore rule");
+    fs::write(project.0.join("Invoice.PDF"), "invoice").expect("write ignored PDF");
+
+    let preview = project.run(&["sort", "pdf", "--format", "json"]);
+
+    assert!(preview.status.success());
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid ignored-file preview");
+    assert!(preview["entries"].as_array().unwrap().iter().all(|entry| {
+        entry["source"] != "Invoice.PDF" && entry["destination"] != "pdfs/Invoice.PDF"
+    }));
+    assert!(project.0.join("Invoice.PDF").is_file());
+    assert!(!project.0.join("pdfs").exists());
 }
 
 #[test]
