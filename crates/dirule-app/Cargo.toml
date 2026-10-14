@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Shared application services for Dirule frontends."
 
 [dependencies]
-dirule-core = { version = "0.2.1", path = "../dirule-core" }
-dirule-fs = { version = "0.2.1", path = "../dirule-fs" }
+dirule-core = { version = "0.3.0", path = "../dirule-core" }
+dirule-fs = { version = "0.3.0", path = "../dirule-fs" }
 tempfile = "3"
 toml_edit = "0.25"

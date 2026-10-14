@@ -98,7 +98,7 @@ Commit `dirule.toml` at the repository root and run the check from that director
 
 ```yaml
 - name: Install Dirule
-  run: cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.2.1 dirule
+  run: cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.3.0 dirule
 - name: Check project paths
   run: dirule check --color never
 ```

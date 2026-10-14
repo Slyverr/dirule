@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## Version 0.3.0
+
 ### Added
 
 - List the effective built-in and user-defined sort categories with `dirule categories list`.
