@@ -7,7 +7,7 @@
 - Preview-first `sort` and `rename` commands that reuse the existing planner, apply flow, and undo journal.
 - Target-aware configuration discovery from a local `dirule.toml` or one global preset bound to the exact target.
 - Target-wide `ignore` patterns that exclude matching paths even when Git tracks them.
-- Project-level `.diruleignore` rules that can exclude paths or re-include VCS-ignored paths.
+- Project-level `.diruleignore` exclusions for tracked and untracked paths, while VCS-ignored untracked paths remain excluded.
 - Structured plan findings, conflict details, and command errors in JSON output.
 
 ### Fixed
