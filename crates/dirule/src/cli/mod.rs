@@ -6,6 +6,7 @@ mod output;
 mod paths;
 mod presets;
 mod prompt;
+mod quick;
 
 use self::args::{Cli, ColorChoice};
 use clap::Parser;
@@ -19,6 +20,8 @@ const COMMAND_ERROR_EXIT_CODE: u8 = 2;
 pub struct CliError {
     source: Box<dyn Error>,
     color: ColorChoice,
+    format: args::OutputFormat,
+    code: &'static str,
     exit_code: u8,
 }
 
@@ -35,7 +38,13 @@ impl Error for CliError {
 }
 
 pub fn print_error(error: &CliError) {
-    let _ = output::error(&error.to_string(), error.color);
+    let _ = output::error(
+        &error.to_string(),
+        error.color,
+        error.format,
+        error.code,
+        error.exit_code,
+    );
 }
 
 impl CliError {
@@ -47,20 +56,23 @@ impl CliError {
 pub fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
     let color = cli.color;
+    let format = cli.command.output_format();
 
     match commands::run(cli.command, color) {
         Ok(()) => Ok(()),
         Err(source) if output::is_broken_pipe(source.as_ref()) => Ok(()),
         Err(source) => {
-            let exit_code = if source.downcast_ref::<commands::CheckFailure>().is_some() {
-                CHECK_FAILURE_EXIT_CODE
+            let (code, exit_code) = if source.downcast_ref::<commands::CheckFailure>().is_some() {
+                ("check_failed", CHECK_FAILURE_EXIT_CODE)
             } else {
-                COMMAND_ERROR_EXIT_CODE
+                ("command_error", COMMAND_ERROR_EXIT_CODE)
             };
 
             Err(CliError {
                 source,
                 color,
+                format,
+                code,
                 exit_code,
             })
         }

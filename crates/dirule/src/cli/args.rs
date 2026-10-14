@@ -44,6 +44,27 @@ pub(super) enum CliCommand {
     },
 }
 
+impl CliCommand {
+    pub(super) fn output_format(&self) -> OutputFormat {
+        match self {
+            Self::Check(options) | Self::Plan(options) => options.format,
+            Self::Validate(options) => options.format,
+            Self::Apply(options) => options.operation.format,
+            Self::Presets(options) => match &options.command {
+                PresetsCommand::List { format } => *format,
+                PresetsCommand::Save(_)
+                | PresetsCommand::Export { .. }
+                | PresetsCommand::Remove(_) => OutputFormat::Human,
+            },
+            Self::Runs(options) => match &options.command {
+                RunsCommand::List { format } | RunsCommand::Show { format, .. } => *format,
+            },
+            Self::Undo(options) => options.format,
+            Self::Init | Self::Completions { .. } => OutputFormat::Human,
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub(super) struct OperationArgs {
     /// Directory to check or organize.

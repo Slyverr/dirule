@@ -523,6 +523,28 @@ fn malformed_config_errors_identify_the_source_file() {
 }
 
 #[test]
+fn json_command_errors_emit_a_versioned_error_document_to_stderr() {
+    let project = TempProject::new();
+    fs::write(project.0.join("rules.toml"), "version = 12\n").expect("write malformed config");
+
+    let output = project.run(&["plan", "--config", "rules.toml", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("command error is a JSON document");
+    assert_eq!(value["schema_version"], "1.0");
+    assert_eq!(value["error"]["code"], "command_error");
+    assert_eq!(value["error"]["exit_code"], 2);
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("rules.toml")
+    );
+}
+
+#[test]
 fn commands_do_not_search_parent_directories_for_a_config() {
     let project = TempProject::new();
     assert!(project.run(&["init"]).status.success());
@@ -1225,7 +1247,11 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
             .expect("conflicts array")
             .is_empty()
     );
-    assert!(String::from_utf8_lossy(&check.stderr).contains("target does not satisfy"));
+    let error: serde_json::Value =
+        serde_json::from_slice(&check.stderr).expect("check failure is a JSON document");
+    assert_eq!(error["schema_version"], "1.0");
+    assert_eq!(error["error"]["code"], "check_failed");
+    assert_eq!(error["error"]["exit_code"], 1);
     assert!(project.0.join("MyFile.txt").is_file());
     assert!(!project.0.join("my-file.txt").exists());
     assert!(!project.journal_directory().exists());
