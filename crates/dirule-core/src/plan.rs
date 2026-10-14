@@ -4,7 +4,7 @@ use crate::{
     transform_directory, transform_filename,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry as MapEntry};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -240,23 +240,29 @@ fn find_conflicts(
     original_paths: &HashSet<PathBuf>,
     moved_sources: &HashSet<PathBuf>,
 ) {
-    let mut destinations = HashMap::<PathBuf, (usize, Vec<PathBuf>)>::new();
-    for entry in &plan.entries {
+    let mut destinations = HashMap::<PathBuf, usize>::new();
+    let mut duplicate_owners = HashMap::<PathBuf, Vec<usize>>::new();
+    for (index, entry) in plan.entries.iter().enumerate() {
         if entry.source != entry.destination {
-            let (owners, related_paths) =
-                destinations.entry(entry.destination.clone()).or_default();
-            *owners += 1;
-            related_paths.extend([entry.source.clone(), entry.destination.clone()]);
+            match destinations.entry(entry.destination.clone()) {
+                MapEntry::Occupied(owner) => {
+                    duplicate_owners
+                        .entry(entry.destination.clone())
+                        .or_insert_with(|| vec![*owner.get()])
+                        .push(index);
+                }
+                MapEntry::Vacant(slot) => {
+                    slot.insert(index);
+                }
+            }
         }
     }
 
     let mut destination_conflicts = destinations
         .into_iter()
-        .filter_map(|(destination, (owners, mut related_paths))| {
-            related_paths.sort_unstable();
-            related_paths.dedup();
-
-            if owners > 1 {
+        .filter_map(|(destination, first_owner)| {
+            if let Some(owners) = duplicate_owners.remove(&destination) {
+                let related_paths = related_paths(plan, owners);
                 Some(Conflict {
                     path: destination,
                     kind: ConflictKind::DuplicateDestination,
@@ -265,6 +271,7 @@ fn find_conflicts(
                 })
             } else if original_paths.contains(&destination) && !moved_sources.contains(&destination)
             {
+                let related_paths = related_paths(plan, [first_owner]);
                 Some(Conflict {
                     path: destination,
                     kind: ConflictKind::DestinationOccupied,
@@ -288,23 +295,20 @@ fn find_conflicts(
         }
     }
 
-    let mut file_parent_conflicts = vec![Vec::new(); plan.entries.len()];
-    for entry in plan
-        .entries
-        .iter()
-        .filter(|entry| entry.source != entry.destination)
-    {
+    let mut file_parent_conflicts = HashMap::<usize, Vec<usize>>::new();
+    for (entry_index, entry) in plan.entries.iter().enumerate() {
+        if entry.source == entry.destination {
+            continue;
+        }
+
         let mut parent = entry.destination.parent();
         while let Some(path) = parent {
             if let Some(file_indices) = file_destinations.get(path) {
                 for index in file_indices {
-                    let related_paths = &mut file_parent_conflicts[*index];
-                    related_paths.extend([
-                        plan.entries[*index].source.clone(),
-                        plan.entries[*index].destination.clone(),
-                        entry.source.clone(),
-                        entry.destination.clone(),
-                    ]);
+                    file_parent_conflicts
+                        .entry(*index)
+                        .or_default()
+                        .extend([*index, entry_index]);
                 }
             }
 
@@ -312,19 +316,28 @@ fn find_conflicts(
         }
     }
 
-    for (index, mut related_paths) in file_parent_conflicts.into_iter().enumerate() {
-        if !related_paths.is_empty() {
-            related_paths.sort_unstable();
-            related_paths.dedup();
-
-            plan.conflicts.push(Conflict {
-                path: plan.entries[index].destination.clone(),
-                kind: ConflictKind::FileDestinationParent,
-                related_paths,
-                reason: "a file destination is also a parent of another destination".into(),
-            });
-        }
+    for (index, related_entries) in file_parent_conflicts {
+        plan.conflicts.push(Conflict {
+            path: plan.entries[index].destination.clone(),
+            kind: ConflictKind::FileDestinationParent,
+            related_paths: related_paths(plan, related_entries),
+            reason: "a file destination is also a parent of another destination".into(),
+        });
     }
+}
+
+fn related_paths(plan: &Plan, entry_indices: impl IntoIterator<Item = usize>) -> Vec<PathBuf> {
+    let mut paths = entry_indices
+        .into_iter()
+        .flat_map(|index| {
+            let entry = &plan.entries[index];
+            [entry.source.clone(), entry.destination.clone()]
+        })
+        .collect::<Vec<_>>();
+    paths.sort_unstable();
+    paths.dedup();
+
+    paths
 }
 
 fn virtual_parent(path: &Path, destinations: &HashMap<PathBuf, PathBuf>) -> PathBuf {
