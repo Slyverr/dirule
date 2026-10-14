@@ -114,6 +114,7 @@ Install Dirule separately and make sure it is on `PATH`. The hook checks the con
 ```toml
 version = "1.3"
 target = "."
+ignore = ["generated/api/**"]
 
 [[rules]]
 name = "Archive invoices"
@@ -136,6 +137,10 @@ to = "builtin:kebab-case"
 ```
 
 `<year>` and the other named captures come from the matched path; `${year}` inserts a capture in a `template:` destination. `kind` can select `file`, `directory`, or `any`; it defaults to `any`. `exclude` skips paths from that rule, allowing later rules to match them. `builtin:` applies a built-in case transformation to the entry name. Available transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. See the [configuration specification](docs/specs/dirule-config.md) for matching, templates, and path behavior.
+
+### Exclusions
+
+Dirule honors project ignore files such as `.gitignore` and `.ignore`, plus Git's repository and global exclude rules. In a Git repository, ignored untracked paths are skipped while tracked paths remain eligible. Outside Git, `.ignore` files still filter the scan. Use the top-level `ignore` setting for paths Dirule must always skip, whether tracked or not. A rule's `exclude` setting skips a path only for that rule, so a later rule may still match it.
 
 ## Conflict handling
 
