@@ -112,7 +112,7 @@ Install Dirule separately and make sure it is on `PATH`. The hook checks the con
 `dirule init` creates a starter `dirule.toml`. Put project-specific rules before its general `**/*` rule: rules run in order, and the first match owns each original path.
 
 ```toml
-version = "1.2"
+version = "1.3"
 target = "."
 
 [[rules]]

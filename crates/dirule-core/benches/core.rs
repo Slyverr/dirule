@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const CONFIG_SOURCE: &str = r#"
-version = "1.2"
+version = "1.3"
 target = "."
 
 [acronyms]
