@@ -1,6 +1,7 @@
 use crate::{Error, Result};
 use serde::Deserialize;
 use std::fmt;
+use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ConfigVersion {
@@ -38,6 +39,14 @@ impl ConfigVersion {
         let major = parse_component(major, "major")?;
         let minor = parse_component(minor, "minor")?;
         Ok(Self { major, minor })
+    }
+}
+
+impl FromStr for ConfigVersion {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse(value)
     }
 }
 
