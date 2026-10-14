@@ -22,6 +22,12 @@ The CLI is Dirule's only user interface at this stage. Prefer portable standard-
 
 When implementing file changes, calculate and validate a complete plan before mutation. Never overwrite an existing path. Respect the project's ignore rules, skip symlinks unless a later design explicitly supports them, and revalidate sources and destinations when applying a plan. Keep path matching and transformations in `dirule-core`; do not let filesystem traversal determine rule semantics.
 
+## Path checks
+
+- Before changing paths in this repository, inspect the proposed moves with `cargo run -p dirule -- plan --format json`.
+- Verify the result with `cargo run -p dirule -- check --format json`; `check` never changes files. Status `0` means the names comply, `1` means the plan contains changes or conflicts, and `2` means Dirule could not evaluate the check. Treat status `2` as an error, not as a pass.
+- Dirule changes paths only. Update code references separately and run the relevant project checks afterward.
+
 ## Work and validation
 
 Inspect the affected crate and relevant spec before changing behavior. Make the smallest coherent change, keep module boundaries clear, and avoid comments that merely repeat the code. Add dependencies only when they materially simplify or strengthen the implementation.
