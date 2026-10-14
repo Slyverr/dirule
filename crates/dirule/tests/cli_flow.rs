@@ -436,7 +436,20 @@ to = "template:independent.txt"
     assert!(project.0.join("Source/child.txt").is_file());
     assert_eq!(text(&project.0.join("Occupied/existing.txt")), "keep");
     assert_eq!(text(&project.0.join("independent.txt")), "independent");
-    assert!(!project.0.join("Independent.txt").exists());
+    let root_names = || {
+        fs::read_dir(&project.0)
+            .expect("read project entries")
+            .map(|entry| {
+                entry
+                    .expect("read project entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(root_names().iter().any(|name| name == "independent.txt"));
+    assert!(!root_names().iter().any(|name| name == "Independent.txt"));
 
     let run_id = apply["execution"]["run_id"]
         .as_str()
@@ -449,6 +462,8 @@ to = "template:independent.txt"
         String::from_utf8_lossy(&undo.stderr)
     );
     assert_eq!(text(&project.0.join("Independent.txt")), "independent");
+    assert!(root_names().iter().any(|name| name == "Independent.txt"));
+    assert!(!root_names().iter().any(|name| name == "independent.txt"));
     assert!(project.0.join("Source/child.txt").is_file());
     assert_eq!(text(&project.0.join("Occupied/existing.txt")), "keep");
 }
