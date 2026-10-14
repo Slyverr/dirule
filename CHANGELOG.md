@@ -4,12 +4,19 @@
 
 ### Added
 
-- Structured findings with stable kinds, affected paths, and suggestions in JSON plan output.
-- Structured conflict details and stable error categories in JSON output.
+- Preview-first `sort` and `rename` commands that reuse the existing planner, apply flow, and undo journal.
+- Target-aware configuration discovery from a local `dirule.toml` or one global preset bound to the exact target.
+- Target-wide `ignore` patterns that exclude matching paths even when Git tracks them.
+- Structured plan findings, conflict details, and command errors in JSON output.
+
+### Fixed
+
+- Valid rename chains and cycles no longer conflict with destinations vacated by other planned moves.
+- Scans skip Git metadata paths and return findings in stable order.
 
 ### Improved
 
-- Speed up large directory scans by reducing path-indexing overhead.
+- Reduce scan and conflict-planning overhead on large targets and configurations with many path patterns.
 
 ## Version 0.1.0
 
