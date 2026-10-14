@@ -2458,3 +2458,93 @@ fn plan_json_keeps_finding_messages_and_exposes_structured_diagnostics() {
         }])
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn plan_json_reports_non_regular_entry_diagnostics() {
+    use std::os::unix::net::UnixListener;
+
+    let project = TempProject::new();
+    let _listener =
+        UnixListener::bind(project.0.join("service.sock")).expect("create socket fixture");
+    assert!(project.run(&["init"]).status.success());
+
+    let output = project.run(&["plan", "--format", "json"]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+
+    assert!(
+        value["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["kind"] == "skipped_non_regular_entry"
+                    && diagnostic["path"] == "service.sock"
+                    && diagnostic["suggestion"].is_string()
+            })
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn plan_json_reports_non_unicode_path_diagnostics() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let project = TempProject::new();
+    let name = std::ffi::OsString::from_vec(vec![b'f', 0xff]);
+    fs::write(project.0.join(name), "non-Unicode path").expect("write non-Unicode file");
+    assert!(project.run(&["init"]).status.success());
+
+    let output = project.run(&["plan", "--format", "json"]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+
+    assert!(
+        value["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["kind"] == "skipped_non_unicode_path" && diagnostic["path"].is_null()
+            })
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn plan_json_reports_git_tracked_non_unicode_path_diagnostics() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let project = TempProject::new();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&project.0)
+        .status()
+        .expect("initialize Git fixture");
+    assert!(init.success(), "initialize Git fixture");
+
+    let name = std::ffi::OsString::from_vec(vec![b'f', 0xff]);
+    fs::write(project.0.join(name), "non-Unicode path").expect("write non-Unicode file");
+    let add = Command::new("git")
+        .args(["add", "--all"])
+        .current_dir(&project.0)
+        .status()
+        .expect("stage non-Unicode fixture");
+    assert!(add.success(), "stage non-Unicode fixture");
+    assert!(project.run(&["init"]).status.success());
+
+    let output = project.run(&["plan", "--format", "json"]);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+
+    assert!(
+        value["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["kind"] == "skipped_git_non_unicode_path" && diagnostic["path"].is_null()
+            })
+    );
+}
