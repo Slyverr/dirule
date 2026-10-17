@@ -107,6 +107,16 @@ dirule undo RUN_ID
 
 The journal stores paths and filesystem metadata, not file contents. It is recovery history, not a backup. Dirule verifies paths before undoing and will not overwrite a file that has changed or appeared since the run. See [Usage](docs/usage.md#review-and-undo-applied-runs) for preset management and run details.
 
+## Use with coding agents
+
+Dirule includes an [Agent Skill](.agents/skills/dirule/SKILL.md) that helps compatible coding agents configure and use Dirule in a project or personal folder. Install it with the [Skills CLI](https://github.com/vercel-labs/skills):
+
+```sh
+npx skills add Slyverr/dirule --skill dirule
+```
+
+Add `-g` to make the skill available globally for your agent. The skill provides instructions; install Dirule itself separately using the [installation guide](docs/installation.md).
+
 ## Help and contributions
 
 For bugs, questions, or feature ideas, open a [GitHub issue](https://github.com/Slyverr/dirule/issues). Contributions are welcome; see [Contributing](CONTRIBUTING.md) for development checks and project conventions.

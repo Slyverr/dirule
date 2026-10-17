@@ -2,6 +2,8 @@
 
 Dirule is a Rust Cargo workspace. Keep contributions focused and follow the workspace boundaries below. Update user documentation when implemented behavior changes.
 
+The consumer-facing Agent Skill at `.agents/skills/dirule/SKILL.md` teaches agents to use Dirule in other projects. Review it alongside user docs when CLI, configuration, presets, categories, or filesystem safety workflows change. Keep its examples aligned with implemented behavior and link to user docs for full details rather than copying the full configuration reference.
+
 ## Workspace boundaries
 
 - Put rule data, matching, transformations, validation, and planning in `dirule-core`.

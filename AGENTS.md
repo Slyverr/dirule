@@ -9,6 +9,12 @@ Dirule is a Rust workspace for a local-first filesystem rules CLI. Use the [READ
 - Source code and tests describe what is implemented. Do not describe planned behavior as available functionality.
 - Do not convert a CLI experiment, generated output, or an uncommitted prototype into accepted product direction or a commit without the user's direction.
 
+## Consumer-facing agent skill
+
+- `.agents/skills/dirule/SKILL.md` is an installable skill for agents using Dirule in users' projects or personal folders. It is not contributor guidance for changing Dirule itself.
+- Keep the skill aligned with implemented CLI behavior. Source and tests are authoritative; user documentation explains supported syntax and workflows. Link to those docs instead of maintaining a second full configuration reference in the skill.
+- When a change affects public commands, configuration or category formats, preset selection, ignore behavior, or filesystem safety, review the skill and update any workflow that changed. Verify command examples against the current CLI and docs.
+
 ## Workspace boundaries
 
 - `crates/dirule`: CLI parsing, output, and command orchestration.
