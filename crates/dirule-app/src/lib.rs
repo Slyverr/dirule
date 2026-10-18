@@ -9,8 +9,8 @@ use dirule_core::{
     AcronymOptions, Config, Entry, MatcherSet, Plan, Rule, RuleKind, Transform, plan_compiled,
 };
 use dirule_fs::{
-    ApplyError, ApplyReport, ConflictPolicy, ScanError, ScanResult, apply_journaled,
-    scan_with_entry_limit, scan_with_ignore_set, validate_destinations,
+    ApplyError, ApplyReport, ScanError, ScanResult, apply_journaled, scan_with_entry_limit,
+    scan_with_ignore_set, validate_destinations,
 };
 use std::error::Error;
 use std::fmt;
@@ -31,6 +31,7 @@ mod sort;
 pub use categories::{
     CURRENT_CATEGORY_CATALOG_VERSION, CategoryCatalog, CategoryCatalogError, SortCategory,
 };
+pub use dirule_fs::ConflictPolicy;
 pub use sort::{
     sort_by_extension_preview, sort_extension_preview, sort_selectors_preview,
     sort_selectors_preview_with_entry_limit,

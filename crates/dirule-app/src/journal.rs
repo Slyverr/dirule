@@ -12,6 +12,11 @@ impl JournalService {
         Self { store }
     }
 
+    /// Create a service backed by the journal files in `directory`.
+    pub fn at(directory: impl Into<std::path::PathBuf>) -> Self {
+        Self::new(JournalStore::new(directory))
+    }
+
     /// Create a service using the platform's user state directory.
     pub fn user() -> Result<Self, UserStateDirectoryUnavailable> {
         user_journal_store().map(Self::new)

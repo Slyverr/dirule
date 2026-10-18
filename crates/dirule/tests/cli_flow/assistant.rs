@@ -99,6 +99,95 @@ fn ask_uses_a_profile_tool_loop_and_sends_no_file_contents() {
 }
 
 #[test]
+fn ask_refuses_model_requested_changes_without_an_interactive_terminal() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Portrait.JPG"), "private image bytes").expect("write photo");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind model endpoint");
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for index in 0..2 {
+            let (mut stream, _) = listener.accept().expect("accept model request");
+            let (_, body) = read_request(&mut stream);
+            let body: Value = serde_json::from_str(&body).expect("request JSON");
+            requests.push(body.clone());
+
+            if index == 0 {
+                write_json(
+                    &mut stream,
+                    &json!({
+                        "choices": [{
+                            "message": {
+                                "content": null,
+                                "tool_calls": [{
+                                    "id": "call-apply",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "apply_sort",
+                                        "arguments": "{\"selectors\":[\"images\"]}"
+                                    }
+                                }]
+                            }
+                        }]
+                    }),
+                );
+            } else {
+                let encoded = serde_json::to_string(&body).expect("encode second request");
+                assert!(encoded.contains("interactive terminal"));
+                write_json(
+                    &mut stream,
+                    &json!({
+                        "choices": [{
+                            "message": {
+                                "content": "No changes were applied because approval needs an interactive terminal."
+                            }
+                        }]
+                    }),
+                );
+            }
+        }
+
+        requests
+    });
+
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create assistant config directory");
+    fs::write(
+        config_directory.join("assistant.toml"),
+        format!(
+            "version = \"1.0\"\ndefault_profile = \"local\"\n\n[profiles.local]\nadapter = \"openai-compatible\"\nendpoint = {endpoint:?}\nmodel = \"test-model\"\napi_key_env = \"DIRULE_TEST_KEY\"\n"
+        ),
+    )
+    .expect("write assistant profile");
+    let mut command = project.command(&["ask", "--target", ".", "Sort these images."]);
+    let output = command
+        .env("DIRULE_TEST_KEY", "dirule-test-secret")
+        .output()
+        .expect("run ask");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Apply sorting"));
+    assert!(stderr.contains("Portrait.JPG"));
+    assert!(stderr.contains("media/images/Portrait.JPG"));
+    assert_eq!(text(&project.0.join("Portrait.JPG")), "private image bytes");
+    assert!(!project.0.join("media/images/Portrait.JPG").exists());
+    assert!(project.journal_directory().read_dir().is_err());
+
+    let requests = server.join().expect("model test server");
+    let encoded = serde_json::to_string(&requests).expect("encode captured requests");
+    assert!(encoded.contains("interactive terminal"));
+    assert!(!encoded.contains("private image bytes"));
+}
+
+#[test]
 fn ask_discovers_project_rules_and_previews_them_without_mutation() {
     let project = TempProject::new();
     let config = format!(

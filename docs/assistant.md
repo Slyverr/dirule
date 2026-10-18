@@ -1,6 +1,6 @@
 # Ask with a model
 
-`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list available rule-source names and sorting categories, inspect a selected rule config or named global preset, and preview configured rules, quick sorting, or renaming. These tools do not read file contents, write configuration, or change paths. Source listing returns whether the target has a local `dirule.toml` and up to 64 global preset names; it does not send preset contents or storage paths. When more than 64 presets exist, the result reports that the list was truncated. A listed preset can be inspected and previewed by name during the same Ask run.
+`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list available rule-source names and sorting categories, inspect a selected rule config or named global preset, and preview configured rules, quick sorting, or renaming. It can also apply sort, rename, and configured-rule plans after you approve the exact path changes in an interactive terminal. It does not read file contents or write configuration. Source listing returns whether the target has a local `dirule.toml` and up to 64 global preset names; it does not send preset contents or storage paths. When more than 64 presets exist, the result reports that the list was truncated. A listed preset can be inspected, previewed, or applied by name during the same Ask run.
 
 ## Configure a provider profile
 
@@ -86,6 +86,16 @@ dirule ask --target /tmp/dirule-ask-demo "Preview sorting the images in this fol
 
 Select the NVIDIA profile with `--profile nvidia`. The command sends the prompt, target path, and any requested preview data to the selected provider. It does not send file bytes or modify the target.
 
+## Approve a change
+
+Ask can apply a sort, rename, or selected rule config after it displays every proposed source and destination and you confirm with `y`. Approval is per operation. Declining leaves the target unchanged. Ask refuses filesystem changes when standard input is not an interactive terminal; it has no `--yes` bypass. Conflicting plans and plans with more than 40 changes are refused.
+
+```sh
+dirule ask --target ~/Downloads "Sort images into category folders and apply the result"
+```
+
+Successful changes use Dirule's normal journal, so the run ID can be undone with `dirule undo RUN_ID`. Ask does not yet provide journal browsing or undo tools.
+
 ## Ask for a preview
 
 ```sh
@@ -102,7 +112,7 @@ With no prompt argument, `dirule ask` prompts for a task in a terminal or reads 
 printf '%s\n' "Preview a kebab-case rename" | dirule ask --target ./project
 ```
 
-The selected provider receives your prompt and the target path. If Dirule inspects a rule config, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a preview tool, the provider also receives relevant entry names and proposed destinations. The current tools do not read file bytes, and previews leave the target and config unchanged. No conversation transcript is persisted.
+The selected provider receives your prompt and the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a preview or apply tool, the provider also receives relevant entry names and proposed destinations. The tools do not read file bytes. A successful apply changes paths only after local approval. No conversation transcript is persisted.
 
 Ask bounds each run to 10,000 scanned entries and three minutes. Target inspection returns at most 100 paths; larger listings are marked as truncated. If a preview reaches the scan limit, choose a narrower target.
 

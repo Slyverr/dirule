@@ -9,8 +9,8 @@ mod tools;
 
 pub use assistant::{Assistant, AssistantLimits, AssistantResult};
 pub use builtins::{
-    dirule_tool_catalog, dirule_tool_catalog_with_categories, dirule_tool_catalog_with_source,
-    dirule_tool_catalog_with_sources,
+    dirule_tool_catalog, dirule_tool_catalog_with_categories, dirule_tool_catalog_with_services,
+    dirule_tool_catalog_with_source, dirule_tool_catalog_with_sources,
 };
 pub use error::{AssistantError, ProviderError, ToolError};
 pub use profile::{

@@ -12,11 +12,31 @@ use std::path::{Path, PathBuf};
 
 const MAX_PROMPT_BYTES: usize = 32 * 1024;
 
-struct DeclineMutations;
+struct InteractiveApproval;
 
-impl ApprovalHandler for DeclineMutations {
-    fn approve(&mut self, _proposal: &ChangeProposal) -> Result<bool, ToolError> {
-        Ok(false)
+impl ApprovalHandler for InteractiveApproval {
+    fn approve(&mut self, proposal: &ChangeProposal) -> Result<bool, ToolError> {
+        let mut output = io::stderr().lock();
+        writeln!(output, "\n{}", proposal.summary)
+            .map_err(|error| ToolError::new(error.to_string()))?;
+        for change in &proposal.changes {
+            writeln!(output, "  {:?} -> {:?}", change.source, change.destination)
+                .map_err(|error| ToolError::new(error.to_string()))?;
+        }
+        drop(output);
+
+        if !io::stdin().is_terminal() {
+            return Err(ToolError::new(
+                "Dirule Ask needs an interactive terminal to approve path changes; no changes were applied",
+            ));
+        }
+
+        super::prompt::confirm(
+            "Apply this exact proposal?",
+            "Dirule Ask needs an interactive terminal to approve path changes",
+            false,
+        )
+        .map_err(|error| ToolError::new(error.to_string()))
     }
 }
 
@@ -52,19 +72,29 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
     let categories = dirule_app::CategoryCatalog::user_if_available()?;
     let tools =
         dirule_tool_catalog_with_source(target.clone(), base.clone(), categories, source.clone())?;
+    let write_tools_available = tools
+        .definitions()
+        .iter()
+        .any(|tool| tool.name.starts_with("apply_"));
+    let operation_policy = if write_tools_available {
+        "Filesystem changes require explicit approval of the exact path list in the terminal. Never claim a change was applied unless an apply tool succeeded."
+    } else {
+        "This invocation is read-only and can inspect or preview but cannot change paths."
+    };
     let selected_config = source.as_ref().map_or_else(
         || "No project rule config or preset is selected.".to_owned(),
         |source| {
             format!(
-                "The selected rule source is {:?}. You may inspect its rules or preview them with the provided read-only tools.",
+                "The selected rule source is {:?}. You may inspect its rules, preview them, or request an apply through an approval-gated tool.",
                 source.name()
             )
         },
     );
     let instructions = format!(
-        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, and create read-only previews, then explain the result plainly. You may inspect or preview a listed global preset by passing its name to the rules tools. Never claim that files were changed: this version can only inspect and preview. The selected target is {}. Keep operations within that target. {} Do not request or infer file contents.",
+        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, and create previews, then explain the result plainly. You may inspect or preview a listed global preset by passing its name to the rules tools. The selected target is {}. Keep operations within that target. {} {} Do not request or infer file contents.",
         target.display(),
-        selected_config
+        selected_config,
+        operation_policy
     );
     let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
 
@@ -78,7 +108,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         &profile.model,
         &instructions,
         &prompt,
-        &mut DeclineMutations,
+        &mut InteractiveApproval,
     )?;
     println!("{}", result.response);
 

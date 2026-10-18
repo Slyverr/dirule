@@ -1,15 +1,17 @@
 use dirule_app::CategoryCatalog;
 use dirule_app::configuration::ConfigurationSource;
+use dirule_app::journal::JournalService;
 use dirule_app::presets::PresetStore;
 use dirule_assistant::{
     ApprovalHandler, Assistant, AssistantLimits, ChangeProposal, ModelProvider, ModelRequest,
-    ModelResponse, ModelToolCall, ProviderError, ToolError, dirule_tool_catalog_with_categories,
+    ModelResponse, ModelToolCall, ProviderError, ToolChange, ToolError,
+    dirule_tool_catalog_with_categories, dirule_tool_catalog_with_services,
     dirule_tool_catalog_with_source, dirule_tool_catalog_with_sources,
 };
 use serde_json::json;
 use std::collections::VecDeque;
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::tempdir;
 
@@ -43,6 +45,15 @@ struct SourceListingProvider {
 
 struct PresetPreviewProvider {
     requests: Mutex<Vec<ModelRequest>>,
+}
+
+struct ApplySortProvider {
+    requests: Mutex<Vec<ModelRequest>>,
+}
+
+struct RecordedApproval {
+    approved: bool,
+    proposals: Mutex<Vec<ChangeProposal>>,
 }
 
 impl ModelProvider for TargetInspectingProvider {
@@ -139,6 +150,45 @@ impl ModelProvider for PresetPreviewProvider {
             content: None,
             tool_calls,
         })
+    }
+}
+
+impl ModelProvider for ApplySortProvider {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        let mut requests = self.requests.lock().expect("request lock");
+        requests.push(request.clone());
+        let response = if requests.len() == 1 {
+            ModelResponse {
+                content: None,
+                tool_calls: vec![ModelToolCall {
+                    id: "apply-sort".into(),
+                    name: "apply_sort".into(),
+                    arguments: json!({ "selectors": ["images"] }),
+                }],
+            }
+        } else {
+            ModelResponse {
+                content: Some("The requested sort is complete.".into()),
+                tool_calls: Vec::new(),
+            }
+        };
+
+        Ok(response)
+    }
+}
+
+impl ApprovalHandler for RecordedApproval {
+    fn approve(&mut self, proposal: &ChangeProposal) -> Result<bool, ToolError> {
+        self.proposals
+            .lock()
+            .expect("proposal lock")
+            .push(proposal.clone());
+
+        Ok(self.approved)
     }
 }
 
@@ -372,6 +422,108 @@ fn assistant_can_select_a_listed_preset_for_read_only_inspection_and_preview() {
     assert!(encoded_results.contains("ReadMe.TXT"));
     assert!(encoded_results.contains("read-me.TXT"), "{encoded_results}");
     assert!(!encoded_results.contains("private file bytes"));
+}
+
+#[test]
+fn apply_sort_waits_for_exact_approval_and_records_the_change() {
+    let target = tempdir().expect("temporary target");
+    let original_name = target.path().join("Portrait.JPG");
+    fs::write(&original_name, "private image bytes").expect("create image");
+    let journal_directory = tempdir().expect("temporary journal directory");
+    let journal = Arc::new(JournalService::at(journal_directory.path()));
+    let catalog = dirule_tool_catalog_with_services(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        None,
+        Some(Arc::clone(&journal)),
+    )
+    .expect("tool catalog");
+    let provider = ApplySortProvider {
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let mut approval = RecordedApproval {
+        approved: true,
+        proposals: Mutex::new(Vec::new()),
+    };
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Apply tools require an exact user approval.",
+            "Sort images into their category folders.",
+            &mut approval,
+        )
+        .expect("assistant response");
+
+    assert_eq!(result.approvals_granted, 1);
+    assert!(!original_name.exists());
+    assert!(target.path().join("media/images/Portrait.JPG").is_file());
+    let proposals = approval.proposals.lock().expect("proposal lock");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(
+        proposals[0].changes,
+        [ToolChange {
+            source: "Portrait.JPG".into(),
+            destination: "media/images/Portrait.JPG".into(),
+        }]
+    );
+    let runs = journal.list_runs().expect("list journaled apply");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].operations, 1);
+    let requests = provider.requests.lock().expect("request lock");
+    let apply_result = requests[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("apply tool result");
+    assert!(apply_result.contains("\"status\":\"applied\""));
+    assert!(!apply_result.contains("private image bytes"));
+}
+
+#[test]
+fn declined_apply_sort_leaves_the_target_and_journal_unchanged() {
+    let target = tempdir().expect("temporary target");
+    let original_name = target.path().join("Portrait.JPG");
+    fs::write(&original_name, "image bytes").expect("create image");
+    let journal_directory = tempdir().expect("temporary journal directory");
+    let journal = Arc::new(JournalService::at(journal_directory.path()));
+    let catalog = dirule_tool_catalog_with_services(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        None,
+        Some(Arc::clone(&journal)),
+    )
+    .expect("tool catalog");
+    let provider = ApplySortProvider {
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let mut approval = RecordedApproval {
+        approved: false,
+        proposals: Mutex::new(Vec::new()),
+    };
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Apply tools require an exact user approval.",
+            "Sort images into their category folders.",
+            &mut approval,
+        )
+        .expect("assistant response");
+
+    assert_eq!(result.approvals_granted, 0);
+    assert!(original_name.is_file());
+    assert!(!target.path().join("media/images/Portrait.JPG").exists());
+    assert!(journal.list_runs().expect("list journal runs").is_empty());
 }
 
 #[test]
