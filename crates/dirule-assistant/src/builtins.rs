@@ -1,15 +1,18 @@
 use crate::{ApprovalRequirement, PreparedToolCall, Tool, ToolCatalog, ToolDefinition, ToolError};
 use dirule_app::configuration::{ConfigurationLoadError, ConfigurationSource};
 use dirule_app::{
-    CategoryCatalog, Preview, PreviewSourceError, rename_preview, sort_selectors_preview,
+    CategoryCatalog, Preview, PreviewSourceError, inspect_target, rename_preview_with_entry_limit,
+    sort_selectors_preview_with_entry_limit,
 };
-use dirule_core::Transform;
+use dirule_core::{EntryKind, Transform};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
 const MAX_PREVIEW_CHANGES: usize = 40;
 const MAX_PREVIEW_RESULT_BYTES: usize = 24 * 1024;
+const MAX_SCANNED_ENTRIES: usize = 10_000;
+const MAX_TARGET_LISTING_ENTRIES: usize = 100;
 
 pub fn dirule_tool_catalog(target: PathBuf) -> Result<ToolCatalog, ToolError> {
     let categories =
@@ -41,6 +44,9 @@ fn build_tool_catalog(
     source: Option<(ConfigurationSource, PathBuf)>,
 ) -> Result<ToolCatalog, ToolError> {
     let tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(InspectTargetTool {
+            target: target.clone(),
+        }),
         Box::new(ListCategoriesTool {
             categories: categories.clone(),
         }),
@@ -66,6 +72,10 @@ fn build_tool_catalog(
     }
 
     ToolCatalog::new(tools)
+}
+
+struct InspectTargetTool {
+    target: PathBuf,
 }
 
 struct ListCategoriesTool {
@@ -163,6 +173,61 @@ impl Tool for ListCategoriesTool {
     }
 }
 
+impl Tool for InspectTargetTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "inspect_target".into(),
+            description: "List a bounded sample of visible file and directory paths under the selected target. This does not read file contents.".into(),
+            parameters: empty_object_schema(),
+            approval: ApprovalRequirement::None,
+        }
+    }
+
+    fn prepare(&self, arguments: Value) -> Result<PreparedToolCall, ToolError> {
+        require_no_arguments("inspect_target", arguments)?;
+
+        let inspection = inspect_target(&self.target, MAX_SCANNED_ENTRIES)
+            .map_err(|error| ToolError::new(error.to_string()))?;
+        let entries = inspection
+            .entries
+            .iter()
+            .take(MAX_TARGET_LISTING_ENTRIES)
+            .map(|entry| {
+                json!({
+                    "path": entry.path,
+                    "kind": entry_kind_name(entry.kind),
+                })
+            })
+            .collect::<Vec<_>>();
+        let listing_truncated =
+            inspection.truncated || inspection.entries.len() > MAX_TARGET_LISTING_ENTRIES;
+
+        let mut result = json!({
+            "target": inspection.target,
+            "entries_seen": inspection.entries.len(),
+            "scan_truncated": inspection.truncated,
+            "listing_truncated": listing_truncated,
+            "entries": entries,
+        });
+        while encoded_size(&result)? > MAX_PREVIEW_RESULT_BYTES {
+            let current = result["entries"].as_array().map_or(0, Vec::len);
+            if current == 0 {
+                return Err(ToolError::new(
+                    "target inspection summary exceeds the tool output limit",
+                ));
+            }
+
+            result["entries"]
+                .as_array_mut()
+                .expect("target inspection entries are an array")
+                .truncate(current / 2);
+            result["listing_truncated"] = json!(true);
+        }
+
+        Ok(PreparedToolCall::ReadOnly(result))
+    }
+}
+
 impl Tool for PreviewSortTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
@@ -199,11 +264,12 @@ impl Tool for PreviewSortTool {
             ));
         }
 
-        let preview = sort_selectors_preview(
+        let preview = sort_selectors_preview_with_entry_limit(
             &self.target,
             &arguments.selectors,
             &self.categories,
             arguments.recursive,
+            Some(MAX_SCANNED_ENTRIES),
         )
         .map_err(|error| ToolError::new(error.to_string()))?;
 
@@ -237,10 +303,11 @@ impl Tool for PreviewRenameTool {
 
     fn prepare(&self, arguments: Value) -> Result<PreparedToolCall, ToolError> {
         let arguments: RenameArguments = parse_arguments(arguments)?;
-        let preview = rename_preview(
+        let preview = rename_preview_with_entry_limit(
             &self.target,
             arguments.transform.into(),
             arguments.recursive,
+            Some(MAX_SCANNED_ENTRIES),
         )
         .map_err(|error| ToolError::new(error.to_string()))?;
 
@@ -289,9 +356,13 @@ impl Tool for PreviewRulesTool {
     fn prepare(&self, arguments: Value) -> Result<PreparedToolCall, ToolError> {
         require_no_arguments("preview_configured_rules", arguments)?;
 
-        let preview =
-            dirule_app::preview_source(&self.source, &self.base, Some(self.target.clone()))
-                .map_err(preview_source_error)?;
+        let preview = dirule_app::preview_source_with_entry_limit(
+            &self.source,
+            &self.base,
+            Some(self.target.clone()),
+            Some(MAX_SCANNED_ENTRIES),
+        )
+        .map_err(preview_source_error)?;
 
         Ok(PreparedToolCall::ReadOnly(preview_result(&preview)?))
     }
@@ -303,6 +374,14 @@ fn empty_object_schema() -> Value {
         "properties": {},
         "additionalProperties": false
     })
+}
+
+fn entry_kind_name(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::File => "file",
+        EntryKind::Directory => "directory",
+        EntryKind::Symlink => "symlink",
+    }
 }
 
 fn require_no_arguments(name: &str, arguments: Value) -> Result<(), ToolError> {
@@ -332,7 +411,7 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(arguments: Value) -> Result<T, 
 
 fn preview_result(preview: &Preview) -> Result<Value, ToolError> {
     let plan = preview.plan();
-    let mut changes = plan
+    let changes = plan
         .entries
         .iter()
         .take(MAX_PREVIEW_CHANGES)
@@ -344,28 +423,58 @@ fn preview_result(preview: &Preview) -> Result<Value, ToolError> {
             })
         })
         .collect::<Vec<_>>();
+    let conflicts = plan
+        .conflicts
+        .iter()
+        .take(MAX_PREVIEW_CHANGES)
+        .collect::<Vec<_>>();
+    let findings = plan
+        .findings
+        .iter()
+        .take(MAX_PREVIEW_CHANGES)
+        .collect::<Vec<_>>();
     let mut result = json!({
         "target": preview.target(),
         "change_count": plan.entries.len(),
-        "conflicts": plan.conflicts,
-        "findings": plan.findings,
+        "conflict_count": plan.conflicts.len(),
+        "finding_count": plan.findings.len(),
         "changes_truncated": plan.entries.len() > changes.len(),
+        "conflicts_truncated": plan.conflicts.len() > conflicts.len(),
+        "findings_truncated": plan.findings.len() > findings.len(),
         "changes": changes,
+        "conflicts": conflicts,
+        "findings": findings,
     });
 
-    while serde_json::to_vec(&result)
-        .map_err(|error| ToolError::new(format!("could not encode preview: {error}")))?
-        .len()
-        > MAX_PREVIEW_RESULT_BYTES
-        && changes.len() > 1
-    {
-        changes.truncate(changes.len() / 2);
-        result["changes"] = json!(changes);
-        result["changes_truncated"] = json!(true);
+    while encoded_size(&result)? > MAX_PREVIEW_RESULT_BYTES {
+        let mut reduced = false;
+        for (field, truncated_field) in [
+            ("changes", "changes_truncated"),
+            ("conflicts", "conflicts_truncated"),
+            ("findings", "findings_truncated"),
+        ] {
+            let Some(values) = result[field].as_array() else {
+                continue;
+            };
+            let length = values.len();
+            if length == 0 {
+                continue;
+            }
+
+            let next_length = length / 2;
+            result[field]
+                .as_array_mut()
+                .expect("preview field remains an array")
+                .truncate(next_length);
+            result[truncated_field] = json!(true);
+            reduced = true;
+        }
+        if !reduced {
+            break;
+        }
     }
-    let size = serde_json::to_vec(&result)
-        .map_err(|error| ToolError::new(format!("could not encode preview: {error}")))?
-        .len();
+
+    let size = encoded_size(&result)?;
     if size > MAX_PREVIEW_RESULT_BYTES {
         return Err(ToolError::new(
             "preview summary exceeds the tool output limit",
@@ -373,4 +482,10 @@ fn preview_result(preview: &Preview) -> Result<Value, ToolError> {
     }
 
     Ok(result)
+}
+
+fn encoded_size(value: &Value) -> Result<usize, ToolError> {
+    serde_json::to_vec(value)
+        .map(|encoded| encoded.len())
+        .map_err(|error| ToolError::new(format!("could not encode tool result: {error}")))
 }

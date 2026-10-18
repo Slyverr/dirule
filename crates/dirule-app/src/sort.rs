@@ -1,4 +1,4 @@
-use crate::{CategoryCatalog, Preview, PreviewError, preview};
+use crate::{CategoryCatalog, Preview, PreviewError, preview, preview_with_entry_limit};
 use dirule_core::{AcronymOptions, Config, Rule, RuleKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -28,6 +28,17 @@ pub fn sort_selectors_preview(
     selectors: &[String],
     categories: &CategoryCatalog,
     recursive: bool,
+) -> Result<Preview, PreviewError> {
+    sort_selectors_preview_with_entry_limit(target, selectors, categories, recursive, None)
+}
+
+/// Preview sorting selected extensions or categories with an optional scan limit.
+pub fn sort_selectors_preview_with_entry_limit(
+    target: &Path,
+    selectors: &[String],
+    categories: &CategoryCatalog,
+    recursive: bool,
+    maximum_entries: Option<usize>,
 ) -> Result<Preview, PreviewError> {
     if selectors.is_empty() {
         return Err(PreviewError::Operation(
@@ -89,7 +100,7 @@ pub fn sort_selectors_preview(
         })
         .collect();
 
-    preview(&quick_config(rules), target)
+    preview_with_entry_limit(&quick_config(rules), target, maximum_entries)
 }
 
 /// Preview sorting files into a destination for each normalized extension.

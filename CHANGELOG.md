@@ -4,7 +4,7 @@
 
 ### Added
 
-- Experimental `dirule ask` support for model-assisted, read-only category, configuration, sort, and rename previews.
+- Experimental `dirule ask` support for bounded target inspection and read-only category, configuration, sort, and rename previews, with scan and elapsed-time limits.
 
 ## Version 0.3.0
 

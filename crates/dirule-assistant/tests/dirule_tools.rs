@@ -9,12 +9,17 @@ use serde_json::json;
 use std::collections::VecDeque;
 use std::fs;
 use std::sync::Mutex;
+use std::time::Duration;
 use tempfile::tempdir;
 
 struct FakeProvider(Mutex<VecDeque<ModelResponse>>);
 
 impl ModelProvider for FakeProvider {
-    fn complete(&self, _request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+    fn complete_with_timeout(
+        &self,
+        _request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
         self.0
             .lock()
             .expect("fake response lock")
@@ -27,8 +32,44 @@ struct InspectingProvider {
     requests: Mutex<Vec<ModelRequest>>,
 }
 
+struct TargetInspectingProvider {
+    requests: Mutex<Vec<ModelRequest>>,
+}
+
+impl ModelProvider for TargetInspectingProvider {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        let mut requests = self.requests.lock().expect("request lock");
+        requests.push(request.clone());
+        let response = if requests.len() == 1 {
+            ModelResponse {
+                content: None,
+                tool_calls: vec![ModelToolCall {
+                    id: "inspect-target".into(),
+                    name: "inspect_target".into(),
+                    arguments: json!({}),
+                }],
+            }
+        } else {
+            ModelResponse {
+                content: Some("I listed a bounded sample of paths.".into()),
+                tool_calls: Vec::new(),
+            }
+        };
+
+        Ok(response)
+    }
+}
+
 impl ModelProvider for InspectingProvider {
-    fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
         let mut requests = self.requests.lock().expect("request lock");
         requests.push(request.clone());
 
@@ -181,10 +222,74 @@ fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
         .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(names, ["list_categories", "preview_rename", "preview_sort"]);
+    assert_eq!(
+        names,
+        [
+            "inspect_target",
+            "list_categories",
+            "preview_rename",
+            "preview_sort"
+        ]
+    );
     assert!(
         !names
             .iter()
             .any(|name| name.contains("shell") || name.contains("read_file"))
     );
+}
+
+#[test]
+fn inspect_target_returns_a_truncated_names_only_listing() {
+    let target = tempdir().expect("temporary target");
+    fs::write(target.path().join(".diruleignore"), "excluded.txt\n")
+        .expect("write Dirule exclusions");
+    fs::write(target.path().join("excluded.txt"), "private file bytes")
+        .expect("write excluded file");
+    for index in 0..105 {
+        fs::write(
+            target
+                .path()
+                .join(format!("entry-{index:03}-{}.txt", "x".repeat(230))),
+            "private file bytes",
+        )
+        .expect("write target file");
+    }
+
+    let catalog = dirule_tool_catalog_with_categories(
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+    )
+    .expect("tool catalog");
+    let provider = TargetInspectingProvider {
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let result = assistant
+        .run(
+            "test-model",
+            "Inspect the selected target.",
+            "What files are here?",
+            &mut NoApproval,
+        )
+        .expect("inspection assistant response");
+    let requests = provider.requests.lock().expect("request lock");
+    let tool_result = requests[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("target inspection tool result");
+    let value: serde_json::Value = serde_json::from_str(tool_result).expect("tool result JSON");
+
+    assert!(result.response.contains("bounded sample"));
+    let returned_entries = value["entries"].as_array().expect("entries");
+    assert!(!returned_entries.is_empty());
+    assert!(returned_entries.len() < 100);
+    assert_eq!(value["listing_truncated"], true);
+    assert!(tool_result.len() <= 24 * 1024);
+    assert!(tool_result.contains("entry-"));
+    assert!(!tool_result.contains("excluded.txt"));
+    assert!(!tool_result.contains("private file bytes"));
 }

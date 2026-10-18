@@ -1,6 +1,7 @@
 use crate::{ProviderError, ToolError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -72,7 +73,12 @@ pub struct ModelResponse {
 }
 
 pub trait ModelProvider: Send + Sync {
-    fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError>;
+    /// Complete one model request, returning no later than the supplied timeout.
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError>;
 }
 
 pub(crate) fn encode_tool_result(result: &Value, maximum: usize) -> Result<String, ToolError> {

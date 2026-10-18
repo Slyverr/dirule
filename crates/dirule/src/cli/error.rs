@@ -125,7 +125,10 @@ fn classify_error_category(error: &(dyn Error + 'static)) -> CliErrorCategory {
         if let Some(error) = source.downcast_ref::<dirule_app::PreviewError>() {
             match error {
                 dirule_app::PreviewError::Target { .. } => return CliErrorCategory::Target,
-                dirule_app::PreviewError::Scan(_) => return CliErrorCategory::Scan,
+                dirule_app::PreviewError::Scan(_)
+                | dirule_app::PreviewError::EntryLimitExceeded { .. } => {
+                    return CliErrorCategory::Scan;
+                }
                 dirule_app::PreviewError::Plan(_) => return CliErrorCategory::Configuration,
                 dirule_app::PreviewError::Destinations(_) => return CliErrorCategory::Apply,
                 dirule_app::PreviewError::Operation(_) => return CliErrorCategory::Command,

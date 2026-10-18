@@ -1,6 +1,6 @@
 # Ask with a model
 
-`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can list sorting categories, inspect the selected rule config, and preview configured rules, quick sorting, or renaming. These tools do not write configuration or change paths.
+`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list sorting categories, inspect the selected rule config, and preview configured rules, quick sorting, or renaming. These tools do not read file contents, write configuration, or change paths.
 
 ## Configure a provider profile
 
@@ -103,6 +103,8 @@ printf '%s\n' "Preview a kebab-case rename" | dirule ask --target ./project
 ```
 
 The selected provider receives your prompt and the target path. If Dirule inspects a rule config, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a preview tool, the provider also receives relevant entry names and proposed destinations. The current tools do not read file bytes, and previews leave the target and config unchanged. No conversation transcript is persisted.
+
+Ask bounds each run to 10,000 scanned entries and three minutes. Target inspection returns at most 100 paths; larger listings are marked as truncated. If a preview reaches the scan limit, choose a narrower target.
 
 Provider data policies differ. Google's [Gemini API pricing and data-use documentation](https://ai.google.dev/gemini-api/docs/pricing) describes how free and paid tier data is handled. Review the terms for your configured provider before sending private paths or names.
 

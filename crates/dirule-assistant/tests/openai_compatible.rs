@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[test]
 fn sends_chat_completion_tool_schema_and_parses_tool_calls() {
@@ -72,13 +73,51 @@ fn sends_chat_completion_tool_schema_and_parses_tool_calls() {
         }],
     };
 
-    let response = provider.complete(&request).expect("provider response");
+    let response = provider
+        .complete_with_timeout(&request, Duration::from_secs(1))
+        .expect("provider response");
     server.join().expect("mock provider thread");
 
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].name, "list_categories");
     assert_eq!(response.tool_calls[0].arguments, json!({}));
     assert!(!format!("{provider:?}").contains("test-secret"));
+}
+
+#[test]
+fn applies_the_assistant_deadline_to_the_http_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock provider");
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept provider request");
+        let _request = read_request(&mut stream);
+        thread::sleep(Duration::from_millis(150));
+    });
+    let provider = OpenAiCompatibleProvider::with_api_key(
+        OpenAiCompatibleConfig::new(endpoint, "demo-model", "DIRULE_TEST_KEY"),
+        "test-secret",
+    )
+    .expect("valid mock endpoint");
+    let request = ModelRequest {
+        model: "demo-model".into(),
+        messages: vec![Message::User {
+            content: "hello".into(),
+        }],
+        tools: Vec::new(),
+    };
+    let started = Instant::now();
+    let error = provider
+        .complete_with_timeout(&request, Duration::from_millis(20))
+        .expect_err("provider should time out before the server responds");
+    let elapsed = started.elapsed();
+
+    server.join().expect("mock provider thread");
+
+    assert!(elapsed < Duration::from_millis(120));
+    assert!(!error.to_string().contains("test-secret"));
 }
 
 #[test]

@@ -6,10 +6,25 @@ use dirule_assistant::{
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 struct FakeProvider {
     responses: Mutex<VecDeque<ModelResponse>>,
     requests: Mutex<Vec<ModelRequest>>,
+}
+
+struct SlowProvider;
+
+impl ModelProvider for SlowProvider {
+    fn complete_with_timeout(
+        &self,
+        _request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        std::thread::sleep(Duration::from_millis(20));
+
+        Ok(response_text("late response"))
+    }
 }
 
 impl FakeProvider {
@@ -26,7 +41,11 @@ impl FakeProvider {
 }
 
 impl ModelProvider for FakeProvider {
-    fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
         self.requests
             .lock()
             .expect("requests lock")
@@ -237,6 +256,28 @@ fn prompt_limit_is_checked_before_calling_provider() {
 
     assert!(error.to_string().contains("3-byte limit"));
     assert!(provider.requests().is_empty());
+}
+
+#[test]
+fn assistant_rejects_a_provider_response_after_the_overall_time_limit() {
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let limits = AssistantLimits {
+        maximum_elapsed: Duration::from_millis(1),
+        ..AssistantLimits::default()
+    };
+    let assistant = Assistant::new(&SlowProvider, &tools, limits);
+
+    let error = assistant
+        .run(
+            "test-model",
+            "Use Dirule tools.",
+            "What is here?",
+            &mut FixedApproval(false),
+        )
+        .expect_err("late provider response must be rejected");
+
+    assert!(error.to_string().contains("time limit"));
 }
 
 #[test]

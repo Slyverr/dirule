@@ -3,6 +3,7 @@ use crate::{
     protocol::encode_tool_result, tools::PreparedToolCall,
 };
 use serde_json::json;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AssistantLimits {
@@ -10,6 +11,7 @@ pub struct AssistantLimits {
     pub maximum_turns: usize,
     pub maximum_tool_calls: usize,
     pub maximum_tool_result_bytes: usize,
+    pub maximum_elapsed: Duration,
 }
 
 impl Default for AssistantLimits {
@@ -19,6 +21,7 @@ impl Default for AssistantLimits {
             maximum_turns: 8,
             maximum_tool_calls: 16,
             maximum_tool_result_bytes: 32 * 1024,
+            maximum_elapsed: Duration::from_secs(180),
         }
     }
 }
@@ -72,14 +75,17 @@ impl<'a> Assistant<'a> {
         ];
         let mut tool_calls = 0;
         let mut approvals_granted = 0;
+        let started = Instant::now();
 
         for _ in 0..self.limits.maximum_turns {
+            let remaining = self.remaining_time(started)?;
             let request = ModelRequest {
                 model: model.to_owned(),
                 messages: messages.clone(),
                 tools: self.tools.definitions().to_vec(),
             };
-            let response = self.provider.complete(&request)?;
+            let response = self.provider.complete_with_timeout(&request, remaining)?;
+            self.remaining_time(started)?;
             if response.tool_calls.is_empty() {
                 return Ok(AssistantResult {
                     response: response.content.unwrap_or_default(),
@@ -102,12 +108,14 @@ impl<'a> Assistant<'a> {
             });
 
             for call in response.tool_calls {
+                self.remaining_time(started)?;
                 let result = self.dispatch(
                     &call.name,
                     call.arguments,
                     approvals,
                     &mut approvals_granted,
                 );
+                self.remaining_time(started)?;
                 let content = match result {
                     Ok(value) => encode_tool_result(&value, self.limits.maximum_tool_result_bytes)
                         .unwrap_or_else(error_result),
@@ -122,6 +130,16 @@ impl<'a> Assistant<'a> {
         }
 
         Err(AssistantError::MissingFinalResponse)
+    }
+
+    fn remaining_time(&self, started: Instant) -> Result<Duration, AssistantError> {
+        self.limits
+            .maximum_elapsed
+            .checked_sub(started.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(AssistantError::TimeLimitExceeded {
+                maximum: self.limits.maximum_elapsed,
+            })
     }
 
     fn dispatch(

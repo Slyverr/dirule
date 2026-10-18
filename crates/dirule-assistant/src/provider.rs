@@ -40,6 +40,7 @@ pub struct OpenAiCompatibleProvider {
     endpoint: String,
     model: String,
     api_key: String,
+    request_timeout: Duration,
 }
 
 impl OpenAiCompatibleProvider {
@@ -75,6 +76,7 @@ impl OpenAiCompatibleProvider {
             endpoint,
             model: config.model,
             api_key,
+            request_timeout: config.request_timeout,
         })
     }
 }
@@ -114,7 +116,18 @@ impl fmt::Debug for OpenAiCompatibleProvider {
 }
 
 impl ModelProvider for OpenAiCompatibleProvider {
-    fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        let timeout = timeout.min(self.request_timeout);
+        if timeout.is_zero() {
+            return Err(ProviderError::new(
+                "assistant request time limit was exhausted before contacting the provider",
+            ));
+        }
+
         let model = if request.model.trim().is_empty() {
             &self.model
         } else {
@@ -134,6 +147,9 @@ impl ModelProvider for OpenAiCompatibleProvider {
             .post(self.endpoint.clone())
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
+            .config()
+            .timeout_global(Some(timeout))
+            .build()
             .send(body)
             .map_err(provider_request_error)?;
         let body = response

@@ -1049,6 +1049,39 @@ fn rename_preview_uses_shared_transforms_and_inherits_directory_moves() {
 }
 
 #[test]
+fn target_inspection_returns_a_bounded_partial_listing() {
+    let target = TempTarget::new();
+    fs::write(target.join("one.txt"), "contents").expect("write first file");
+    fs::write(target.join("two.txt"), "contents").expect("write second file");
+
+    let inspection = dirule_app::inspect_target(&target, 1).expect("inspect target");
+
+    assert_eq!(inspection.entries.len(), 1);
+    assert!(inspection.truncated);
+    assert_eq!(
+        inspection.target,
+        target.canonicalize().expect("canonical target")
+    );
+}
+
+#[test]
+fn bounded_preview_rejects_a_partial_scan() {
+    let target = TempTarget::new();
+    fs::write(target.join("one.txt"), "contents").expect("write first file");
+    fs::write(target.join("two.txt"), "contents").expect("write second file");
+    let config = parse_config(&config_with_target(None)).expect("parse fixture config");
+
+    let error = match dirule_app::preview_with_entry_limit(&config, &target, Some(1)) {
+        Ok(_) => panic!("a partial scan must not produce a preview"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("1-entry scan limit"));
+    assert!(target.join("one.txt").is_file());
+    assert!(target.join("two.txt").is_file());
+}
+
+#[test]
 fn preview_hard_excludes_configured_paths_independent_of_vcs_ignores() {
     let target = TempTarget::new();
     fs::create_dir_all(target.join("generated/api")).expect("create generated directory");

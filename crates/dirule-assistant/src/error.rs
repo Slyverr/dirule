@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub enum AssistantError {
@@ -7,6 +8,7 @@ pub enum AssistantError {
     Tool(ToolError),
     PromptTooLarge { limit: usize },
     LimitExceeded { limit: &'static str, maximum: usize },
+    TimeLimitExceeded { maximum: Duration },
     MissingFinalResponse,
 }
 
@@ -50,6 +52,11 @@ impl fmt::Display for AssistantError {
                     "assistant exceeded the {limit} limit ({maximum})"
                 )
             }
+            Self::TimeLimitExceeded { maximum } => write!(
+                formatter,
+                "assistant exceeded the {}-second time limit",
+                maximum.as_secs()
+            ),
             Self::MissingFinalResponse => {
                 formatter.write_str("model did not return a final response within the turn limit")
             }
@@ -76,6 +83,7 @@ impl Error for AssistantError {
             Self::Tool(error) => Some(error),
             Self::PromptTooLarge { .. }
             | Self::LimitExceeded { .. }
+            | Self::TimeLimitExceeded { .. }
             | Self::MissingFinalResponse => None,
         }
     }

@@ -42,9 +42,8 @@ Provider profiles are user-level Dirule settings, separate from project `dirule.
 
 ## Dirule tools
 
-Tools are named, typed operations that call existing Dirule application services. The catalog is intentionally small and grows by adding independent tools. The current implementation includes category listing, selected-config inspection, and read-only configured-rule, quick-sort, and quick-rename previews. The planned catalog also includes:
+Tools are named, typed operations that call existing Dirule application services. The catalog is intentionally small and grows by adding independent tools. The current implementation includes bounded target inspection, category listing, selected-config inspection, and read-only configured-rule, quick-sort, and quick-rename previews. The planned catalog also includes:
 
-- Inspect the target's bounded entry names and metadata needed for the task. File contents are not read by default.
 - List available configuration sources.
 - Draft and validate a project `dirule.toml` using Dirule's configuration reader.
 - Save a reviewed configuration after explicit approval.
@@ -61,7 +60,7 @@ The model can request only tools registered by the active Dirule version. Each t
 - Non-interactive use must provide a separate explicit approval mechanism; it must not infer approval from the prompt.
 - Apply and undo use the existing identity revalidation, conflict policy, and journal services. The model never receives direct filesystem write access.
 - No arbitrary shell, command execution, or unrestricted file read/write tool is provided.
-- Bound provider turns, tool calls, request and response bytes, target entries, and elapsed time. Handle cancellation, API errors, malformed tool calls, and limit exhaustion without applying changes.
+- Bound provider turns, tool calls, request and response bytes, target entries, and elapsed time. The initial implementation has a three-minute overall deadline, provider request timeouts, a 10,000-entry scan cap, and bounded tool results. Handle cancellation, API errors, malformed tool calls, and limit exhaustion without applying changes.
 
 ## Data sent to providers
 
@@ -81,9 +80,9 @@ Provider data policies differ. Google's Gemini free tier may use submitted conte
 
 ## Delivery sequence
 
-1. Establish the normalized provider, conversation, tool, request/response bounds, and approval interfaces. Done; the tool loop is covered by deterministic fake-provider tests. Each provider request has a timeout and turn and tool-call counts are bounded; an overall deadline and scan-work limit are still open.
+1. Establish the normalized provider, conversation, tool, request/response bounds, and approval interfaces. Done; the tool loop is covered by deterministic fake-provider tests. Provider requests receive the remaining overall timeout, and turn, tool-call, elapsed-time, result-byte, and scan-entry limits are enforced.
 2. Add versioned user profiles and the first network adapter. Done for OpenAI-compatible Chat Completions; native OpenAI Responses remains to be implemented. Request construction and response parsing are covered by a local mock endpoint.
-3. Add read-only target inspection, categories, config validation, and previews using `dirule-app`. In progress; category listing, selected-config inspection, configured-rule preview, and quick sort/rename previews are implemented. Target inspection remains to be added. Preview results are size-limited, but recursive scan work does not yet have an assistant-specific entry cap.
+3. Add read-only target inspection, categories, config validation, and previews using `dirule-app`. In progress; bounded target inspection, category listing, selected-config inspection, configured-rule preview, and quick sort/rename previews are implemented. All Ask previews use a capped scan and reject partial plans; target inspection may return a clearly marked partial listing. Remaining read-only work includes source listing and broader edge-case coverage.
 4. Add config save, apply, and undo tools behind exact-proposal approval.
 5. Add opt-in live smoke tests for user-configured endpoints. An ignored integration test now uses the selected profile against a synthetic target and verifies the model calls a read-only Dirule tool. Never put API keys in CI or require network access for ordinary tests.
 
