@@ -6,12 +6,12 @@ Quick operations provide a preview-first path for common sorting and naming task
 
 ```text
 dirule categories list [--format human|json]
-dirule sort SELECTOR... [--target PATH] [--recursive] [--apply] [--yes]
+dirule sort [SELECTOR...] [--target PATH] [--recursive] [--apply] [--yes]
 dirule sort --by extension [--target PATH] [--recursive] [--apply] [--yes]
 dirule rename TRANSFORM [--target PATH] [--recursive] [--apply] [--yes]
 ```
 
-`SELECTOR` is an alphanumeric extension, with an optional leading dot, or a category name. Multiple selectors are accepted. A category name takes precedence over an extension with the same spelling; prefix that extension with `.` to select it literally. `--by extension` sorts every file with a final extension into its own bucket. `TRANSFORM` is one of `snake-case`, `kebab-case`, `camel-case`, or `pascal-case`. `--target` defaults to the current directory. Quick operations do not load or merge `dirule.toml` or a preset.
+`SELECTOR` is an alphanumeric extension, with an optional leading dot, or a category name. Multiple selectors are accepted. With no selectors, `sort` uses every category in the effective catalog. A category name takes precedence over an extension with the same spelling; prefix that extension with `.` to select it literally. `--by extension` sorts every file with a final extension into its own bucket. `TRANSFORM` is one of `snake-case`, `kebab-case`, `camel-case`, or `pascal-case`. `--target` defaults to the current directory. Quick operations do not load or merge `dirule.toml` or a preset.
 
 ## Sort categories
 
@@ -44,6 +44,7 @@ Category names start with a lowercase letter and contain lowercase letters, digi
 - With `--recursive`, `sort` also includes nested files and collects them into target-level bucket directories. If different directories contain files with the same name and extension, the planner reports a conflict instead of overwriting either file.
 - `sort SELECTOR...` accepts multiple extensions or categories. Extension selectors match their final extension case-insensitively and move matches into a target-level `<lowercase-extension>s/` bucket. For example, `sort pdf png` uses `pdfs/` and `pngs/`.
 - Category selectors match their configured extensions and route files to the category destination. For example, `sort images videos` routes image and video files to their separate media folders. A leading dot forces an extension selector when it has the same name as a category.
+- Bare `sort` uses every category in the effective catalog, including user categories and built-in overrides. It keeps the default direct-file scope; add `--recursive` to include nested files. Files that match no category are left unchanged, and overlapping category destinations are reported as an error.
 - `sort --by extension` creates one sibling bucket per normalized final extension. Files with no extension, including a single-component dotfile such as `.profile`, remain unchanged. Multiple-extension files are bucketed by their final suffix.
 - `rename TRANSFORM` applies the selected built-in transformation to matching entry names. It preserves file extensions and leading dots on hidden file and directory names.
 - `--apply` asks for confirmation unless `--yes` is also supplied. `--yes` only affects an explicitly requested apply.

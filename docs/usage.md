@@ -18,13 +18,14 @@ Quick operations preview by default and do not load `dirule.toml` or a preset. A
 
 ```sh
 dirule categories list
+dirule sort --target ~/Downloads
 dirule sort pdf --target ~/Downloads
 dirule sort images videos documents --target ~/Downloads
 dirule sort --by extension --target ~/Downloads --recursive
 dirule rename kebab-case --target src/
 ```
 
-`sort` accepts multiple extensions or categories. Extensions match case-insensitively; direct files are selected by default, and `--recursive` includes nested files. The built-in categories are `images`, `videos`, `audio`, and `documents`; they match explicit extension lists, not MIME types or file contents, and route files to their configured folders. `sort --by extension` places each file with a final extension in its own bucket. `rename` transforms file and directory names with `snake-case`, `kebab-case`, `camel-case`, or `pascal-case`; `--recursive` includes nested entries.
+`sort` accepts multiple extensions or categories. With no selectors it previews every category in the effective catalog, including user categories and built-in overrides. Extensions match case-insensitively; direct files are selected by default, and `--recursive` includes nested files. Files that match no category stay in place. The built-in categories are `images`, `videos`, `audio`, and `documents`; they match explicit extension lists, not MIME types or file contents, and route files to their configured folders. `sort --by extension` places each file with a final extension in its own bucket. `rename` transforms file and directory names with `snake-case`, `kebab-case`, `camel-case`, or `pascal-case`; `--recursive` includes nested entries.
 
 Users can add categories or replace built-in category definitions with `categories.toml` in Dirule's user config directory:
 

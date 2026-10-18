@@ -77,13 +77,14 @@ For a one-off sort, use a quick operation instead of creating a project config. 
 
 ```sh
 dirule categories list
+dirule sort --target ~/Downloads
 dirule sort images videos audio documents --target ~/Downloads
 dirule sort pdf png --target ~/Downloads
 dirule sort images --target ~/Downloads --apply
 dirule rename kebab-case --target ~/Downloads
 ```
 
-Built-in categories group common extensions into destinations such as `media/images/` and `documents/`. Add categories or customize those defaults with `categories.toml`. Quick operations can also sort recursively and use the same conflict checks and undo history as configured rules. See [Usage](docs/usage.md#sort-and-rename-without-a-project-config) for custom categories and more examples.
+A bare `sort` previews every category in the effective catalog, including custom categories and built-in overrides. It scans direct files by default; add `--recursive` for nested files. Built-in categories group common extensions into destinations such as `media/images/` and `documents/`. Add categories or customize those defaults with `categories.toml`. Quick operations use the same conflict checks and undo history as configured rules. See [Usage](docs/usage.md#sort-and-rename-without-a-project-config) for custom categories and more examples.
 
 ## Ask a model (experimental)
 
