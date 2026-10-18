@@ -125,6 +125,114 @@ fn preserves_response_items_across_approved_tool_turns() {
 }
 
 #[test]
+fn preserves_reasoning_and_parallel_function_calls_across_tool_turns() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock provider");
+    let endpoint = format!("http://{}/v1/responses", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().expect("accept initial request");
+        let first_request = read_request(&mut first_stream);
+        let (_, first_body) = first_request
+            .split_once("\r\n\r\n")
+            .expect("initial request headers");
+        let first_request: Value = serde_json::from_str(first_body).expect("initial JSON");
+        assert_eq!(first_request["input"][0]["role"], "system");
+        assert_eq!(first_request["input"][1]["role"], "user");
+        write_json(
+            &mut first_stream,
+            &json!({
+                "status": "completed",
+                "output": [
+                    {"id": "rs_2", "type": "reasoning", "summary": []},
+                    {
+                        "type": "function_call",
+                        "call_id": "call_images",
+                        "name": "preview_sort",
+                        "arguments": "{\"selectors\":[\"images\"]}"
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_videos",
+                        "name": "preview_sort",
+                        "arguments": "{\"selectors\":[\"videos\"]}"
+                    }
+                ]
+            }),
+        );
+
+        let (mut second_stream, _) = listener.accept().expect("accept follow-up request");
+        let second_request = read_request(&mut second_stream);
+        let (_, second_body) = second_request
+            .split_once("\r\n\r\n")
+            .expect("follow-up request headers");
+        let second_request: Value = serde_json::from_str(second_body).expect("follow-up JSON");
+        assert_eq!(second_request["input"][2]["id"], "rs_2");
+        assert_eq!(second_request["input"][3]["call_id"], "call_images");
+        assert_eq!(second_request["input"][4]["call_id"], "call_videos");
+        assert_eq!(second_request["input"][5]["call_id"], "call_images");
+        assert_eq!(second_request["input"][5]["output"], "image preview");
+        assert_eq!(second_request["input"][6]["call_id"], "call_videos");
+        assert_eq!(second_request["input"][6]["output"], "video preview");
+        write_json(
+            &mut second_stream,
+            &json!({
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Both previews are ready."}]
+                }]
+            }),
+        );
+    });
+
+    let provider = OpenAiResponsesProvider::with_api_key(
+        OpenAiResponsesConfig::new(endpoint, "demo-model", "DIRULE_TEST_KEY"),
+        "test-secret",
+    )
+    .expect("valid mock endpoint");
+    let mut request = model_request(vec![
+        Message::System {
+            content: "Use Dirule tools.".into(),
+        },
+        Message::User {
+            content: "Preview images and videos.".into(),
+        },
+    ]);
+
+    let first_response = provider
+        .complete_with_timeout(&request, Duration::from_secs(1))
+        .expect("parallel function-call response");
+    assert_eq!(first_response.tool_calls.len(), 2);
+    assert_eq!(first_response.tool_calls[0].id, "call_images");
+    assert_eq!(first_response.tool_calls[1].id, "call_videos");
+    request.messages.push(Message::Assistant {
+        content: None,
+        tool_calls: first_response.tool_calls,
+    });
+    request.messages.push(Message::Tool {
+        tool_call_id: "call_images".into(),
+        name: "preview_sort".into(),
+        content: "image preview".into(),
+    });
+    request.messages.push(Message::Tool {
+        tool_call_id: "call_videos".into(),
+        name: "preview_sort".into(),
+        content: "video preview".into(),
+    });
+
+    let final_response = provider
+        .complete_with_timeout(&request, Duration::from_secs(1))
+        .expect("final response");
+    server.join().expect("mock provider thread");
+
+    assert_eq!(
+        final_response.content.as_deref(),
+        Some("Both previews are ready.")
+    );
+    assert!(final_response.tool_calls.is_empty());
+}
+
+#[test]
 fn rejects_incomplete_responses() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock provider");
     let endpoint = format!("http://{}/v1/responses", listener.local_addr().unwrap());
@@ -150,6 +258,49 @@ fn rejects_incomplete_responses() {
     server.join().expect("mock provider thread");
 
     assert!(error.to_string().contains("incomplete response"));
+}
+
+#[test]
+fn rejects_failed_responses_and_malformed_function_calls() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock provider");
+    let endpoint = format!("http://{}/v1/responses", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        for response in [
+            json!({"status": "failed", "output": []}),
+            json!({
+                "status": "completed",
+                "output": [{
+                    "type": "function_call",
+                    "name": "preview_sort",
+                    "arguments": "{}"
+                }]
+            }),
+        ] {
+            let (mut stream, _) = listener.accept().expect("accept provider request");
+            let _request = read_request(&mut stream);
+            write_json(&mut stream, &response);
+        }
+    });
+    let provider = OpenAiResponsesProvider::with_api_key(
+        OpenAiResponsesConfig::new(endpoint, "demo-model", "DIRULE_TEST_KEY"),
+        "test-secret",
+    )
+    .expect("valid mock endpoint");
+    let request = model_request(vec![Message::User {
+        content: "Preview images.".into(),
+    }]);
+
+    let failed = provider
+        .complete_with_timeout(&request, Duration::from_secs(1))
+        .expect_err("failed response rejected");
+    assert!(failed.to_string().contains("failed response"));
+
+    let malformed = provider
+        .complete_with_timeout(&request, Duration::from_secs(1))
+        .expect_err("malformed function call rejected");
+    server.join().expect("mock provider thread");
+
+    assert!(malformed.to_string().contains("missing its call ID"));
 }
 
 fn model_request(messages: Vec<Message>) -> ModelRequest {
