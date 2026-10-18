@@ -12,7 +12,9 @@ use std::time::Duration;
 
 const CHILD_CASE: &str = "DIRULE_CREDENTIALS_CHILD_CASE";
 const CHILD_ENDPOINT: &str = "DIRULE_CREDENTIALS_CHILD_ENDPOINT";
+const CHILD_EXPECTED_ERROR: &str = "DIRULE_CREDENTIALS_CHILD_EXPECTED_ERROR";
 const API_KEY_ENV: &str = "DIRULE_CREDENTIALS_TEST_KEY";
+const MAX_CREDENTIALS_FILE_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 enum Adapter {
@@ -81,15 +83,18 @@ fn credentials_resolution_child() {
         .map(|provider| Box::new(provider) as Box<dyn ModelProvider>),
     };
 
-    let provider = match (case.as_str(), provider) {
-        ("insecure-file", Err(error)) => {
-            assert!(error.to_string().contains("must be private to its owner"));
+    let expected_error = std::env::var(CHILD_EXPECTED_ERROR)
+        .ok()
+        .or_else(|| (case == "insecure-file").then(|| "must be private to its owner".into()));
+    let provider = match (expected_error, provider) {
+        (Some(expected), Err(error)) => {
+            assert!(error.to_string().contains(&expected));
 
             return;
         }
-        ("insecure-file", Ok(_)) => panic!("insecure credentials file must be rejected"),
-        (_, Ok(provider)) => provider,
-        (_, Err(error)) => panic!("provider loads credentials: {error}"),
+        (Some(expected), Ok(_)) => panic!("provider should reject credentials: {expected}"),
+        (None, Ok(provider)) => provider,
+        (None, Err(error)) => panic!("provider loads credentials: {error}"),
     };
     let response = provider
         .complete_with_timeout(
@@ -122,6 +127,7 @@ fn environment_credentials_override_the_file_for_both_adapters() {
             &endpoint,
             home.path(),
             Some("  environment-secret  "),
+            None,
         );
 
         assert_success(&output);
@@ -145,6 +151,7 @@ fn credentials_file_is_used_when_the_environment_value_is_blank() {
             &endpoint,
             home.path(),
             Some("  "),
+            None,
         );
 
         assert_success(&output);
@@ -170,9 +177,38 @@ fn credentials_file_with_group_or_world_permissions_is_rejected() {
         "http://127.0.0.1:1/v1/chat/completions",
         home.path(),
         None,
+        None,
     );
 
     assert_success(&output);
+}
+
+#[test]
+fn malformed_duplicate_invalid_utf8_and_oversized_files_are_rejected() {
+    let malformed = b"this is not a NAME=value line\n";
+    let duplicate = b"DIRULE_CREDENTIALS_TEST_KEY=first\nDIRULE_CREDENTIALS_TEST_KEY=second\n";
+    let invalid_utf8 = b"DIRULE_CREDENTIALS_TEST_KEY=\xff\n";
+    let oversized = vec![b'x'; MAX_CREDENTIALS_FILE_BYTES + 1];
+
+    for (contents, expected_error) in [
+        (malformed.as_slice(), "invalid Dirule credentials file"),
+        (duplicate.as_slice(), "invalid Dirule credentials file"),
+        (invalid_utf8.as_slice(), "not valid UTF-8"),
+        (oversized.as_slice(), "exceeds the 65536-byte limit"),
+    ] {
+        let home = tempfile::tempdir().expect("temporary config home");
+        write_credentials_bytes(&credentials_path(home.path()), contents);
+
+        let output = run_child(
+            "reject-chat",
+            "http://127.0.0.1:1/v1/chat/completions",
+            home.path(),
+            None,
+            Some(expected_error),
+        );
+
+        assert_success(&output);
+    }
 }
 
 fn start_mock_provider(adapter: Adapter) -> (String, JoinHandle<String>) {
@@ -189,17 +225,27 @@ fn start_mock_provider(adapter: Adapter) -> (String, JoinHandle<String>) {
     (endpoint, server)
 }
 
-fn run_child(case: &str, endpoint: &str, home: &Path, api_key: Option<&str>) -> Output {
+fn run_child(
+    case: &str,
+    endpoint: &str,
+    home: &Path,
+    api_key: Option<&str>,
+    expected_error: Option<&str>,
+) -> Output {
     let mut command = Command::new(std::env::current_exe().expect("current test executable"));
     command
         .args(["--exact", "credentials_resolution_child", "--nocapture"])
         .env(CHILD_CASE, case)
         .env(CHILD_ENDPOINT, endpoint)
-        .env_remove(API_KEY_ENV);
+        .env_remove(API_KEY_ENV)
+        .env_remove(CHILD_EXPECTED_ERROR);
     set_config_directory(&mut command, home);
 
     if let Some(api_key) = api_key {
         command.env(API_KEY_ENV, api_key);
+    }
+    if let Some(expected_error) = expected_error {
+        command.env(CHILD_EXPECTED_ERROR, expected_error);
     }
 
     command.output().expect("run isolated credential test")
@@ -230,6 +276,10 @@ fn credentials_path(home: &Path) -> PathBuf {
 }
 
 fn write_credentials(path: &Path, contents: &str) {
+    write_credentials_bytes(path, contents.as_bytes());
+}
+
+fn write_credentials_bytes(path: &Path, contents: &[u8]) {
     std::fs::create_dir_all(path.parent().expect("credentials parent"))
         .expect("create config directory");
     std::fs::write(path, contents).expect("write test credentials");
