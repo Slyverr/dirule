@@ -1,10 +1,10 @@
-# Dirule configuration 1.3
+# Dirule configuration 1.4
 
 ## Purpose and scope
 
 This specification defines the project configuration file, rule format, and behavior shared by `plan`, `check`, and `apply`. The file is named `dirule.toml` and uses TOML. A configuration can combine built-in transformations with custom path matching and destination templates.
 
-The format must be able to grow through explicit migrations. New matchers, transformations, and filesystem actions may be added without silently changing the meaning of existing configurations.
+The format must be able to grow through explicit migrations. New matchers, transformations, and filesystem actions may be added without silently changing the meaning of existing configurations. Configurations without a rule `mode` migrate as `mode = "apply"`.
 
 ## Format evolution
 
@@ -14,10 +14,10 @@ A migration must preserve the document's meaning, update its version, and produc
 
 ## Configuration shape
 
-`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `ignore` is an optional list of target-relative path patterns that excludes matching source paths before rule matching. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. The optional per-rule `exclude` list skips entries from that rule while allowing later rules to match. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
+`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `ignore` is an optional list of target-relative path patterns that excludes matching source paths before rule matching. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. `mode` accepts `apply` or `check` and defaults to `apply`. The optional per-rule `exclude` list skips entries from that rule while allowing later rules to match. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
 
 ```toml
-version = "1.3"
+version = "1.4"
 name = "Downloads"
 target = "."
 ignore = ["generated/api/**", "vendor/**"]
@@ -44,6 +44,16 @@ Top-level `ignore` patterns are evaluated against original target-relative sourc
 A target may also contain `.diruleignore`, which uses ignore-file patterns to add Dirule-specific exclusions. It applies to tracked and untracked paths, and negation patterns are invalid. VCS-ignored untracked paths stay excluded; tracked paths remain eligible unless excluded by `.diruleignore` or top-level `ignore`. Dirule reads this file without changing it.
 
 Rules are evaluated in declaration order. The first rule matching both the entry's kind and path owns it. A kind mismatch or matching per-rule exclusion does not claim the entry, so later rules can still match it. Per-rule exclusions use the same path-relative glob syntax as `match`, inspect original paths, and apply only to their containing rule; excluding a directory from one rule does not automatically exclude its descendants. The parser splits `to` at its first colon, so colons later in a value remain part of that value. Unknown fields, kinds, namespaces, transformations, malformed patterns, exclusions, and invalid templates are configuration errors with the relevant field or rule identified.
+
+A rule with `mode = "check"` claims matching entries just like an apply-mode rule, so later rules do not take ownership. Dirule reports the destination that the rule expects, but does not schedule that rule's rename. `check` fails while the expected destination differs from the path after any apply-mode parent-directory moves. `apply` can execute other apply-mode operations and leaves check-mode names unchanged. A check-mode directory does not supply a virtual rename to its descendants; children continue from the directory path that will actually remain.
+
+```toml
+[[rules]]
+name = "Require kebab case in CI"
+match = "src/**/*.rs"
+mode = "check"
+to = "builtin:kebab-case"
+```
 
 ## Matching
 
@@ -159,7 +169,7 @@ User presets are TOML files named `<name>.toml` in the platform user configurati
 - Build one virtual plan from all matched entries before changing the filesystem. Do not apply a rule and rescan before evaluating the next rule.
 - A template provides a complete target-relative destination. Entries without their own destination inherit a renamed directory's virtual path; an explicit child template destination is used as written.
 - Create missing destination parents only during apply. There is no standalone directory-creation rule in the initial action set.
-- `plan` and `check` are read-only. `plan` reports proposed operations, findings, and conflicts. `check` succeeds only when every final planned path equals its original path and the plan has no conflicts. Informational findings alone, such as a skipped symlink, do not fail it. `apply` executes the same validated plan with apply-time revalidation.
+- `plan` and `check` are read-only. `plan` reports proposed operations, findings, and conflicts. `check` succeeds only when every apply-mode path is unchanged, every check-mode rule's expected destination is satisfied, and the plan has no conflicts. Informational findings alone, such as a skipped symlink, do not fail it. `apply` executes the same validated plan with apply-time revalidation and never executes a check-mode rule's expected rename.
 - Never overwrite an existing path. An existing destination is available when another active planned move vacates that path; Dirule stages dependent sources through unique sibling paths so move chains and cycles can complete without overwriting. Other existing destinations, duplicate planned destinations, stale sources, and failed dependencies are conflicts. Apply aborts on conflicts by default. `--on-conflict skip` may apply independent operations and reports skipped conflicts. If a move is skipped, skip moves that depend on its destination becoming free. If a directory move is skipped, skip dependent descendant operations. If multiple entries claim one destination, skip every conflicting claim.
 - Support case-only renames on case-insensitive filesystems by moving through a unique sibling path with no-replace operations. If the second move fails, restore the original path and report any rollback failure.
 - Revalidate the target directory identity, source identities, and destination availability during apply. Reject a target directory replaced since scanning before making any changes.
@@ -187,6 +197,7 @@ Tests should verify:
 - Root-level and nested glob matching, including `**/` matching zero directories, named captures, and safe template expansion.
 - File and directory kind filters, including later rules matching entries whose kind did not match an earlier rule.
 - Rule exclusions, including fall-through to later rules, unmatched entries remaining unchanged, and rejection of malformed exclusion patterns.
+- Check-mode rules report expected destinations without applying them, retain first-match ownership, and leave descendants under check-only directories at their actual paths.
 - All four transformations for ordinary names, uppercase runs, letter/digit transitions, punctuation, Unicode cased letters, scripts without case, dotfiles, and multiple extensions.
 - Built-in directory transformations preserve leading dots on `.github`, `.config`, and nested hidden directories.
 - Acronym behavior for generic uppercase runs such as `HTTPServer`, configured mixed-case spellings such as `iOSGuide`, longest-first tokenization, and non-matching inside a larger token.
