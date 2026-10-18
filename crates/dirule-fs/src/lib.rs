@@ -14,4 +14,6 @@ pub use journal::{
     CURRENT_JOURNAL_VERSION, JournalDetails, JournalError, JournalOperation, JournalRun,
     JournalStatus, JournalStore, UndoReport,
 };
-pub use scan::{ScanError, ScanResult, scan, scan_with_ignore_set, scan_with_ignores};
+pub use scan::{
+    ScanError, ScanResult, scan, scan_with_entry_limit, scan_with_ignore_set, scan_with_ignores,
+};

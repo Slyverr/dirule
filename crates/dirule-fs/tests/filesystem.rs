@@ -1,10 +1,11 @@
+use dirule_core::MatcherSet;
 use dirule_core::{
     Conflict, ConflictKind, EntryKind, Matcher, Plan, PlannedEntry, parse_config, plan,
 };
 use dirule_fs::validate_destinations;
 use dirule_fs::{
     ApplyError, ConflictPolicy, ScanError, apply, apply_with_conflict_policy, scan,
-    scan_with_ignores,
+    scan_with_entry_limit, scan_with_ignores,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,6 +53,50 @@ fn scan_respects_ignore_files_and_includes_hidden_paths() {
     assert!(paths.contains(&PathBuf::from(".hidden")));
     assert!(!paths.iter().any(|path| path.starts_with("ignored")));
     assert!(!paths.iter().any(|path| path.starts_with("nested/ignored")));
+}
+
+#[test]
+fn bounded_scan_returns_a_partial_snapshot_and_marks_it_truncated() {
+    let temp = TempDir::new();
+    for name in ["one.txt", "two.txt", "three.txt"] {
+        std::fs::write(temp.0.join(name), "content").expect("write fixture file");
+    }
+
+    let result = scan_with_entry_limit(&temp.0, &MatcherSet::default(), 1)
+        .expect("scan target within the entry limit");
+
+    assert_eq!(result.entries.len(), 1);
+    assert!(result.truncated);
+}
+
+#[test]
+fn bounded_scan_caps_git_tracked_path_recovery() {
+    let temp = TempDir::new();
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("initialize Git fixture");
+    assert!(init.success(), "initialize Git fixture");
+
+    std::fs::write(temp.0.join(".gitignore"), "ignored/\n").expect("write Git ignore rules");
+    std::fs::create_dir(temp.0.join("ignored")).expect("create ignored directory");
+    for index in 0..8 {
+        std::fs::write(temp.0.join(format!("ignored/file-{index}.txt")), "content")
+            .expect("write tracked ignored file");
+    }
+    let add_files = Command::new("git")
+        .args(["add", "-f", ".gitignore", "ignored"])
+        .current_dir(&temp.0)
+        .status()
+        .expect("stage Git fixture files");
+    assert!(add_files.success(), "stage Git fixture files");
+
+    let result = scan_with_entry_limit(&temp.0, &MatcherSet::default(), 3)
+        .expect("scan target within the entry limit");
+
+    assert!(result.truncated);
+    assert!(result.entries.len() <= 3);
 }
 
 #[test]

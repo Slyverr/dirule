@@ -12,6 +12,8 @@ mod git;
 pub struct ScanResult {
     pub entries: Vec<Entry>,
     pub findings: Vec<Finding>,
+    /// Whether a bounded scan stopped early and returned a partial entry list.
+    pub truncated: bool,
     pub(crate) target_identity: Option<SourceIdentity>,
     pub(crate) identities: HashMap<PathBuf, SourceIdentity>,
 }
@@ -80,6 +82,26 @@ pub fn scan_with_ignores(target: &Path, ignores: &[Matcher]) -> Result<ScanResul
 }
 
 pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanResult, ScanError> {
+    scan_inner(target, ignores, None)
+}
+
+/// Scan a target while limiting work to a bounded number of filesystem entries.
+///
+/// When the limit is reached, the returned snapshot is partial and its
+/// [`ScanResult::truncated`] field is set.
+pub fn scan_with_entry_limit(
+    target: &Path,
+    ignores: &MatcherSet,
+    maximum_entries: usize,
+) -> Result<ScanResult, ScanError> {
+    scan_inner(target, ignores, Some(maximum_entries))
+}
+
+fn scan_inner(
+    target: &Path,
+    ignores: &MatcherSet,
+    maximum_entries: Option<usize>,
+) -> Result<ScanResult, ScanError> {
     let target = target
         .canonicalize()
         .map_err(|source| ScanError::Metadata {
@@ -134,6 +156,8 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
 
     let mut paths = HashMap::<PathBuf, ScannedEntry>::new();
     let mut findings = Vec::new();
+    let mut visited_entries = 0;
+    let mut truncated = false;
     for item in builder.build() {
         let entry = item.map_err(|source| ScanError::Walk {
             path: target.clone(),
@@ -149,6 +173,13 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
         if entry.path() == target {
             continue;
         }
+
+        if maximum_entries.is_some_and(|maximum| visited_entries >= maximum) {
+            truncated = true;
+
+            break;
+        }
+        visited_entries += 1;
 
         if entry.file_type().is_some_and(|kind| kind.is_dir()) {
             validate_ignore_files(entry.path())?;
@@ -193,8 +224,13 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
         }
     }
 
-    let (tracked, tracked_findings) = git::tracked_paths(&target)?;
+    let (tracked, tracked_findings, tracked_truncated) = if truncated {
+        (Default::default(), Vec::new(), false)
+    } else {
+        git::tracked_paths(&target, maximum_entries)?
+    };
     findings.extend(tracked_findings);
+    truncated |= tracked_truncated;
     let mut dirule_ignore_matchers = None;
     for tracked in tracked {
         if slash_path(&tracked).is_some_and(|path| ignores.matches_path_or_parent(&path)) {
@@ -202,6 +238,12 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
         }
 
         if !paths.contains_key(&tracked) {
+            if maximum_entries.is_some_and(|maximum| paths.len() >= maximum) {
+                truncated = true;
+
+                break;
+            }
+
             let absolute = target.join(&tracked);
             let metadata = match std::fs::symlink_metadata(&absolute) {
                 Ok(metadata) => metadata,
@@ -260,12 +302,22 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
         let mut parent = tracked.parent();
         while let Some(path) = parent {
             if !path.as_os_str().is_empty() {
+                if !paths.contains_key(path)
+                    && maximum_entries.is_some_and(|maximum| paths.len() >= maximum)
+                {
+                    truncated = true;
+
+                    break;
+                }
                 paths.entry(path.to_path_buf()).or_insert(ScannedEntry {
                     kind: EntryKind::Directory,
                     identity: None,
                 });
             }
             parent = path.parent();
+        }
+        if truncated {
+            break;
         }
     }
 
@@ -305,6 +357,7 @@ pub fn scan_with_ignore_set(target: &Path, ignores: &MatcherSet) -> Result<ScanR
     Ok(ScanResult {
         entries,
         findings,
+        truncated,
         target_identity: Some(target_identity),
         identities,
     })
