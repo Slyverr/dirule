@@ -695,3 +695,125 @@ fn quick_sort_reports_existing_destinations_without_overwriting() {
     assert_eq!(text(&project.0.join("Invoice.pdf")), "source");
     assert_eq!(text(&project.0.join("pdfs/Invoice.pdf")), "existing");
 }
+
+#[test]
+fn quick_sort_without_selectors_uses_effective_categories_and_previews_by_default() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Camera.RAW"), "raw image").expect("write raw image");
+    fs::write(project.0.join("Book.EPUB"), "ebook").expect("write ebook");
+    fs::write(project.0.join("Voice.MP3"), "audio").expect("write audio");
+    fs::write(project.0.join("Photo.PNG"), "overridden image").expect("write PNG");
+    fs::write(project.0.join("payload.bin"), "unmatched").expect("write unmatched file");
+    fs::create_dir_all(project.0.join("nested")).expect("create nested directory");
+    fs::write(project.0.join("nested/Hidden.RAW"), "nested image").expect("write nested image");
+
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create Dirule config directory");
+    fs::write(
+        config_directory.join("categories.toml"),
+        format!(
+            "version = \"{}\"\n\
+             [[categories]]\nname = 'images'\nextensions = ['raw']\ndestination = 'photos'\n\
+             [[categories]]\nname = 'ebooks'\nextensions = ['epub']\ndestination = 'reading/books'\n",
+            dirule_app::CURRENT_CATEGORY_CATALOG_VERSION
+        ),
+    )
+    .expect("write user category catalog");
+
+    let preview = project.run(&["sort", "--format", "json"]);
+
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&preview.stdout).expect("valid plan");
+    assert_eq!(
+        plan["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["source"] != entry["destination"])
+            .count(),
+        3
+    );
+    assert!(plan["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Camera.RAW" && entry["destination"] == "photos/Camera.RAW"
+    }));
+    assert!(plan["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Book.EPUB" && entry["destination"] == "reading/books/Book.EPUB"
+    }));
+    assert!(plan["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "Voice.MP3" && entry["destination"] == "media/audio/Voice.MP3"
+    }));
+    assert!(project.0.join("Camera.RAW").is_file());
+    assert!(project.0.join("Photo.PNG").is_file());
+    assert!(project.0.join("payload.bin").is_file());
+    assert!(project.0.join("nested/Hidden.RAW").is_file());
+
+    let apply = project.run(&["sort", "--apply", "--yes", "--format", "json"]);
+
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(project.0.join("photos/Camera.RAW").is_file());
+    assert!(project.0.join("reading/books/Book.EPUB").is_file());
+    assert!(project.0.join("media/audio/Voice.MP3").is_file());
+    assert!(project.0.join("Photo.PNG").is_file());
+    assert!(project.0.join("payload.bin").is_file());
+}
+
+#[test]
+fn quick_recursive_bare_sort_collects_nested_category_files() {
+    let project = TempProject::new();
+    fs::create_dir_all(project.0.join("incoming")).expect("create source directory");
+    fs::write(project.0.join("incoming/Portrait.JPG"), "image").expect("write nested image");
+
+    let preview = project.run(&["sort", "--recursive", "--format", "json"]);
+
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&preview.stdout).expect("valid plan");
+    assert!(plan["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["source"] == "incoming/Portrait.JPG"
+            && entry["destination"] == "media/images/Portrait.JPG"
+    }));
+    assert!(project.0.join("incoming/Portrait.JPG").is_file());
+}
+
+#[test]
+fn quick_bare_sort_rejects_overlapping_category_destinations() {
+    let project = TempProject::new();
+    fs::write(project.0.join("Photo.PNG"), "image").expect("write image");
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create Dirule config directory");
+    fs::write(
+        config_directory.join("categories.toml"),
+        format!(
+            "version = \"{}\"\n\
+             [[categories]]\nname = 'pictures'\nextensions = ['png']\ndestination = 'pictures'\n",
+            dirule_app::CURRENT_CATEGORY_CATALOG_VERSION
+        ),
+    )
+    .expect("write overlapping custom category");
+
+    let output = project.run(&["sort", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let error: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("valid JSON error");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("overlap")
+    );
+    assert!(project.0.join("Photo.PNG").is_file());
+    assert!(!project.0.join("media/images/Photo.PNG").exists());
+    assert!(!project.0.join("pictures/Photo.PNG").exists());
+}

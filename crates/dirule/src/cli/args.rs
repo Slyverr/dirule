@@ -156,12 +156,11 @@ pub(super) struct ApplyArgs {
 
 #[derive(Debug, Args)]
 pub(super) struct SortArgs {
-    /// One or more extensions or category names (images, videos, audio, documents, or a user category).
+    /// Extensions or categories to sort; omit them to use every category in the catalog.
     #[arg(
         value_name = "SELECTOR",
-        num_args = 1..,
-        conflicts_with = "by",
-        required_unless_present = "by"
+        num_args = 0..,
+        conflicts_with = "by"
     )]
     pub(super) selectors: Vec<String>,
 
@@ -579,6 +578,17 @@ mod tests {
         assert_eq!(sort.selectors, ["pdf", "images", "videos"]);
         assert_eq!(sort.by, None);
         assert!(sort.operation.recursive);
+    }
+
+    #[test]
+    fn sort_parses_without_selectors_to_use_the_effective_categories() {
+        let cli = Cli::try_parse_from(["dirule", "sort"]).expect("bare sort is valid");
+        let CliCommand::Sort(sort) = cli.command else {
+            panic!("expected sort command");
+        };
+
+        assert!(sort.selectors.is_empty());
+        assert_eq!(sort.by, None);
     }
 
     #[test]

@@ -19,12 +19,16 @@ pub(super) fn sort(
         }
         None => {
             let categories = dirule_app::CategoryCatalog::user_if_available()?;
-            dirule_app::sort_selectors_preview(
-                &target,
-                &selectors,
-                &categories,
-                operation.recursive,
-            )?
+            if selectors.is_empty() {
+                dirule_app::sort_all_categories_preview(&target, &categories, operation.recursive)?
+            } else {
+                dirule_app::sort_selectors_preview(
+                    &target,
+                    &selectors,
+                    &categories,
+                    operation.recursive,
+                )?
+            }
         }
     };
 
