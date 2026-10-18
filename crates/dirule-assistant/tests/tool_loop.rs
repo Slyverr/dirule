@@ -334,13 +334,15 @@ fn unregistered_tool_is_reported_to_model_without_dispatching() {
     let called = Arc::new(Mutex::new(false));
     let tools = catalog(ApprovalRequirement::None, Arc::clone(&called));
     let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut observer = RecordingObserver::default();
 
     let result = assistant
-        .run(
+        .run_with_observer(
             "test-model",
             "Use Dirule tools.",
             "Organize this folder.",
             &mut FixedApproval(false),
+            &mut observer,
         )
         .expect("assistant recovers from an unsupported tool call");
 
@@ -348,6 +350,34 @@ fn unregistered_tool_is_reported_to_model_without_dispatching() {
     assert!(!*called.lock().expect("called lock"));
     assert!(
         matches!(provider.requests()[1].messages.last(), Some(Message::Tool { content, .. }) if content.contains("unknown Dirule tool"))
+    );
+    assert_eq!(
+        observer.0,
+        [
+            AssistantEvent::ModelRequestStarted {
+                turn: 1,
+                turn_limit: 8,
+            },
+            AssistantEvent::ModelRequestFinished {
+                turn: 1,
+                succeeded: true,
+            },
+            AssistantEvent::ToolCallStarted {
+                name: "run_shell".into(),
+            },
+            AssistantEvent::ToolCallFinished {
+                name: "run_shell".into(),
+                succeeded: false,
+            },
+            AssistantEvent::ModelRequestStarted {
+                turn: 2,
+                turn_limit: 8,
+            },
+            AssistantEvent::ModelRequestFinished {
+                turn: 2,
+                succeeded: true,
+            },
+        ]
     );
 }
 

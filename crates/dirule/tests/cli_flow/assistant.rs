@@ -197,6 +197,51 @@ fn ask_sanitizes_model_supplied_tool_names_in_progress_output() {
 }
 
 #[test]
+fn ask_reports_provider_failure_without_echoing_response_body_or_credentials() {
+    let project = TempProject::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind model endpoint");
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept model request");
+        let (_, body) = read_request(&mut stream);
+        let _: Value = serde_json::from_str(&body).expect("request JSON");
+        let response_body = "provider-private-response";
+        write!(
+            stream,
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+            response_body.len()
+        )
+        .expect("write provider error");
+    });
+
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create assistant config directory");
+    fs::write(
+        config_directory.join("assistant.toml"),
+        format!(
+            "version = \"1.0\"\ndefault_profile = \"local\"\n\n[profiles.local]\nadapter = \"openai-compatible\"\nendpoint = {endpoint:?}\nmodel = \"test-model\"\napi_key_env = \"DIRULE_TEST_KEY\"\n"
+        ),
+    )
+    .expect("write assistant profile");
+    let output = project
+        .command(&["ask", "--target", ".", "Inspect this folder."])
+        .env("DIRULE_TEST_KEY", "dirule-test-secret")
+        .output()
+        .expect("run ask");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Waiting for model · turn 1/8"));
+    assert!(stderr.contains("HTTP status 503"));
+    assert!(!stderr.contains("provider-private-response"));
+    assert!(!stderr.contains("dirule-test-secret"));
+    server.join().expect("model test server");
+}
+
+#[test]
 fn ask_refuses_model_requested_changes_without_an_interactive_terminal() {
     let project = TempProject::new();
     fs::write(project.0.join("Portrait.JPG"), "private image bytes").expect("write photo");
