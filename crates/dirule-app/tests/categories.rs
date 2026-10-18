@@ -43,6 +43,10 @@ impl Drop for TempTarget {
     }
 }
 
+fn portable_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 #[test]
 fn built_in_categories_cover_common_file_groups() {
     let categories = CategoryCatalog::built_in();
@@ -175,8 +179,8 @@ fn sort_resolves_multiple_extensions_and_categories_through_rules() {
         .iter()
         .map(|entry| {
             (
-                entry.source.to_string_lossy().into_owned(),
-                entry.destination.to_string_lossy().into_owned(),
+                portable_path(&entry.source),
+                portable_path(&entry.destination),
             )
         })
         .collect::<std::collections::BTreeMap<_, _>>();
@@ -208,8 +212,8 @@ fn sort_all_categories_uses_catalog_and_leaves_unmatched_or_nested_files_alone()
         .iter()
         .map(|entry| {
             (
-                entry.source.to_string_lossy().into_owned(),
-                entry.destination.to_string_lossy().into_owned(),
+                portable_path(&entry.source),
+                portable_path(&entry.destination),
             )
         })
         .collect::<std::collections::BTreeMap<_, _>>();
