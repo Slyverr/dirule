@@ -1,6 +1,6 @@
 use dirule_app::{
     CURRENT_CATEGORY_CATALOG_VERSION, CategoryCatalog, CategoryCatalogError,
-    sort_extension_preview, sort_selectors_preview,
+    sort_all_categories_preview, sort_extension_preview, sort_selectors_preview,
 };
 use std::fs;
 use std::ops::Deref;
@@ -185,6 +185,44 @@ fn sort_resolves_multiple_extensions_and_categories_through_rules() {
     assert_eq!(destinations["Clip.MP4"], "media/videos/Clip.MP4");
     assert_eq!(destinations["Guide.PDF"], "pdfs/Guide.PDF");
     assert_eq!(destinations["Notes.TXT"], "txts/Notes.TXT");
+    assert!(target.join("Portrait.JPG").is_file());
+    assert!(!target.join("media/images/Portrait.JPG").exists());
+}
+
+#[test]
+fn sort_all_categories_uses_catalog_and_leaves_unmatched_or_nested_files_alone() {
+    let target = TempTarget::new();
+    fs::write(target.join("Portrait.JPG"), "image").expect("write image");
+    fs::write(target.join("Clip.MP4"), "video").expect("write video");
+    fs::write(target.join("Voice.MP3"), "audio").expect("write audio");
+    fs::write(target.join("Guide.PDF"), "document").expect("write document");
+    fs::write(target.join("payload.bin"), "unknown").expect("write unmatched file");
+    fs::create_dir_all(target.join("nested")).expect("create nested directory");
+    fs::write(target.join("nested/Deep.JPG"), "nested image").expect("write nested image");
+
+    let preview = sort_all_categories_preview(&target, &CategoryCatalog::built_in(), false)
+        .expect("preview all built-in categories");
+    let destinations = preview
+        .plan()
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.source.to_string_lossy().into_owned(),
+                entry.destination.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    assert_eq!(destinations["Portrait.JPG"], "media/images/Portrait.JPG");
+    assert_eq!(destinations["Clip.MP4"], "media/videos/Clip.MP4");
+    assert_eq!(destinations["Voice.MP3"], "media/audio/Voice.MP3");
+    assert_eq!(destinations["Guide.PDF"], "documents/Guide.PDF");
+    assert_eq!(destinations["payload.bin"], "payload.bin");
+    assert_eq!(
+        destinations["nested/Deep.JPG"], "nested/Deep.JPG",
+        "nested files stay in place without recursive sorting"
+    );
     assert!(target.join("Portrait.JPG").is_file());
     assert!(!target.join("media/images/Portrait.JPG").exists());
 }

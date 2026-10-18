@@ -33,8 +33,8 @@ pub use categories::{
 };
 pub use dirule_fs::ConflictPolicy;
 pub use sort::{
-    sort_by_extension_preview, sort_extension_preview, sort_selectors_preview,
-    sort_selectors_preview_with_entry_limit,
+    sort_all_categories_preview, sort_by_extension_preview, sort_extension_preview,
+    sort_selectors_preview, sort_selectors_preview_with_entry_limit,
 };
 
 /// A read-only scan and validated plan for one target.

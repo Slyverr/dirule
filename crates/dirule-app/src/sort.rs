@@ -32,6 +32,20 @@ pub fn sort_selectors_preview(
     sort_selectors_preview_with_entry_limit(target, selectors, categories, recursive, None)
 }
 
+/// Preview sorting files using every category in the effective catalog.
+pub fn sort_all_categories_preview(
+    target: &Path,
+    categories: &CategoryCatalog,
+    recursive: bool,
+) -> Result<Preview, PreviewError> {
+    let selectors = categories
+        .iter()
+        .map(|category| category.name.clone())
+        .collect::<Vec<_>>();
+
+    sort_selectors_preview(target, &selectors, categories, recursive)
+}
+
 /// Preview sorting selected extensions or categories with an optional scan limit.
 pub fn sort_selectors_preview_with_entry_limit(
     target: &Path,
