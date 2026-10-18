@@ -149,6 +149,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
 
 pub(super) fn build_agent(timeout: Duration) -> Agent {
     let config = Agent::config_builder()
+        .max_redirects(0)
         .timeout_global(Some(timeout))
         .build();
 
@@ -179,6 +180,12 @@ pub(super) fn post_json(
         .build()
         .send(body)
         .map_err(provider_request_error)?;
+    if response.status().is_redirection() {
+        return Err(ProviderError::new(
+            "model provider redirected the request; configure its final endpoint",
+        ));
+    }
+
     let body = response
         .body_mut()
         .with_config()

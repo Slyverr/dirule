@@ -137,6 +137,40 @@ fn http_errors_do_not_expose_provider_response_bodies() {
     server.join().expect("mock provider thread");
 }
 
+#[test]
+fn provider_redirects_are_rejected_without_sending_data_to_the_redirect_target() {
+    for adapter in ADAPTERS {
+        let redirect_target = TcpListener::bind("127.0.0.1:0").expect("bind redirect target");
+        redirect_target
+            .set_nonblocking(true)
+            .expect("make redirect target nonblocking");
+        let redirect_endpoint = format!("http://{}/collect", redirect_target.local_addr().unwrap());
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock provider");
+        let endpoint = adapter.endpoint(listener.local_addr().expect("listener address"));
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept provider request");
+            let _request = read_request(&mut stream);
+            write_redirect_response(&mut stream, &redirect_endpoint);
+        });
+
+        let provider = adapter.provider(endpoint);
+        let error = provider
+            .complete_with_timeout(
+                &model_request("private path data".into()),
+                Duration::from_secs(1),
+            )
+            .expect_err("redirected provider request rejected");
+
+        assert!(error.to_string().contains("redirected the request"));
+        server.join().expect("mock provider thread");
+        assert!(matches!(
+            redirect_target.accept(),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
+    }
+}
+
 fn model_request(content: String) -> ModelRequest {
     ModelRequest {
         model: String::new(),
@@ -211,4 +245,12 @@ fn write_response(stream: &mut TcpStream, status: &str, body: &[u8]) {
         .write_all(header.as_bytes())
         .expect("write response headers");
     let _ = stream.write_all(body);
+}
+
+fn write_redirect_response(stream: &mut TcpStream, location: &str) {
+    write!(
+        stream,
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .expect("write redirect response");
 }

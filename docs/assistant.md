@@ -25,6 +25,8 @@ GEMINI_API_KEY=your-key
 NVIDIA_API_KEY=your-key
 ```
 
+Dirule does not follow provider HTTP redirects. Configure the endpoint's final URL so prompts, paths, and preview data go only to the provider endpoint you selected.
+
 On Windows, keep it in your user-only `%APPDATA%` directory. The file is plain text, not encrypted storage. Dirule uses only the selected profile's key; it does not load project `.env` files or execute this file as shell code. Lines use `NAME=value`; blank lines and full-line `#` comments are allowed, and matching single or double quotes may surround a value. No variable expansion or escape processing is performed. Environment variables remain useful for CI and secret managers.
 
 These examples use currently documented tool-capable endpoints. Model availability and free access can change, so check the linked provider catalog before testing.
