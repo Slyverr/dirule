@@ -2,16 +2,17 @@
 
 ## Unreleased
 
-### Added
-
-- Live `dirule ask` progress for model turns, tool calls, and approval pauses.
-- Per-rule `mode = "check"` policies that report naming violations without applying those rules' renames.
-
 ## Version 0.4.0
 
 ### Added
 
 - Experimental `dirule ask` support for OpenAI-compatible and OpenAI Responses providers, bounded tools and previews, credential resolution, validated config creation, and approval-gated path changes and undo.
+- Per-rule `mode = "check"` policies that report naming violations without applying those rules' renames.
+- Bare `dirule sort` that previews sorting with every category in the effective catalog.
+
+### Improved
+
+- Live `dirule ask` progress for model turns, tool calls, and approval pauses.
 
 ## Version 0.3.0
 
