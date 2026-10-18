@@ -41,6 +41,7 @@ pub(crate) struct CompiledRule {
     pub(crate) name: String,
     pub(crate) matcher: Matcher,
     pub(crate) kind: RuleKind,
+    pub(crate) mode: RuleMode,
     pub(crate) exclude: MatcherSet,
     pub(crate) destination: CompiledDestination,
 }
@@ -60,6 +61,20 @@ pub enum RuleKind {
     Directory,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleMode {
+    #[default]
+    Apply,
+    Check,
+}
+
+impl RuleMode {
+    fn is_apply(mode: &Self) -> bool {
+        *mode == Self::Apply
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
@@ -70,6 +85,9 @@ pub struct Rule {
 
     #[serde(default)]
     pub kind: RuleKind,
+
+    #[serde(default, skip_serializing_if = "RuleMode::is_apply")]
+    pub mode: RuleMode,
 
     #[serde(default)]
     pub exclude: Vec<String>,
@@ -196,6 +214,7 @@ impl Config {
                 name: rule.name.clone(),
                 matcher,
                 kind: rule.kind,
+                mode: rule.mode,
                 exclude,
                 destination,
             });

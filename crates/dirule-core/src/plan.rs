@@ -1,4 +1,4 @@
-use crate::config::CompiledDestination;
+use crate::config::{CompiledDestination, RuleMode};
 use crate::{
     CompiledConfig, Config, DestinationValues, Error, Finding, FindingKind, Result, RuleKind,
     transform_directory, transform_filename,
@@ -79,6 +79,12 @@ impl Plan {
         self.entries
             .iter()
             .any(|entry| entry.source != entry.destination)
+    }
+
+    pub fn has_check_violations(&self) -> bool {
+        self.findings
+            .iter()
+            .any(|finding| finding.kind == FindingKind::CheckOnlyViolation)
     }
 
     pub fn is_conflict_free(&self) -> bool {
@@ -192,6 +198,24 @@ pub fn plan_compiled(config: &CompiledConfig, entries: &[Entry]) -> Result<Plan>
                     template.expand(&values, &config.acronyms)?
                 }
             };
+
+            if rule.mode == RuleMode::Check {
+                let expected = destination;
+                destination = planned_parent.join(basename);
+                if expected != destination {
+                    result.findings.push(Finding::new(
+                        FindingKind::CheckOnlyViolation,
+                        Some(&source),
+                        format!(
+                            "check-only rule {:?} expects {} to become {}",
+                            rule.name,
+                            display_path(&source),
+                            display_path(&expected)
+                        ),
+                    ));
+                }
+            }
+
             owner = Some(rule.name.clone());
             break;
         }

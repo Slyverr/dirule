@@ -67,7 +67,7 @@ fn preset_listing_emits_versioned_json() {
     );
     let value: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid preset listing JSON");
-    assert_eq!(value["schema_version"], "1.3");
+    assert_eq!(value["schema_version"], "1.4");
     assert_eq!(value["presets"], serde_json::json!(["downloads", "zeta"]));
 }
 

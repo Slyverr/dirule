@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dirule_core::{
-    AcronymLexicon, AcronymOptions, Config, Entry, EntryKind, Matcher, Rule, RuleKind,
+    AcronymLexicon, AcronymOptions, Config, Entry, EntryKind, Matcher, Rule, RuleKind, RuleMode,
     parse_config, plan, plan_compiled, transform_filename,
 };
 use std::hint::black_box;
@@ -83,6 +83,7 @@ fn benchmark_planning(criterion: &mut Criterion) {
                 name: "Normalize invoices".into(),
                 pattern: "Invoices/<year>-<vendor>-<title>.pdf".into(),
                 kind: RuleKind::File,
+                mode: RuleMode::Apply,
                 exclude: Vec::new(),
                 to: "template:Archive/${year}/${vendor|kebab-case}/${title|kebab-case}.pdf".into(),
             },
@@ -90,6 +91,7 @@ fn benchmark_planning(criterion: &mut Criterion) {
                 name: "Normalize other names".into(),
                 pattern: "**/*".into(),
                 kind: RuleKind::Any,
+                mode: RuleMode::Apply,
                 exclude: Vec::new(),
                 to: "builtin:kebab-case".into(),
             },
@@ -173,6 +175,7 @@ fn benchmark_acronym_scaling(criterion: &mut Criterion) {
                 name: "Normalize files".into(),
                 pattern: "**/*".into(),
                 kind: RuleKind::File,
+                mode: RuleMode::Apply,
                 exclude: Vec::new(),
                 to: "builtin:kebab-case".into(),
             }],
@@ -220,6 +223,7 @@ fn exclusion_config(count: usize) -> Config {
             name: "Normalize files".into(),
             pattern: "**/*".into(),
             kind: RuleKind::File,
+            mode: RuleMode::Apply,
             exclude: (0..count)
                 .map(|index| format!("**/*.excluded-{index}"))
                 .collect(),

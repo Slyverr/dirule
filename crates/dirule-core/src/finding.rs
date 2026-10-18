@@ -5,6 +5,7 @@ use std::path::Path;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
+    CheckOnlyViolation,
     SkippedGitNonUnicodePath,
     SkippedNonRegularEntry,
     SkippedNonUnicodePath,
@@ -14,6 +15,9 @@ pub enum FindingKind {
 impl FindingKind {
     pub fn suggestion(self) -> &'static str {
         match self {
+            Self::CheckOnlyViolation => {
+                "Change the rule mode to `apply` if Dirule should rename this path."
+            }
             Self::SkippedGitNonUnicodePath | Self::SkippedNonUnicodePath => {
                 "Use Unicode paths so Dirule can display and process the entry safely."
             }

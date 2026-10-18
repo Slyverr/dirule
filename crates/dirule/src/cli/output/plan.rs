@@ -83,7 +83,11 @@ pub(super) fn write_text_plan<W: Write>(
         .count();
     let (label, heading_color) = match context {
         PlanContext::Preview => ("Plan preview", "36"),
-        PlanContext::Check if changes == 0 && plan.conflicts.is_empty() => ("Check passed", "32"),
+        PlanContext::Check
+            if changes == 0 && plan.conflicts.is_empty() && !plan.has_check_violations() =>
+        {
+            ("Check passed", "32")
+        }
         PlanContext::Check => ("Check failed", "31"),
         PlanContext::Apply => ("Apply preview", "36"),
     };
@@ -163,7 +167,11 @@ pub(super) fn write_text_plan<W: Write>(
         }
     }
 
-    if matches!(context, PlanContext::Check) && changes == 0 && plan.conflicts.is_empty() {
+    if matches!(context, PlanContext::Check)
+        && changes == 0
+        && plan.conflicts.is_empty()
+        && !plan.has_check_violations()
+    {
         writeln!(writer, "Target matches the configured rules.")?;
     }
 

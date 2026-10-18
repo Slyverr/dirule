@@ -22,6 +22,11 @@ const MIGRATIONS: &[Migration] = &[
         to: ConfigVersion::new(1, 3),
         apply: add_ignore_defaults,
     },
+    Migration {
+        from: ConfigVersion::new(1, 3),
+        to: ConfigVersion::new(1, 4),
+        apply: advance_check_mode_version,
+    },
 ];
 
 fn advance_version(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
@@ -47,6 +52,28 @@ fn add_ignore_defaults(mut document: toml::Value, version: ConfigVersion) -> Res
     document_table.insert("version".into(), toml::Value::String(version.to_string()));
 
     Ok(document)
+}
+
+fn advance_check_mode_version(
+    document: toml::Value,
+    version: ConfigVersion,
+) -> Result<toml::Value> {
+    let has_rule_mode = document
+        .get("rules")
+        .and_then(toml::Value::as_array)
+        .is_some_and(|rules| {
+            rules.iter().any(|rule| {
+                rule.as_table()
+                    .is_some_and(|rule| rule.contains_key("mode"))
+            })
+        });
+    if has_rule_mode {
+        return Err(Error::Config(format!(
+            "rule `mode` requires configuration version {version}"
+        )));
+    }
+
+    advance_version(document, version)
 }
 
 pub(super) fn upgrade(document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {

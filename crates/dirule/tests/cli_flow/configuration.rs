@@ -216,7 +216,7 @@ fn validate_checks_config_without_scanning_its_target() {
     );
     let result: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("valid validation JSON");
-    assert_eq!(result["schema_version"], "1.3");
+    assert_eq!(result["schema_version"], "1.4");
     assert_eq!(result["valid"], true);
     assert_eq!(result["source"]["kind"], "config");
     assert_eq!(result["source"]["name"], "dirule.toml");

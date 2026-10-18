@@ -19,6 +19,83 @@ fn cli_accepts_human_output_format_and_rejects_text_alias() {
 }
 
 #[test]
+fn check_only_rules_fail_checks_but_allow_other_rules_to_apply() {
+    let project = TempProject::new();
+    fs::write(project.0.join("CheckOnly.txt"), "check").expect("write check-only file");
+    fs::write(project.0.join("ApplyMe.txt"), "apply").expect("write apply file");
+    fs::write(
+        project.0.join("dirule.toml"),
+        r#"
+version = "1.4"
+
+[[rules]]
+name = "Require kebab case"
+match = "CheckOnly.txt"
+mode = "check"
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Normalize selected files"
+match = "ApplyMe.txt"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("write mixed-mode config");
+
+    let check = project.run(&["check"]);
+
+    assert_eq!(check.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("check-only rule"));
+    assert!(project.0.join("CheckOnly.txt").is_file());
+    assert!(project.0.join("ApplyMe.txt").is_file());
+
+    let preview = project.run(&["plan", "--format", "json"]);
+
+    assert!(preview.status.success());
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.stdout).expect("valid mixed-mode plan");
+    assert!(
+        preview["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["kind"] == "check_only_violation"
+                    && diagnostic["path"] == "CheckOnly.txt"
+            })
+    );
+
+    let check_json = project.run(&["check", "--format", "json"]);
+
+    assert_eq!(check_json.status.code(), Some(1));
+    let check_json: serde_json::Value =
+        serde_json::from_slice(&check_json.stdout).expect("valid check result");
+    assert!(
+        check_json["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| { diagnostic["kind"] == "check_only_violation" })
+    );
+
+    let apply = project.run(&["apply", "--yes"]);
+
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(String::from_utf8_lossy(&apply.stdout).contains("Applied 1 rename(s)."));
+    assert!(project.0.join("CheckOnly.txt").is_file());
+    assert!(project.0.join("apply-me.txt").is_file());
+
+    let check = project.run(&["check"]);
+
+    assert_eq!(check.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("Check failed"));
+}
+
+#[test]
 fn cli_initializes_checks_plans_applies_and_emits_json() {
     let project = TempProject::new();
     let canonical_target = project

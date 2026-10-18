@@ -6,7 +6,8 @@
 use self::configuration::{ConfigurationLoadError, ConfigurationSource};
 use self::paths::HomeDirectoryUnavailable;
 use dirule_core::{
-    AcronymOptions, Config, Entry, MatcherSet, Plan, Rule, RuleKind, Transform, plan_compiled,
+    AcronymOptions, Config, Entry, MatcherSet, Plan, Rule, RuleKind, RuleMode, Transform,
+    plan_compiled,
 };
 use dirule_fs::{
     ApplyError, ApplyReport, ScanError, ScanResult, apply_journaled, scan_with_entry_limit,
@@ -207,6 +208,7 @@ pub fn rename_preview_with_entry_limit(
         name: "Rename entries".into(),
         pattern: pattern.into(),
         kind: RuleKind::Any,
+        mode: RuleMode::Apply,
         exclude: Vec::new(),
         to: format!("builtin:{}", transform.as_str()),
     }]);

@@ -9,7 +9,7 @@ pub struct ConfigVersion {
     minor: u32,
 }
 
-pub const CURRENT_CONFIG_VERSION: ConfigVersion = ConfigVersion::new(1, 3);
+pub const CURRENT_CONFIG_VERSION: ConfigVersion = ConfigVersion::new(1, 4);
 
 impl ConfigVersion {
     pub const fn new(major: u32, minor: u32) -> Self {

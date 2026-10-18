@@ -36,7 +36,7 @@ pub(super) fn run(
                 output::PlanContext::Check,
                 verbose,
             )?;
-            if result.has_changes() || !result.is_conflict_free() {
+            if result.has_changes() || result.has_check_violations() || !result.is_conflict_free() {
                 return Err(Box::new(CheckFailure));
             }
 

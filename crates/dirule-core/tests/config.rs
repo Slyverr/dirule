@@ -1,4 +1,4 @@
-use dirule_core::{RuleKind, parse_config};
+use dirule_core::{RuleKind, RuleMode, parse_config};
 
 #[test]
 fn parses_and_validates_rule_configuration() {
@@ -17,6 +17,7 @@ to = "template:Archive/${year}/${vendor|kebab-case}/${title}.pdf"
 
     assert_eq!(config.rules.len(), 1);
     assert_eq!(config.rules[0].kind, RuleKind::Any);
+    assert_eq!(config.rules[0].mode, RuleMode::Apply);
     assert!(config.acronyms.entries.is_empty());
     assert_eq!(
         config.rules[0].pattern,
@@ -66,6 +67,63 @@ to = "builtin:kebab-case"
     .expect("legacy configuration migrates");
 
     assert!(config.ignore.is_empty());
+}
+
+#[test]
+fn version_1_3_migrates_to_apply_mode() {
+    let config = parse_config(
+        r#"
+version = "1.3"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("legacy configuration migrates");
+
+    assert_eq!(config.rules[0].mode, RuleMode::Apply);
+}
+
+#[test]
+fn check_mode_requires_configuration_version_1_4() {
+    let error = parse_config(
+        r#"
+version = "1.3"
+
+[[rules]]
+name = "Check names"
+match = "**/*"
+mode = "check"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect_err("new rule mode requires its format version");
+
+    assert!(
+        error
+            .to_string()
+            .contains("`mode` requires configuration version 1.4")
+    );
+}
+
+#[test]
+fn parses_check_only_rule_mode() {
+    let config = parse_config(
+        r#"
+version = "1.4"
+
+[[rules]]
+name = "Check names"
+match = "**/*"
+mode = "check"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid check-only rule");
+
+    assert_eq!(config.rules[0].mode, RuleMode::Check);
 }
 
 #[test]

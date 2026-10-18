@@ -1,7 +1,7 @@
 use dirule_app::configuration::{ConfigEditor, ConfigEditorError};
 use dirule_app::journal::JournalService;
 use dirule_app::presets::{PresetError, PresetStore};
-use dirule_core::{Rule, RuleKind, parse_config};
+use dirule_core::{Rule, RuleKind, RuleMode, parse_config};
 use dirule_fs::{ConflictPolicy, JournalStore};
 use std::fs;
 use std::ops::Deref;
@@ -824,6 +824,7 @@ fn config_editor_supports_adding_and_reordering_rules() {
             name: "Third rule".into(),
             pattern: "**/*.txt".into(),
             kind: RuleKind::File,
+            mode: RuleMode::Apply,
             exclude: vec!["**/drafts/**".into()],
             to: "builtin:pascal-case".into(),
         })
@@ -855,6 +856,7 @@ fn config_editor_supports_adding_and_reordering_rules() {
     let saved = fs::read_to_string(&path).expect("read edited project config");
     assert!(!saved.contains("# first rule note"));
     assert!(saved.contains("# second rule note"));
+    assert!(!saved.contains("mode = \"apply\""));
     let reloaded = parse_config(&saved).expect("parse saved project config");
     assert_eq!(
         reloaded

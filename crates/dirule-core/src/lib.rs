@@ -8,7 +8,9 @@ mod template;
 mod transform;
 
 pub use acronyms::{AcronymLexicon, AcronymOptions};
-pub use config::{CURRENT_CONFIG_VERSION, CompiledConfig, Config, ConfigVersion, Rule, RuleKind};
+pub use config::{
+    CURRENT_CONFIG_VERSION, CompiledConfig, Config, ConfigVersion, Rule, RuleKind, RuleMode,
+};
 pub use error::{Error, Result};
 pub use finding::{Finding, FindingKind};
 pub use matching::{Captures, Matcher, MatcherSet};

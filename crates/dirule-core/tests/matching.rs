@@ -1,4 +1,4 @@
-use dirule_core::{Matcher, MatcherSet, Rule, RuleKind, parse_config};
+use dirule_core::{Matcher, MatcherSet, Rule, RuleKind, RuleMode, parse_config};
 
 #[test]
 fn extracts_named_capture_values() {
@@ -50,6 +50,7 @@ fn tree_globs_match_root_and_nested_paths_case_sensitively() {
         name: "PDF files".into(),
         pattern: "**/*.pdf".into(),
         kind: RuleKind::Any,
+        mode: RuleMode::Apply,
         exclude: Vec::new(),
         to: "builtin:kebab-case".into(),
     };

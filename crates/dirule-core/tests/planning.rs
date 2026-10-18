@@ -1,5 +1,5 @@
 use dirule_core::{
-    AcronymOptions, Config, ConflictKind, Entry, EntryKind, FindingKind, Rule, RuleKind,
+    AcronymOptions, Config, ConflictKind, Entry, EntryKind, FindingKind, Rule, RuleKind, RuleMode,
     parse_config, plan,
 };
 use std::path::{Path, PathBuf};
@@ -94,6 +94,145 @@ to = "builtin:kebab-case"
     assert_eq!(
         planned.entries[0].destination,
         PathBuf::from("Invoices/http-server.pdf")
+    );
+}
+
+#[test]
+fn check_mode_reports_expected_names_without_planning_moves() {
+    let config = parse_config(
+        r#"
+version = "1.4"
+
+[[rules]]
+name = "Require kebab case"
+match = "*.txt"
+mode = "check"
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Fallback rename"
+match = "**/*.txt"
+to = "builtin:snake-case"
+"#,
+    )
+    .expect("valid check-only config");
+    let entries = [Entry {
+        path: PathBuf::from("QuarterlyReport.txt"),
+        kind: EntryKind::File,
+    }];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert!(!planned.has_changes());
+    assert!(planned.has_check_violations());
+    assert!(planned.conflicts.is_empty());
+    assert_eq!(
+        planned.entries[0].source,
+        PathBuf::from("QuarterlyReport.txt")
+    );
+    assert_eq!(
+        planned.entries[0].destination,
+        PathBuf::from("QuarterlyReport.txt")
+    );
+    assert_eq!(
+        planned.entries[0].rule.as_deref(),
+        Some("Require kebab case")
+    );
+    assert_eq!(planned.findings.len(), 1);
+    assert_eq!(planned.findings[0].kind, FindingKind::CheckOnlyViolation);
+    assert!(planned.findings[0].message.contains("quarterly-report.txt"));
+}
+
+#[test]
+fn check_mode_does_not_inherit_a_hypothetical_directory_rename() {
+    let config = parse_config(
+        r#"
+version = "1.4"
+
+[[rules]]
+name = "Check directory names"
+match = "*"
+kind = "directory"
+mode = "check"
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Check file names"
+match = "**/*"
+kind = "file"
+mode = "check"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid check-only config");
+    let entries = [
+        Entry {
+            path: PathBuf::from("HTTPServer"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("HTTPServer/ReadMe.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert!(!planned.has_changes());
+    assert_eq!(planned.findings.len(), 2);
+    assert!(planned.findings[0].message.contains("http-server"));
+    assert!(
+        planned.findings[1]
+            .message
+            .contains("HTTPServer/read-me.txt")
+    );
+}
+
+#[test]
+fn check_mode_child_tracks_only_an_applied_parent_rename() {
+    let config = parse_config(
+        r#"
+version = "1.4"
+
+[[rules]]
+name = "Normalize directories"
+match = "*"
+kind = "directory"
+to = "builtin:kebab-case"
+
+[[rules]]
+name = "Check file names"
+match = "**/*"
+kind = "file"
+mode = "check"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("valid mixed-mode config");
+    let entries = [
+        Entry {
+            path: PathBuf::from("HTTPServer"),
+            kind: EntryKind::Directory,
+        },
+        Entry {
+            path: PathBuf::from("HTTPServer/ReadMe.txt"),
+            kind: EntryKind::File,
+        },
+    ];
+
+    let planned = plan(&config, &entries).expect("valid plan");
+
+    assert!(planned.has_changes());
+    assert!(planned.has_check_violations());
+    assert_eq!(planned.entries[0].destination, PathBuf::from("http-server"));
+    assert_eq!(
+        planned.entries[1].destination,
+        PathBuf::from("http-server/ReadMe.txt")
+    );
+    assert!(
+        planned.findings[0]
+            .message
+            .contains("http-server/read-me.txt")
     );
 }
 
@@ -671,6 +810,7 @@ fn planning_propagates_directory_names_from_unsorted_entries() {
                 name: "Normalize project folder".into(),
                 pattern: "*".into(),
                 kind: RuleKind::Any,
+                mode: RuleMode::Apply,
                 exclude: Vec::new(),
                 to: "builtin:kebab-case".into(),
             },
@@ -678,6 +818,7 @@ fn planning_propagates_directory_names_from_unsorted_entries() {
                 name: "Normalize remaining paths".into(),
                 pattern: "**/*".into(),
                 kind: RuleKind::Any,
+                mode: RuleMode::Apply,
                 exclude: Vec::new(),
                 to: "builtin:snake-case".into(),
             },

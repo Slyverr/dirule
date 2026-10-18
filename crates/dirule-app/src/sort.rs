@@ -1,5 +1,5 @@
 use crate::{CategoryCatalog, Preview, PreviewError, preview, preview_with_entry_limit};
-use dirule_core::{AcronymOptions, Config, Rule, RuleKind};
+use dirule_core::{AcronymOptions, Config, Rule, RuleKind, RuleMode};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -108,6 +108,7 @@ pub fn sort_selectors_preview_with_entry_limit(
                 name: format!("Sort into {destination}"),
                 pattern,
                 kind: RuleKind::File,
+                mode: RuleMode::Apply,
                 exclude: Vec::new(),
                 to: format!("template:{destination}/${{name}}"),
             }
@@ -124,6 +125,7 @@ pub fn sort_by_extension_preview(target: &Path, recursive: bool) -> Result<Previ
         name: "Sort files by extension".into(),
         pattern: pattern.into(),
         kind: RuleKind::File,
+        mode: RuleMode::Apply,
         exclude: Vec::new(),
         to: "template:${extension|kebab-case}s/${name}".into(),
     }]);
