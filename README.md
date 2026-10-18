@@ -16,7 +16,7 @@ It is meant for the cleanup people keep repeating: organizing personal files, ke
 
 ## Development status
 
-Dirule is under active development. The current release is `v0.3.0`; configuration and command behavior may change before a stable `1.0` release. See the [changelog](CHANGELOG.md) for release contents.
+Dirule is under active development. The current release is `v0.4.0`; configuration and command behavior may change before a stable `1.0` release. See the [changelog](CHANGELOG.md) for release contents.
 
 ## Install
 
@@ -29,7 +29,7 @@ cargo install --path crates/dirule --locked
 Or install the published release with Cargo:
 
 ```sh
-cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.3.0 dirule
+cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.4.0 dirule
 ```
 
 NixOS users can install from the flake. Release installers, checksums, platform details, and shell completions are in the [installation guide](docs/installation.md).

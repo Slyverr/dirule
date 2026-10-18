@@ -16,7 +16,7 @@ After checking out the project and setting up Rust, install a pinned Dirule rele
 
 ```yaml
 - name: Install Dirule
-  run: cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.3.0 dirule
+  run: cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.4.0 dirule
 - name: Check project paths
   run: dirule check --color never
 ```

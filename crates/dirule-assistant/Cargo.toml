@@ -8,8 +8,8 @@ rust-version.workspace = true
 description = "Provider-neutral assistant and tool orchestration for Dirule."
 
 [dependencies]
-dirule-app = { version = "0.3.0", path = "../dirule-app" }
-dirule-core = { version = "0.3.0", path = "../dirule-core" }
+dirule-app = { version = "0.4.0", path = "../dirule-app" }
+dirule-core = { version = "0.4.0", path = "../dirule-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"

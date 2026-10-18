@@ -2,9 +2,11 @@
 
 ## Unreleased
 
+## Version 0.4.0
+
 ### Added
 
-- Experimental `dirule ask` support for OpenAI Responses, bounded inspection and previews, session-local preset selection, validated config creation, sort/rename/rule application, and selected-target journal undo after exact approval.
+- Experimental `dirule ask` support for OpenAI-compatible and OpenAI Responses providers, bounded tools and previews, credential resolution, validated config creation, and approval-gated path changes and undo.
 
 ## Version 0.3.0
 
