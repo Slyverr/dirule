@@ -42,17 +42,14 @@ Provider profiles are user-level Dirule settings, separate from project `dirule.
 
 ## Dirule tools
 
-Tools are named, typed operations that call existing Dirule application services. The catalog is intentionally small and grows by adding independent tools. The current implementation includes bounded target inspection, configuration-source and category listing, selected-config or named-preset inspection, read-only configured-rule, quick-sort, and quick-rename previews, approval-gated sort, rename, and configured-rule apply tools, and selected-target journal listing, run inspection, undo preview, and approval-gated undo. The planned catalog also includes:
-
-- Draft and validate a project `dirule.toml` using Dirule's configuration reader.
-- Save a reviewed configuration after explicit approval.
+Tools are named, typed operations that call existing Dirule application services. The catalog is intentionally small and grows by adding independent tools. The current implementation includes bounded target inspection, configuration-source and category listing, selected-config or named-preset inspection, read-only configured-rule, quick-sort, and quick-rename previews, validated project-config drafting and approval-gated creation, approval-gated sort, rename, and configured-rule apply tools, and selected-target journal listing, run inspection, undo preview, and approval-gated undo.
 
 The model can request only tools registered by the active Dirule version. Each tool validates its arguments and calls an existing app service; it does not reimplement matching, scanning, planning, or mutation logic. Unknown tools, invalid arguments, oversized results, and exhausted limits produce controlled errors.
 
 ## Approval and safety
 
 - Read-only inspection, validation, and previews may run without approval.
-- Saving a config, applying a filesystem plan, or undoing a run requires explicit user approval after Dirule displays the exact paths and actions.
+- Saving a config, applying a filesystem plan, or undoing a run requires explicit user approval after Dirule displays the exact config contents, paths, and directory actions.
 - Ask apply and undo tools require an interactive terminal, preflight conflicts and object identities, and cap one approval at 40 actions. There is no non-interactive approval bypass.
 - A model request, a prior approval, or text such as “do whatever is needed” does not authorize a later or different mutation.
 - Non-interactive apply requests are refused; they must not infer approval from the prompt.
@@ -81,7 +78,7 @@ Provider data policies differ. Google's Gemini free tier may use submitted conte
 1. Establish the normalized provider, conversation, tool, request/response bounds, and approval interfaces. Done; the tool loop is covered by deterministic fake-provider tests. Provider requests receive the remaining overall timeout, and turn, tool-call, elapsed-time, result-byte, and scan-entry limits are enforced.
 2. Add versioned user profiles and the first network adapter. Done for OpenAI-compatible Chat Completions; native OpenAI Responses remains to be implemented. Request construction and response parsing are covered by a local mock endpoint.
 3. Add read-only target inspection, categories, config validation, source listing, previews, and journal queries using `dirule-app`. The initial tools are implemented, including selected-target-only journal listing, run inspection, and preflighted undo previews. Source listing exposes only local-config availability and global preset names; a listed preset can be selected for inspection and preview within the current Ask run. All Ask previews use a capped scan and reject partial plans; target inspection and preset listing may return clearly marked partial results. Broader edge-case coverage remains.
-4. Add writes behind exact-proposal approval. Sort, rename, and configured-rule apply tools are implemented with terminal confirmation, conflict rejection, the normal apply journal, and bounded proposal display. Selected-target journal listing, run inspection, preflighted undo previews, and approval-gated undo are implemented. Config drafting and save remain.
+4. Add writes behind exact-proposal approval. Sort, rename, configured-rule apply, and journal undo tools are implemented with terminal confirmation, conflict or identity preflight, bounded proposals, and the normal apply journal. Validated project-config drafting and create-only save are implemented; editing an existing config through Ask remains out of scope.
 5. Add opt-in live smoke tests for user-configured endpoints. An ignored integration test now uses the selected profile against a synthetic target and verifies the model calls a read-only Dirule tool. Never put API keys in CI or require network access for ordinary tests.
 
 The first runnable milestone is the read-only CLI slice. Its live-provider check should exercise one configured Google Gemini or NVIDIA NIM profile against a synthetic target. It is separate from ordinary CI and requires the selected key to be available through the process environment or Dirule's per-user credentials file.

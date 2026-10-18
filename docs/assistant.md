@@ -1,6 +1,6 @@
 # Ask with a model
 
-`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list available rule-source names and sorting categories, inspect a selected rule config or named global preset, preview configured rules, quick sorting, or renaming, and inspect apply history for the selected target. It can also apply sort, rename, configured-rule, or undo plans after you approve the exact path and directory actions in an interactive terminal. It does not read file contents or write configuration. Source listing returns whether the target has a local `dirule.toml` and up to 64 global preset names; it does not send preset contents or storage paths. When more than 64 presets exist, the result reports that the list was truncated. A listed preset can be inspected, previewed, or applied by name during the same Ask run.
+`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list available rule-source names and sorting categories, inspect a selected rule config or named global preset, preview configured rules, quick sorting, or renaming, and inspect apply history for the selected target. It can apply sort, rename, configured-rule, or undo plans after you approve the exact path and directory actions in an interactive terminal. It can also validate a proposed `dirule.toml` and create it in the selected target after you approve its exact contents. Ask does not read project file contents, and it never overwrites an existing config. Source listing returns whether the target has a local `dirule.toml` and up to 64 global preset names; it does not send preset contents or storage paths. When more than 64 presets exist, the result reports that the list was truncated. A listed preset can be inspected, previewed, or applied by name during the same Ask run.
 
 ## Configure a provider profile
 
@@ -96,6 +96,10 @@ dirule ask --target ~/Downloads "Sort images into category folders and apply the
 
 Successful changes use Dirule's normal journal, so the run ID can be undone with `dirule undo RUN_ID` or from a later Ask session. Ask can list recent runs for the selected target, inspect a run, and preflight its inverse actions. Undo displays every inverse move and directory action before approval. Directories created by the run are removed only when empty; non-empty directories are retained and reported.
 
+## Draft a project config
+
+Ask can validate a proposed TOML document with Dirule's configuration reader. If you ask it to create the config, it displays the exact TOML and writes `dirule.toml` in the selected target only after approval. It refuses to replace an existing file.
+
 ## Ask for a preview
 
 ```sh
@@ -112,7 +116,7 @@ With no prompt argument, `dirule ask` prompts for a task in a terminal or reads 
 printf '%s\n' "Preview a kebab-case rename" | dirule ask --target ./project
 ```
 
-The selected provider receives your prompt and the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a preview, apply, or journal tool, the provider also receives relevant entry names, run IDs, statuses, and proposed path or directory actions. Journal tools expose runs for the selected target only. The tools do not read file bytes. A successful apply or undo changes paths only after local approval. No conversation transcript is persisted.
+The selected provider receives your prompt and the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a draft-config tool, the proposed TOML is returned to the model for validation and explanation. If it calls a preview, apply, or journal tool, the provider also receives relevant entry names, run IDs, statuses, and proposed path or directory actions. Journal tools expose runs for the selected target only. The tools do not read project file bytes. A successful config creation, apply, or undo happens only after local approval. No conversation transcript is persisted.
 
 Ask bounds each run to 10,000 scanned entries and three minutes. Target inspection returns at most 100 paths; larger listings are marked as truncated. If a preview reaches the scan limit, choose a narrower target.
 

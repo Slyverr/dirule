@@ -31,6 +31,19 @@ impl ApprovalHandler for InteractiveApproval {
                 dirule_assistant::ToolChange::RemoveDirectoryIfEmpty { path } => {
                     format!("  Remove directory if empty {path:?}")
                 }
+                dirule_assistant::ToolChange::WriteFile { path, contents } => {
+                    writeln!(
+                        output,
+                        "  Create validated file {path:?} ({} bytes):",
+                        contents.len()
+                    )
+                    .map_err(|error| ToolError::new(error.to_string()))?;
+                    for line in contents.split_inclusive('\n') {
+                        writeln!(output, "    {line:?}")
+                            .map_err(|error| ToolError::new(error.to_string()))?;
+                    }
+                    continue;
+                }
             };
             writeln!(output, "{line}").map_err(|error| ToolError::new(error.to_string()))?;
         }
@@ -83,12 +96,12 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
     let categories = dirule_app::CategoryCatalog::user_if_available()?;
     let tools =
         dirule_tool_catalog_with_source(target.clone(), base.clone(), categories, source.clone())?;
-    let write_tools_available = tools
+    let mutating_tools_available = tools
         .definitions()
         .iter()
-        .any(|tool| tool.name.starts_with("apply_"));
-    let operation_policy = if write_tools_available {
-        "Filesystem changes require explicit terminal approval of the exact path and directory action list. Never claim a change was applied unless the matching tool succeeded."
+        .any(|tool| tool.approval == dirule_assistant::ApprovalRequirement::Required);
+    let operation_policy = if mutating_tools_available {
+        "Filesystem and configuration changes require explicit terminal approval of the exact displayed proposal. Save a configuration only when the user asked to create one. Never claim a change was applied unless the matching tool succeeded."
     } else {
         "This invocation is read-only and can inspect or preview but cannot change paths."
     };

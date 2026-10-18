@@ -371,7 +371,7 @@ fn selected_config_can_be_inspected_and_previewed_without_mutation() {
 }
 
 #[test]
-fn tool_catalog_exposes_only_read_only_operations_for_this_stage() {
+fn tool_catalog_exposes_validated_config_authoring_without_unrestricted_access() {
     let target = tempdir().expect("temporary target");
     let catalog = dirule_tool_catalog_with_categories(
         target.path().to_path_buf(),
@@ -387,14 +387,25 @@ fn tool_catalog_exposes_only_read_only_operations_for_this_stage() {
     assert_eq!(
         names,
         [
+            "draft_project_config",
             "inspect_rules",
             "inspect_target",
             "list_categories",
             "list_configuration_sources",
             "preview_configured_rules",
             "preview_rename",
-            "preview_sort"
+            "preview_sort",
+            "save_project_config"
         ]
+    );
+    let save = catalog
+        .definitions()
+        .iter()
+        .find(|tool| tool.name == "save_project_config")
+        .expect("save tool definition");
+    assert_eq!(
+        save.approval,
+        dirule_assistant::ApprovalRequirement::Required
     );
     assert!(
         !names
@@ -726,6 +737,124 @@ fn preview_journal_undo_preflights_without_changing_the_target() {
     assert!(result.contains("Portrait.JPG"));
 }
 
+#[test]
+fn draft_project_config_validates_without_writing_a_file() {
+    let target = tempdir().expect("temporary target");
+    let contents = test_config();
+    let catalog = dirule_tool_catalog_with_categories(
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "draft_project_config".into(),
+        arguments: json!({ "contents": contents }),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    assistant
+        .run(
+            "test-model",
+            "Validate a proposed project config.",
+            "Draft one rule for text files.",
+            &mut NoApproval,
+        )
+        .expect("assistant response");
+
+    assert!(!target.path().join("dirule.toml").exists());
+    let result = tool_result(&provider);
+    assert_eq!(result["valid"], true);
+    assert_eq!(result["rule_count"], 1);
+    assert_eq!(result["contents"], test_config());
+}
+
+#[test]
+fn save_project_config_requires_approval_of_exact_contents() {
+    let target = tempdir().expect("temporary target");
+    let contents = test_config();
+    let catalog = dirule_tool_catalog_with_categories(
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "save_project_config".into(),
+        arguments: json!({ "contents": contents }),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let mut approval = RecordedApproval {
+        approved: true,
+        proposals: Mutex::new(Vec::new()),
+    };
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Save only after exact approval.",
+            "Create this project config.",
+            &mut approval,
+        )
+        .expect("assistant response");
+
+    let path = target
+        .path()
+        .canonicalize()
+        .expect("canonical target")
+        .join("dirule.toml");
+    assert_eq!(result.approvals_granted, 1);
+    assert_eq!(
+        fs::read_to_string(&path).expect("saved config"),
+        test_config()
+    );
+    let proposals = approval.proposals.lock().expect("proposal lock");
+    assert_eq!(proposals[0].changes.len(), 1);
+    match &proposals[0].changes[0] {
+        ToolChange::WriteFile {
+            path: proposed_path,
+            contents,
+        } => {
+            assert_eq!(std::path::PathBuf::from(proposed_path), path);
+            assert_eq!(contents, &test_config());
+        }
+        change => panic!("expected file creation proposal, got {change:?}"),
+    }
+    assert_eq!(tool_result(&provider)["status"], "created");
+}
+
+#[test]
+fn declined_project_config_save_does_not_create_the_file() {
+    let target = tempdir().expect("temporary target");
+    let catalog = dirule_tool_catalog_with_categories(
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "save_project_config".into(),
+        arguments: json!({ "contents": test_config() }),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let mut approval = RecordedApproval {
+        approved: false,
+        proposals: Mutex::new(Vec::new()),
+    };
+
+    assistant
+        .run(
+            "test-model",
+            "Save only after exact approval.",
+            "Create this project config.",
+            &mut approval,
+        )
+        .expect("assistant response");
+
+    assert!(!target.path().join("dirule.toml").exists());
+    assert_eq!(approval.proposals.lock().expect("proposal lock").len(), 1);
+}
+
 fn record_image_sort(target: &std::path::Path, journal: &JournalService) -> String {
     fs::write(target.join("Portrait.JPG"), "image bytes").expect("create image");
     let preview = sort_selectors_preview(
@@ -739,6 +868,26 @@ fn record_image_sort(target: &std::path::Path, journal: &JournalService) -> Stri
         .expect("apply and journal sort")
         .run_id
         .expect("run ID")
+}
+
+fn test_config() -> String {
+    format!(
+        "version = {:?}\nname = \"Text names\"\ntarget = \".\"\n\n[[rules]]\nname = \"Normalize text names\"\nmatch = \"*.txt\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION.to_string()
+    )
+}
+
+fn tool_result(provider: &ToolCallProvider) -> serde_json::Value {
+    let requests = provider.requests.lock().expect("request lock");
+    let result = requests[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("tool result");
+    serde_json::from_str(result).expect("tool result JSON")
 }
 
 #[test]

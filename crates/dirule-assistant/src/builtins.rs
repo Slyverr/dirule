@@ -1,3 +1,4 @@
+mod config;
 mod journal;
 
 use crate::{
@@ -120,10 +121,11 @@ fn build_tool_catalog(
         Box::new(PreviewRulesTool {
             selected_source,
             base,
-            target,
+            target: target.clone(),
             presets,
         }),
     ];
+    config::register(&mut tools, target);
 
     if let Some((target, base, categories, selected_source, presets, journal)) = apply_services {
         tools.push(Box::new(ApplySortTool {
