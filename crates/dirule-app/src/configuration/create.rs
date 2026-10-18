@@ -6,10 +6,11 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
-/// Creating a starter config failed because the path, template, or write was invalid.
+/// Creating a configuration file failed because its path, content, or write was invalid.
 pub enum ConfigCreationError {
     RelativePath(PathBuf),
     InvalidStarter(dirule_core::Error),
+    InvalidConfiguration(dirule_core::Error),
     Io { path: PathBuf, source: io::Error },
 }
 
@@ -23,25 +24,47 @@ pub fn create_starter(path: impl Into<PathBuf>) -> Result<(), ConfigCreationErro
     let contents = starter_document();
     parse_config(&contents).map_err(ConfigCreationError::InvalidStarter)?;
 
+    create_file(&path, &contents)
+}
+
+/// Create validated configuration content without replacing an existing file.
+pub fn create_config(path: impl Into<PathBuf>, contents: &str) -> Result<(), ConfigCreationError> {
+    let path = path.into();
+    if !path.is_absolute() {
+        return Err(ConfigCreationError::RelativePath(path));
+    }
+
+    parse_config(contents).map_err(ConfigCreationError::InvalidConfiguration)?;
+
+    create_file(&path, contents)
+}
+
+fn create_file(path: &Path, contents: &str) -> Result<(), ConfigCreationError> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&path)
+        .open(path)
         .map_err(|source| ConfigCreationError::Io {
-            path: path.clone(),
+            path: path.to_path_buf(),
             source,
         })?;
 
     if let Err(source) = file.write_all(contents.as_bytes()) {
-        remove_partial(&path, file);
+        remove_partial(path, file);
 
-        return Err(ConfigCreationError::Io { path, source });
+        return Err(ConfigCreationError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
     }
 
     if let Err(source) = file.sync_all() {
-        remove_partial(&path, file);
+        remove_partial(path, file);
 
-        return Err(ConfigCreationError::Io { path, source });
+        return Err(ConfigCreationError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
     }
 
     Ok(())
@@ -72,6 +95,9 @@ impl fmt::Display for ConfigCreationError {
                     "invalid built-in starter configuration: {source}"
                 )
             }
+            Self::InvalidConfiguration(source) => {
+                write!(formatter, "invalid configuration: {source}")
+            }
             Self::Io { path, source } => {
                 write!(formatter, "cannot create {}: {source}", path.display())
             }
@@ -82,7 +108,7 @@ impl fmt::Display for ConfigCreationError {
 impl Error for ConfigCreationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::InvalidStarter(source) => Some(source),
+            Self::InvalidStarter(source) | Self::InvalidConfiguration(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::RelativePath(_) => None,
         }

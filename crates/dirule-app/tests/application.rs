@@ -94,6 +94,59 @@ fn starter_configuration_requires_an_absolute_path() {
     ));
 }
 
+#[test]
+fn validated_configuration_is_written_exactly_and_loads() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let contents = config_with_target(Some(Path::new(".")));
+
+    dirule_app::configuration::create_config(&path, &contents).expect("create validated config");
+
+    assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+    assert_eq!(
+        dirule_app::configuration::load(&path)
+            .expect("load created config")
+            .config()
+            .rules
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn invalid_configuration_is_rejected_before_file_creation() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let invalid = format!(
+        "version = {:?}\n[[rules]]\nname = \"bad\"\nmatch = \"*.txt\"\nto = \"unknown:value\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION.to_string()
+    );
+
+    let error = dirule_app::configuration::create_config(&path, &invalid)
+        .expect_err("invalid configuration must not be written");
+
+    assert!(matches!(
+        error,
+        dirule_app::configuration::ConfigCreationError::InvalidConfiguration(_)
+    ));
+    assert!(!path.exists());
+}
+
+#[test]
+fn validated_configuration_creation_does_not_replace_an_existing_file() {
+    let target = TempTarget::new();
+    let path = target.join("dirule.toml");
+    let existing = "keep this file";
+    fs::write(&path, existing).expect("write existing config");
+    let contents = config_with_target(Some(Path::new(".")));
+
+    let error = dirule_app::configuration::create_config(&path, &contents)
+        .expect_err("creation must not replace an existing file");
+
+    assert!(error.to_string().contains("cannot create"));
+    assert_eq!(fs::read_to_string(path).unwrap(), existing);
+}
+
 #[cfg(unix)]
 #[test]
 fn starter_configuration_uses_standard_create_permissions() {
