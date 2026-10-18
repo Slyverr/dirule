@@ -41,6 +41,10 @@ struct SourceListingProvider {
     requests: Mutex<Vec<ModelRequest>>,
 }
 
+struct PresetPreviewProvider {
+    requests: Mutex<Vec<ModelRequest>>,
+}
+
 impl ModelProvider for TargetInspectingProvider {
     fn complete_with_timeout(
         &self,
@@ -94,6 +98,47 @@ impl ModelProvider for SourceListingProvider {
         };
 
         Ok(response)
+    }
+}
+
+impl ModelProvider for PresetPreviewProvider {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        let mut requests = self.requests.lock().expect("request lock");
+        requests.push(request.clone());
+        let tool_calls = match requests.len() {
+            1 => vec![ModelToolCall {
+                id: "list-sources".into(),
+                name: "list_configuration_sources".into(),
+                arguments: json!({}),
+            }],
+            2 => vec![
+                ModelToolCall {
+                    id: "inspect-preset".into(),
+                    name: "inspect_rules".into(),
+                    arguments: json!({ "preset": "downloads" }),
+                },
+                ModelToolCall {
+                    id: "preview-preset".into(),
+                    name: "preview_configured_rules".into(),
+                    arguments: json!({ "preset": "downloads" }),
+                },
+            ],
+            _ => {
+                return Ok(ModelResponse {
+                    content: Some("The downloads preset would normalize the filename.".into()),
+                    tool_calls: Vec::new(),
+                });
+            }
+        };
+
+        Ok(ModelResponse {
+            content: None,
+            tool_calls,
+        })
     }
 }
 
@@ -242,7 +287,7 @@ fn selected_config_can_be_inspected_and_previewed_without_mutation() {
 }
 
 #[test]
-fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
+fn tool_catalog_exposes_only_read_only_operations_for_this_stage() {
     let target = tempdir().expect("temporary target");
     let catalog = dirule_tool_catalog_with_categories(
         target.path().to_path_buf(),
@@ -258,9 +303,11 @@ fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
     assert_eq!(
         names,
         [
+            "inspect_rules",
             "inspect_target",
             "list_categories",
             "list_configuration_sources",
+            "preview_configured_rules",
             "preview_rename",
             "preview_sort"
         ]
@@ -270,6 +317,61 @@ fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
             .iter()
             .any(|name| name.contains("shell") || name.contains("read_file"))
     );
+}
+
+#[test]
+fn assistant_can_select_a_listed_preset_for_read_only_inspection_and_preview() {
+    let target = tempdir().expect("temporary target");
+    let original_name = target.path().join("ReadMe.TXT");
+    fs::write(&original_name, "private file bytes").expect("create target file");
+    let preset_directory = tempdir().expect("temporary preset directory");
+    let presets = PresetStore::new(preset_directory.path()).expect("preset store");
+    let config = format!(
+        "version = {:?}\nname = \"Text cleanup\"\ntarget = \".\"\n\n[[rules]]\nname = \"Normalize text names\"\nmatch = \"*.TXT\"\nto = \"builtin:kebab-case\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION.to_string()
+    );
+    fs::write(presets.path("downloads").expect("preset path"), &config).expect("write preset");
+    let catalog = dirule_tool_catalog_with_sources(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        Some(presets),
+    )
+    .expect("tool catalog");
+    let provider = PresetPreviewProvider {
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Use available read-only tools.",
+            "Inspect and preview the downloads preset.",
+            &mut NoApproval,
+        )
+        .expect("assistant response");
+
+    assert!(result.response.contains("normalize the filename"));
+    assert!(original_name.exists());
+    assert!(!target.path().join("read-me.txt").exists());
+    let requests = provider.requests.lock().expect("request lock");
+    let tool_results = requests[2]
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let encoded_results = tool_results.join("\n");
+
+    assert_eq!(tool_results.len(), 3);
+    assert!(encoded_results.contains("Normalize text names"));
+    assert!(encoded_results.contains("ReadMe.TXT"));
+    assert!(encoded_results.contains("read-me.TXT"), "{encoded_results}");
+    assert!(!encoded_results.contains("private file bytes"));
 }
 
 #[test]
@@ -341,6 +443,7 @@ fn source_listing_exposes_only_local_availability_and_global_preset_names() {
     assert_eq!(value["global_presets"]["count"], 67);
     assert_eq!(value["global_presets"]["truncated"], true);
     assert_eq!(items.len(), 64);
+    assert!(tool_result.len() <= 24 * 1024);
     assert_eq!(items[0]["name"], "broken");
     assert_eq!(items[1]["name"], "downloads");
     assert_eq!(items[1]["selected"], true);

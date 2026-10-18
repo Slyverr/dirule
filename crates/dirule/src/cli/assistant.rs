@@ -62,7 +62,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         },
     );
     let instructions = format!(
-        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, and create read-only previews, then explain the result plainly. Never claim that files were changed: this version can only inspect and preview. The selected target is {}. Keep operations within that target. {} Do not request or infer file contents. Listing another preset does not select it; tell the user to rerun with --preset NAME to inspect a different one.",
+        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, and create read-only previews, then explain the result plainly. You may inspect or preview a listed global preset by passing its name to the rules tools. Never claim that files were changed: this version can only inspect and preview. The selected target is {}. Keep operations within that target. {} Do not request or infer file contents.",
         target.display(),
         selected_config
     );

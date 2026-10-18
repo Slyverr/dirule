@@ -1,6 +1,6 @@
 # Ask with a model
 
-`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list available rule-source names and sorting categories, inspect the selected rule config, and preview configured rules, quick sorting, or renaming. These tools do not read file contents, write configuration, or change paths. Source listing returns whether the target has a local `dirule.toml` and up to 64 global preset names; it does not send preset contents or storage paths. When more than 64 presets exist, the result reports that the list was truncated.
+`dirule ask` is an experimental, provider-configurable assistant for Dirule. The model interprets your request and can call only Dirule's registered tools. It can inspect a bounded sample of target paths, list available rule-source names and sorting categories, inspect a selected rule config or named global preset, and preview configured rules, quick sorting, or renaming. These tools do not read file contents, write configuration, or change paths. Source listing returns whether the target has a local `dirule.toml` and up to 64 global preset names; it does not send preset contents or storage paths. When more than 64 presets exist, the result reports that the list was truncated. A listed preset can be inspected and previewed by name during the same Ask run.
 
 ## Configure a provider profile
 

@@ -1,5 +1,7 @@
 use crate::{ApprovalRequirement, PreparedToolCall, Tool, ToolCatalog, ToolDefinition, ToolError};
-use dirule_app::configuration::{ConfigurationLoadError, ConfigurationSource};
+use dirule_app::configuration::{
+    ConfigurationLoadError, ConfigurationSource, ConfigurationSourceKind,
+};
 use dirule_app::presets::PresetStore;
 use dirule_app::{
     CategoryCatalog, Preview, PreviewSourceError, inspect_target, rename_preview_with_entry_limit,
@@ -28,7 +30,7 @@ pub fn dirule_tool_catalog_with_categories(
 ) -> Result<ToolCatalog, ToolError> {
     let presets = user_presets()?;
 
-    build_tool_catalog(target, categories, None, presets)
+    build_tool_catalog(target.clone(), target, categories, None, presets)
 }
 
 pub fn dirule_tool_catalog_with_source(
@@ -37,10 +39,9 @@ pub fn dirule_tool_catalog_with_source(
     categories: CategoryCatalog,
     source: Option<ConfigurationSource>,
 ) -> Result<ToolCatalog, ToolError> {
-    let selected_source = source.map(|source| (source, base));
     let presets = user_presets()?;
 
-    build_tool_catalog(target, categories, selected_source, presets)
+    build_tool_catalog(target, base, categories, source, presets)
 }
 
 /// Build a tool catalog with explicit preset storage for callers and tests.
@@ -51,26 +52,24 @@ pub fn dirule_tool_catalog_with_sources(
     source: Option<ConfigurationSource>,
     presets: Option<PresetStore>,
 ) -> Result<ToolCatalog, ToolError> {
-    let selected_source = source.map(|source| (source, base));
-
-    build_tool_catalog(target, categories, selected_source, presets)
+    build_tool_catalog(target, base, categories, source, presets)
 }
 
 fn build_tool_catalog(
     target: PathBuf,
+    base: PathBuf,
     categories: CategoryCatalog,
-    source: Option<(ConfigurationSource, PathBuf)>,
+    selected_source: Option<ConfigurationSource>,
     presets: Option<PresetStore>,
 ) -> Result<ToolCatalog, ToolError> {
-    let selected_source = source.as_ref().map(|(source, _)| source.clone());
     let tools: Vec<Box<dyn Tool>> = vec![
         Box::new(InspectTargetTool {
             target: target.clone(),
         }),
         Box::new(ListConfigurationSourcesTool {
             target: target.clone(),
-            selected_source,
-            presets,
+            selected_source: selected_source.clone(),
+            presets: presets.clone(),
         }),
         Box::new(ListCategoriesTool {
             categories: categories.clone(),
@@ -82,19 +81,17 @@ fn build_tool_catalog(
         Box::new(PreviewRenameTool {
             target: target.clone(),
         }),
-    ];
-    let mut tools = tools;
-
-    if let Some((source, base)) = source {
-        tools.push(Box::new(InspectRulesTool {
-            source: source.clone(),
-        }));
-        tools.push(Box::new(PreviewRulesTool {
-            source,
+        Box::new(InspectRulesTool {
+            selected_source: selected_source.clone(),
+            presets: presets.clone(),
+        }),
+        Box::new(PreviewRulesTool {
+            selected_source,
             base,
             target,
-        }));
-    }
+            presets,
+        }),
+    ];
 
     ToolCatalog::new(tools)
 }
@@ -127,13 +124,22 @@ struct PreviewRenameTool {
 }
 
 struct InspectRulesTool {
-    source: ConfigurationSource,
+    selected_source: Option<ConfigurationSource>,
+    presets: Option<PresetStore>,
 }
 
 struct PreviewRulesTool {
-    source: ConfigurationSource,
+    selected_source: Option<ConfigurationSource>,
     base: PathBuf,
     target: PathBuf,
+    presets: Option<PresetStore>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuleSourceArguments {
+    #[serde(default)]
+    preset: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -241,7 +247,7 @@ impl Tool for ListConfigurationSourcesTool {
                 json!({
                     "name": name,
                     "selected": self.selected_source.as_ref().is_some_and(|source| {
-                        source.kind() == dirule_app::configuration::ConfigurationSourceKind::Preset
+                        source.kind() == ConfigurationSourceKind::Preset
                             && source.name() == name
                     }),
                 })
@@ -409,20 +415,25 @@ impl Tool for InspectRulesTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "inspect_rules".into(),
-            description: "Read the selected Dirule config's naming rules and exclusions. This sends rule patterns and templates to the model but does not read target file contents.".into(),
-            parameters: empty_object_schema(),
+            description: "Read naming rules and exclusions from the selected config, or from a named global preset. This sends rule patterns and templates to the model but does not read target file contents.".into(),
+            parameters: rule_source_arguments_schema(),
             approval: ApprovalRequirement::None,
         }
     }
 
     fn prepare(&self, arguments: Value) -> Result<PreparedToolCall, ToolError> {
-        require_no_arguments("inspect_rules", arguments)?;
+        let arguments: RuleSourceArguments = parse_arguments(arguments)?;
+        let source = resolve_rule_source(
+            self.selected_source.as_ref(),
+            self.presets.as_ref(),
+            arguments.preset.as_deref(),
+        )?;
 
-        let loaded = dirule_app::configuration::load_source(&self.source)
+        let loaded = dirule_app::configuration::load_source(&source)
             .map_err(|error| ToolError::new(error.to_string()))?;
         let config = loaded.config();
         let result = json!({
-            "source": self.source.name(),
+            "source": source.name(),
             "name": &config.name,
             "target": config.target.as_ref().map(|path| path.display().to_string()),
             "ignore": &config.ignore,
@@ -437,17 +448,22 @@ impl Tool for PreviewRulesTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "preview_configured_rules".into(),
-            description: "Preview the selected Dirule config's rules on the current target. This never changes paths.".into(),
-            parameters: empty_object_schema(),
+            description: "Preview rules from the selected config, or from a named global preset, on the current target. This never changes paths.".into(),
+            parameters: rule_source_arguments_schema(),
             approval: ApprovalRequirement::None,
         }
     }
 
     fn prepare(&self, arguments: Value) -> Result<PreparedToolCall, ToolError> {
-        require_no_arguments("preview_configured_rules", arguments)?;
+        let arguments: RuleSourceArguments = parse_arguments(arguments)?;
+        let source = resolve_rule_source(
+            self.selected_source.as_ref(),
+            self.presets.as_ref(),
+            arguments.preset.as_deref(),
+        )?;
 
         let preview = dirule_app::preview_source_with_entry_limit(
-            &self.source,
+            &source,
             &self.base,
             Some(self.target.clone()),
             Some(MAX_SCANNED_ENTRIES),
@@ -456,6 +472,39 @@ impl Tool for PreviewRulesTool {
 
         Ok(PreparedToolCall::ReadOnly(preview_result(&preview)?))
     }
+}
+
+fn rule_source_arguments_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "preset": {
+                "type": "string",
+                "description": "Optional global preset name. Omit to use the configuration source selected by the CLI."
+            }
+        },
+        "additionalProperties": false
+    })
+}
+
+fn resolve_rule_source(
+    selected_source: Option<&ConfigurationSource>,
+    presets: Option<&PresetStore>,
+    preset_name: Option<&str>,
+) -> Result<ConfigurationSource, ToolError> {
+    if let Some(name) = preset_name {
+        let store =
+            presets.ok_or_else(|| ToolError::new("global preset storage is unavailable"))?;
+
+        return ConfigurationSource::preset(store, name)
+            .map_err(|_| ToolError::new("invalid global preset name"));
+    }
+
+    selected_source.cloned().ok_or_else(|| {
+        ToolError::new(
+            "no rule source is selected; choose a listed global preset or rerun with --config",
+        )
+    })
 }
 
 fn empty_object_schema() -> Value {

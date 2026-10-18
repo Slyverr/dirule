@@ -4,7 +4,7 @@
 
 ### Added
 
-- Experimental `dirule ask` support for bounded target and configuration-source inspection and read-only category, configuration, sort, and rename previews, with scan and elapsed-time limits.
+- Experimental `dirule ask` support for bounded target and configuration-source inspection, read-only category, rule, sort, and rename previews, and session-local selection of named global presets, with scan and elapsed-time limits.
 
 ## Version 0.3.0
 
