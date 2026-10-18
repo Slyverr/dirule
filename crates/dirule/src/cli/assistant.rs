@@ -64,7 +64,7 @@ impl ApprovalHandler for InteractiveApproval {
     }
 }
 
-pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
+pub(super) fn ask(options: args::AskArgs, color: args::ColorChoice) -> Result<(), Box<dyn Error>> {
     let args::AskArgs {
         prompt: prompt_arguments,
         target: target_argument,
@@ -129,11 +129,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
     );
     let assistant = Assistant::new(provider.as_ref(), &tools, AssistantLimits::default());
 
-    eprintln!(
-        "Using profile {profile_name:?} with model {:?} at {}. The prompt, target path, selected rule excerpts, available preset names, requested names, preview data, and selected-target journal entries may be sent to that provider; file contents are not read by these tools.",
-        profile.model, profile.endpoint
-    );
-    eprintln!("Review the provider's data policy before sending project names or paths.");
+    super::output::assistant_notice(profile_name, &profile.model, &target, color)?;
 
     let result = assistant.run(
         &profile.model,
@@ -141,7 +137,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         &prompt,
         &mut InteractiveApproval,
     )?;
-    println!("{}", result.response);
+    super::output::assistant_response(&result.response, color)?;
 
     Ok(())
 }

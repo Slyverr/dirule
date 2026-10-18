@@ -52,7 +52,7 @@ fn ask_uses_a_profile_tool_loop_and_sends_no_file_contents() {
                     &json!({
                         "choices": [{
                             "message": {
-                                "content": "The preview would move Photo.JPG to jpgs/Photo.JPG. No files were changed."
+                                "content": "**Preview:**\n\n- `Photo.JPG` → `jpgs/Photo.JPG`\n\nNo files were changed.\u{1b}[2J\u{1b}]0;attacker title\u{7}"
                             }
                         }]
                     }),
@@ -72,7 +72,14 @@ fn ask_uses_a_profile_tool_loop_and_sends_no_file_contents() {
         ),
     )
     .expect("write assistant profile");
-    let mut command = project.command(&["ask", "--target", ".", "Sort JPG files."]);
+    let mut command = project.command(&[
+        "--color",
+        "always",
+        "ask",
+        "--target",
+        ".",
+        "Sort JPG files.",
+    ]);
     let output = command
         .env("DIRULE_TEST_KEY", "dirule-test-secret")
         .output()
@@ -83,8 +90,22 @@ fn ask_uses_a_profile_tool_loop_and_sends_no_file_contents() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("No files were changed"));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("file contents are not read"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stdout.contains("Preview:"));
+    assert!(stdout.contains("Photo.JPG"));
+    assert!(stdout.contains("No files were changed"));
+    assert!(!stdout.contains("**"));
+    assert!(!stdout.contains('`'));
+    assert!(!stdout.contains("[2J"));
+    assert!(!stdout.contains("attacker title"));
+    assert!(stdout.contains("\u{1b}["));
+    assert!(stderr.contains("profile \"local\" · model \"test-model\""));
+    assert!(stderr.contains("Target:"));
+    assert!(stderr.contains("May send:"));
+    assert!(stderr.contains("File contents are not read"));
+    assert!(!stderr.contains(&endpoint));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("dirule-test-secret"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("dirule-test-secret"));
     assert_eq!(text(&project.0.join("Photo.JPG")), "private image bytes");
@@ -173,6 +194,7 @@ fn ask_refuses_model_requested_changes_without_an_interactive_terminal() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains('\u{1b}'));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Apply sorting"));
     assert!(stderr.contains("Portrait.JPG"));

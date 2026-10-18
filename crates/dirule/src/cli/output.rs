@@ -20,6 +20,7 @@ macro_rules! eprintln {
 const CURRENT_OUTPUT_VERSION: &str = "1.3";
 
 mod apply;
+mod assistant;
 mod categories;
 mod config;
 mod errors;
@@ -29,6 +30,7 @@ mod plan;
 mod presets;
 
 pub(super) use apply::{ApplyStatus, ApplySummary, apply_result};
+pub(super) use assistant::{assistant_notice, assistant_response};
 pub(super) use categories::category_list;
 pub(super) use config::{created_config, validated_config};
 pub(super) use errors::error;
