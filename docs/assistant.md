@@ -100,6 +100,8 @@ dirule ask --target /tmp/dirule-ask-demo "Preview sorting the images in this fol
 
 Select the NVIDIA profile with `--profile nvidia`. The command sends the prompt, target path, and any requested preview data to the selected provider. It does not send file bytes or modify the target.
 
+Ask renders the final response as terminal Markdown. Its styling follows the global `--color` option, and terminal control sequences in model responses are removed before display.
+
 ## Approve a change
 
 Ask can apply a sort, rename, selected rule config, or journal undo after it displays every proposed path and directory action and you confirm with `y`. Approval is per operation. Declining leaves the target unchanged. Ask refuses filesystem changes when standard input is not an interactive terminal; it has no `--yes` bypass. Conflicting plans and plans with more than 40 actions are refused.
