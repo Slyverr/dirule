@@ -123,6 +123,80 @@ fn ask_uses_a_profile_tool_loop_and_sends_no_file_contents() {
 }
 
 #[test]
+fn ask_sanitizes_model_supplied_tool_names_in_progress_output() {
+    let project = TempProject::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind model endpoint");
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let malicious_name = "unsafe\u{1b}[2J\nFORGED".to_owned();
+    let provider_name = malicious_name.clone();
+    let server = thread::spawn(move || {
+        for index in 0..2 {
+            let (mut stream, _) = listener.accept().expect("accept model request");
+            let (_, body) = read_request(&mut stream);
+            let _: Value = serde_json::from_str(&body).expect("request JSON");
+
+            if index == 0 {
+                write_json(
+                    &mut stream,
+                    &json!({
+                        "choices": [{
+                            "message": {
+                                "content": null,
+                                "tool_calls": [{
+                                    "id": "call-unknown",
+                                    "type": "function",
+                                    "function": {
+                                        "name": provider_name,
+                                        "arguments": "{}"
+                                    }
+                                }]
+                            }
+                        }]
+                    }),
+                );
+            } else {
+                write_json(
+                    &mut stream,
+                    &json!({
+                        "choices": [{"message": {"content": "The requested tool is unavailable."}}]
+                    }),
+                );
+            }
+        }
+    });
+
+    let config_directory = preset_config_base(&project).join("dirule");
+    fs::create_dir_all(&config_directory).expect("create assistant config directory");
+    fs::write(
+        config_directory.join("assistant.toml"),
+        format!(
+            "version = \"1.0\"\ndefault_profile = \"local\"\n\n[profiles.local]\nadapter = \"openai-compatible\"\nendpoint = {endpoint:?}\nmodel = \"test-model\"\napi_key_env = \"DIRULE_TEST_KEY\"\n"
+        ),
+    )
+    .expect("write assistant profile");
+    let output = project
+        .command(&["ask", "--target", ".", "Inspect this folder."])
+        .env("DIRULE_TEST_KEY", "dirule-test-secret")
+        .output()
+        .expect("run ask");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Running tool · unsafe?"));
+    assert!(!stderr.contains('\u{1b}'));
+    assert!(!stderr.contains("\nFORGED"));
+    assert!(!stderr.contains("dirule-test-secret"));
+    server.join().expect("model test server");
+}
+
+#[test]
 fn ask_refuses_model_requested_changes_without_an_interactive_terminal() {
     let project = TempProject::new();
     fs::write(project.0.join("Portrait.JPG"), "private image bytes").expect("write photo");

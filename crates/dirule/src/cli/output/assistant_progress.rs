@@ -61,7 +61,8 @@ impl AssistantObserver for AssistantProgress {
                     .finish(succeeded, format!("{state} · turn {turn}"));
             }
             AssistantEvent::ToolCallStarted { name } => {
-                self.handle.begin(format!("Running tool · {name}"));
+                self.handle
+                    .begin(format!("Running tool · {}", safe_tool_name(&name)));
             }
             AssistantEvent::ApprovalRequired { .. } => self.handle.pause(),
             AssistantEvent::ToolCallFinished { name, succeeded } => {
@@ -70,9 +71,29 @@ impl AssistantObserver for AssistantProgress {
                 } else {
                     "Tool failed"
                 };
-                self.handle.finish(succeeded, format!("{state} · {name}"));
+                self.handle
+                    .finish(succeeded, format!("{state} · {}", safe_tool_name(&name)));
             }
         }
+    }
+}
+
+fn safe_tool_name(name: &str) -> String {
+    let sanitized = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.') {
+                character
+            } else {
+                '?'
+            }
+        })
+        .collect::<String>();
+
+    if sanitized.is_empty() {
+        "unknown".to_owned()
+    } else {
+        sanitized
     }
 }
 
