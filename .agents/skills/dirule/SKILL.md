@@ -30,6 +30,12 @@ Use this skill when managing files through Dirule in a user's project or persona
 - Apply only when the user has asked for the filesystem changes. `dirule apply` previews again and normally asks for confirmation. Do not use `--yes` unless the user explicitly requested non-interactive application after the plan has been reviewed.
 - After applying configured rules, run `dirule check`; after a quick operation, rerun that operation as a preview and confirm no moves remain. Report the result and any run ID. Dirule changes paths, not file contents or code references; warn the user when a rename may require reference updates. Do not run `dirule undo` unless requested or needed to recover from a failed operation the user authorized.
 
+## Use model-assisted previews
+
+- Use `dirule ask [PROMPT...]` when a user wants natural-language help selecting a category or understanding a selected configuration's preview. Ask uses a bounded model/tool loop but currently exposes read-only tools only; it cannot write configuration or change paths.
+- Check the installed `dirule ask --help` and provider setup in the [Ask guide](https://github.com/Slyverr/dirule/blob/main/docs/assistant.md) before using it. The prompt, target path, selected rule excerpts, entry names, and preview results may be sent to the configured provider. Do not send sensitive names or paths without the user's direction, and never claim the model applied changes.
+- Prefer the normal deterministic CLI commands when the user already knows the desired operation. Ask is optional and requires a configured provider profile and credentials.
+
 ## Keep user-wide settings separate
 
 Project rules belong in the target's `dirule.toml`. Presets and custom sort categories are user-wide resources. Use `dirule presets list` and `dirule categories list` to inspect them. Manage presets with the `dirule presets` commands; for custom categories, follow the platform-specific `categories.toml` location and schema in the [usage guide](https://github.com/Slyverr/dirule/blob/main/docs/usage.md#sort-and-rename-without-a-project-config). Don't copy global settings into a project config or guess paths under the user's config directory.

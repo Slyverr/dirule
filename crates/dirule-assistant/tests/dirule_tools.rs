@@ -1,0 +1,190 @@
+use dirule_app::CategoryCatalog;
+use dirule_app::configuration::ConfigurationSource;
+use dirule_assistant::{
+    ApprovalHandler, Assistant, AssistantLimits, ChangeProposal, ModelProvider, ModelRequest,
+    ModelResponse, ModelToolCall, ProviderError, ToolError, dirule_tool_catalog_with_categories,
+    dirule_tool_catalog_with_source,
+};
+use serde_json::json;
+use std::collections::VecDeque;
+use std::fs;
+use std::sync::Mutex;
+use tempfile::tempdir;
+
+struct FakeProvider(Mutex<VecDeque<ModelResponse>>);
+
+impl ModelProvider for FakeProvider {
+    fn complete(&self, _request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+        self.0
+            .lock()
+            .expect("fake response lock")
+            .pop_front()
+            .ok_or_else(|| ProviderError::new("no fake response remains"))
+    }
+}
+
+struct InspectingProvider {
+    requests: Mutex<Vec<ModelRequest>>,
+}
+
+impl ModelProvider for InspectingProvider {
+    fn complete(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
+        let mut requests = self.requests.lock().expect("request lock");
+        requests.push(request.clone());
+
+        if requests.len() == 1 {
+            return Ok(ModelResponse {
+                content: None,
+                tool_calls: vec![
+                    ModelToolCall {
+                        id: "inspect-config".into(),
+                        name: "inspect_rules".into(),
+                        arguments: json!({}),
+                    },
+                    ModelToolCall {
+                        id: "preview-config".into(),
+                        name: "preview_configured_rules".into(),
+                        arguments: json!({}),
+                    },
+                ],
+            });
+        }
+
+        Ok(ModelResponse {
+            content: Some("The configured photo rule would normalize the filename.".into()),
+            tool_calls: Vec::new(),
+        })
+    }
+}
+
+struct NoApproval;
+
+impl ApprovalHandler for NoApproval {
+    fn approve(&mut self, _proposal: &ChangeProposal) -> Result<bool, ToolError> {
+        Ok(false)
+    }
+}
+
+#[test]
+fn preview_sort_uses_existing_app_service_and_does_not_mutate_target() {
+    let target = tempdir().expect("temporary target");
+    fs::write(target.path().join("Summer Photo.JPG"), "image bytes").expect("create image");
+    let catalog = dirule_tool_catalog_with_categories(
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+    )
+    .expect("tool catalog");
+    let provider = FakeProvider(Mutex::new(VecDeque::from([
+        ModelResponse {
+            content: None,
+            tool_calls: vec![ModelToolCall {
+                id: "call-1".into(),
+                name: "preview_sort".into(),
+                arguments: json!({ "selectors": [".jpg"] }),
+            }],
+        },
+        ModelResponse {
+            content: Some("The image would move into `jpgs/`. No files were changed.".into()),
+            tool_calls: Vec::new(),
+        },
+    ])));
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Use Dirule previews.",
+            "Sort JPG files.",
+            &mut NoApproval,
+        )
+        .expect("preview assistant response");
+
+    assert_eq!(result.tool_calls, 1);
+    assert!(result.response.contains("No files were changed"));
+    assert!(target.path().join("Summer Photo.JPG").exists());
+    assert!(!target.path().join("jpgs/Summer Photo.JPG").exists());
+}
+
+#[test]
+fn selected_config_can_be_inspected_and_previewed_without_mutation() {
+    let target = tempdir().expect("temporary target");
+    let config_path = target.path().join("dirule.toml");
+    let config = format!(
+        "version = {:?}\nname = \"Photo cleanup\"\ntarget = \".\"\n\n[[rules]]\nname = \"Normalize photos\"\nmatch = \"<title>.JPG\"\nto = \"template:${{title|kebab-case}}.jpg\"\n",
+        dirule_core::CURRENT_CONFIG_VERSION.to_string()
+    );
+    fs::write(&config_path, &config).expect("write project config");
+    fs::write(target.path().join("Summer Photo.JPG"), "image bytes").expect("create photo");
+    let source =
+        ConfigurationSource::explicit_file(target.path(), std::path::PathBuf::from("dirule.toml"));
+    let catalog = dirule_tool_catalog_with_source(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        Some(source),
+    )
+    .expect("tool catalog");
+    let provider = InspectingProvider {
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Inspect and preview the selected config.",
+            "How would this rule rename the photo?",
+            &mut NoApproval,
+        )
+        .expect("assistant response");
+
+    assert_eq!(result.tool_calls, 2);
+    assert!(result.response.contains("would normalize the filename"));
+    assert_eq!(
+        fs::read_to_string(config_path).expect("read unchanged config"),
+        config
+    );
+    assert_eq!(
+        fs::read_to_string(target.path().join("Summer Photo.JPG")).expect("read photo"),
+        "image bytes"
+    );
+    assert!(!target.path().join("summer-photo.jpg").exists());
+
+    let requests = provider.requests.lock().expect("request lock");
+    let tool_results = requests[1]
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tool_results.len(), 2);
+    let encoded_results = tool_results.join("\n");
+    assert!(encoded_results.contains("Normalize photos"));
+    assert!(encoded_results.contains("Summer Photo.JPG"));
+    assert!(encoded_results.contains("summer-photo.jpg"));
+    assert!(!encoded_results.contains("image bytes"));
+}
+
+#[test]
+fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
+    let target = tempdir().expect("temporary target");
+    let catalog = dirule_tool_catalog_with_categories(
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+    )
+    .expect("tool catalog");
+    let names = catalog
+        .definitions()
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, ["list_categories", "preview_rename", "preview_sort"]);
+    assert!(
+        !names
+            .iter()
+            .any(|name| name.contains("shell") || name.contains("read_file"))
+    );
+}

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Experimental `dirule ask` support for model-assisted, read-only category, configuration, sort, and rename previews.
+
 ## Version 0.3.0
 
 ### Added

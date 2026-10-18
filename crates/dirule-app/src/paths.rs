@@ -105,7 +105,8 @@ pub(crate) fn user_journal_store() -> Result<JournalStore, UserStateDirectoryUna
     Ok(JournalStore::new(base.join("dirule").join("runs")))
 }
 
-pub(super) fn user_config_directory() -> Option<PathBuf> {
+/// Return the platform-specific per-user configuration directory when available.
+pub fn user_config_directory() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     let base = absolute_env_path("APPDATA");
     #[cfg(target_os = "macos")]

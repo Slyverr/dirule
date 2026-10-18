@@ -1,5 +1,7 @@
 #[path = "cli_flow/apply_undo.rs"]
 mod apply_undo;
+#[path = "cli_flow/assistant.rs"]
+mod assistant;
 #[path = "cli_flow/categories.rs"]
 mod categories;
 #[path = "cli_flow/commands.rs"]

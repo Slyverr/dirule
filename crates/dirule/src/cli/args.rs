@@ -42,6 +42,8 @@ pub(super) enum CliCommand {
     Runs(RunsArgs),
     /// Undo a previously applied run.
     Undo(UndoArgs),
+    /// Ask a configured model to inspect and preview Dirule operations.
+    Ask(AskArgs),
     /// Generate shell completions.
     Completions {
         /// Shell to generate completions for.
@@ -71,9 +73,31 @@ impl CliCommand {
                 RunsCommand::List { format } | RunsCommand::Show { format, .. } => *format,
             },
             Self::Undo(options) => options.format,
-            Self::Init | Self::Completions { .. } => OutputFormat::Human,
+            Self::Init | Self::Ask(_) | Self::Completions { .. } => OutputFormat::Human,
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct AskArgs {
+    /// Task to ask Dirule; reads standard input when omitted.
+    #[arg(value_name = "PROMPT", num_args = 0..)]
+    pub(super) prompt: Vec<String>,
+
+    /// Directory to inspect and preview; defaults to the current directory.
+    #[arg(long, value_name = "PATH")]
+    pub(super) target: Option<PathBuf>,
+
+    /// Select a profile from the user-level assistant config.
+    #[arg(long, value_name = "NAME")]
+    pub(super) profile: Option<String>,
+
+    /// Read assistant profiles from this file instead of the user config path.
+    #[arg(long, value_name = "FILE")]
+    pub(super) assistant_config: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub(super) rules: RuleSourceArgs,
 }
 
 #[derive(Debug, Args)]
@@ -341,7 +365,7 @@ pub(super) enum ColorChoice {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplyArgs, CategoriesCommand, Cli, CliCommand, ConflictAction, OutputFormat,
+        ApplyArgs, AskArgs, CategoriesCommand, Cli, CliCommand, ConflictAction, OutputFormat,
         PresetsCommand, ValidateArgs,
     };
     use clap::Parser;
@@ -406,6 +430,57 @@ mod tests {
             "downloads",
         ])
         .expect_err("config and preset conflict");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn ask_parses_target_profile_and_rule_source_options() {
+        let cli = Cli::try_parse_from([
+            "dirule",
+            "ask",
+            "--target",
+            "/tmp/files",
+            "--profile",
+            "google",
+            "--config",
+            "rules.toml",
+            "Explain these rules",
+        ])
+        .expect("valid ask options");
+
+        let CliCommand::Ask(AskArgs {
+            prompt,
+            target,
+            profile,
+            rules,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected ask command");
+        };
+
+        assert_eq!(prompt, ["Explain these rules"]);
+        assert_eq!(target.as_deref(), Some(std::path::Path::new("/tmp/files")));
+        assert_eq!(profile.as_deref(), Some("google"));
+        assert_eq!(
+            rules.config.as_deref(),
+            Some(std::path::Path::new("rules.toml"))
+        );
+    }
+
+    #[test]
+    fn ask_rejects_config_and_preset_together() {
+        let error = Cli::try_parse_from([
+            "dirule",
+            "ask",
+            "--config",
+            "rules.toml",
+            "--preset",
+            "downloads",
+            "Explain the rules",
+        ])
+        .expect_err("config and preset conflict for ask");
 
         assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
     }

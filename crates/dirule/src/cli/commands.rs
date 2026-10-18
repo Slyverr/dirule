@@ -1,4 +1,4 @@
-use super::{args, categories, config, journal, output, presets};
+use super::{args, assistant, categories, config, journal, output, presets};
 use clap::CommandFactory;
 use std::error::Error;
 use std::fmt;
@@ -99,6 +99,7 @@ pub(super) fn run(
             args::RunsCommand::Show { run_id, format } => journal::show(run_id, format, color),
         },
         args::CliCommand::Undo(options) => journal::undo(options, color),
+        args::CliCommand::Ask(options) => assistant::ask(options),
         args::CliCommand::Completions { shell } => {
             let mut command = args::Cli::command();
             let binary_name = command.get_name().to_owned();

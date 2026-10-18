@@ -1,0 +1,19 @@
+[package]
+name = "dirule-assistant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Provider-neutral assistant and tool orchestration for Dirule."
+
+[dependencies]
+dirule-app = { version = "0.3.0", path = "../dirule-app" }
+dirule-core = { version = "0.3.0", path = "../dirule-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1"
+ureq = { version = "3.4", default-features = false, features = ["json", "rustls"] }
+
+[dev-dependencies]
+tempfile = "3"

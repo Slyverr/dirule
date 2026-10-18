@@ -85,6 +85,10 @@ dirule rename kebab-case --target ~/Downloads
 
 Built-in categories group common extensions into destinations such as `media/images/` and `documents/`. Add categories or customize those defaults with `categories.toml`. Quick operations can also sort recursively and use the same conflict checks and undo history as configured rules. See [Usage](docs/usage.md#sort-and-rename-without-a-project-config) for custom categories and more examples.
 
+## Ask a model (experimental)
+
+`dirule ask` lets a configured model interpret a file-organization request and use Dirule's category, sort-preview, and rename-preview tools. This first slice only inspects and previews; it does not edit configs or change paths. Set up a model profile as described in the [Ask guide](docs/assistant.md). Dirule sends the prompt and any requested path names or preview data to that provider; these tools do not read file contents.
+
 ## Check in CI
 
 Commit `dirule.toml` with the project and run:

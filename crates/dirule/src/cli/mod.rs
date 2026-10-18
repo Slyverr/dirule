@@ -1,5 +1,6 @@
 mod apply;
 mod args;
+mod assistant;
 mod categories;
 mod commands;
 mod config;
