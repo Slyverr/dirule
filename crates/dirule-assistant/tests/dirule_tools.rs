@@ -1,9 +1,10 @@
 use dirule_app::CategoryCatalog;
 use dirule_app::configuration::ConfigurationSource;
+use dirule_app::presets::PresetStore;
 use dirule_assistant::{
     ApprovalHandler, Assistant, AssistantLimits, ChangeProposal, ModelProvider, ModelRequest,
     ModelResponse, ModelToolCall, ProviderError, ToolError, dirule_tool_catalog_with_categories,
-    dirule_tool_catalog_with_source,
+    dirule_tool_catalog_with_source, dirule_tool_catalog_with_sources,
 };
 use serde_json::json;
 use std::collections::VecDeque;
@@ -36,6 +37,10 @@ struct TargetInspectingProvider {
     requests: Mutex<Vec<ModelRequest>>,
 }
 
+struct SourceListingProvider {
+    requests: Mutex<Vec<ModelRequest>>,
+}
+
 impl ModelProvider for TargetInspectingProvider {
     fn complete_with_timeout(
         &self,
@@ -56,6 +61,34 @@ impl ModelProvider for TargetInspectingProvider {
         } else {
             ModelResponse {
                 content: Some("I listed a bounded sample of paths.".into()),
+                tool_calls: Vec::new(),
+            }
+        };
+
+        Ok(response)
+    }
+}
+
+impl ModelProvider for SourceListingProvider {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        let mut requests = self.requests.lock().expect("request lock");
+        requests.push(request.clone());
+        let response = if requests.len() == 1 {
+            ModelResponse {
+                content: None,
+                tool_calls: vec![ModelToolCall {
+                    id: "list-sources".into(),
+                    name: "list_configuration_sources".into(),
+                    arguments: json!({}),
+                }],
+            }
+        } else {
+            ModelResponse {
+                content: Some("I listed the available configuration sources.".into()),
                 tool_calls: Vec::new(),
             }
         };
@@ -227,6 +260,7 @@ fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
         [
             "inspect_target",
             "list_categories",
+            "list_configuration_sources",
             "preview_rename",
             "preview_sort"
         ]
@@ -236,6 +270,84 @@ fn tool_catalog_exposes_only_the_dirule_operations_selected_for_this_stage() {
             .iter()
             .any(|name| name.contains("shell") || name.contains("read_file"))
     );
+}
+
+#[test]
+fn source_listing_exposes_only_local_availability_and_global_preset_names() {
+    let target = tempdir().expect("temporary target");
+    let local_config = target.path().join("dirule.toml");
+    fs::write(&local_config, "LOCAL_CONFIG_CONTENT_MUST_NOT_BE_SENT").expect("write local config");
+    let preset_directory = tempdir().expect("temporary preset directory");
+    let presets = PresetStore::new(preset_directory.path()).expect("preset store");
+    fs::write(
+        presets.path("downloads").expect("preset path"),
+        "PRESET_CONTENT_MUST_NOT_BE_SENT",
+    )
+    .expect("write preset");
+    fs::write(
+        presets.path("broken").expect("preset path"),
+        "PRIVATE_BROKEN_CONTENT",
+    )
+    .expect("write malformed preset");
+    for index in 0..65 {
+        fs::write(
+            presets
+                .path(&format!("extra-{index:02}"))
+                .expect("preset path"),
+            "",
+        )
+        .expect("write additional preset");
+    }
+    let selected_source =
+        ConfigurationSource::preset(&presets, "downloads").expect("select preset source");
+    let catalog = dirule_tool_catalog_with_sources(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        Some(selected_source),
+        Some(presets),
+    )
+    .expect("tool catalog");
+    let provider = SourceListingProvider {
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    assistant
+        .run(
+            "test-model",
+            "List available source names only.",
+            "What rule sources are available?",
+            &mut NoApproval,
+        )
+        .expect("assistant response");
+
+    let requests = provider.requests.lock().expect("request lock");
+    let tool_result = requests[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("source listing tool result");
+    let value: serde_json::Value = serde_json::from_str(tool_result).expect("tool result JSON");
+    let items = value["global_presets"]["items"]
+        .as_array()
+        .expect("global preset items");
+
+    assert_eq!(value["project_config"]["available"], true);
+    assert_eq!(value["project_config"]["selected"], false);
+    assert_eq!(value["global_presets"]["count"], 67);
+    assert_eq!(value["global_presets"]["truncated"], true);
+    assert_eq!(items.len(), 64);
+    assert_eq!(items[0]["name"], "broken");
+    assert_eq!(items[1]["name"], "downloads");
+    assert_eq!(items[1]["selected"], true);
+    assert!(!tool_result.contains("LOCAL_CONFIG_CONTENT_MUST_NOT_BE_SENT"));
+    assert!(!tool_result.contains("PRESET_CONTENT_MUST_NOT_BE_SENT"));
+    assert!(!tool_result.contains("PRIVATE_BROKEN_CONTENT"));
+    assert!(!tool_result.contains(preset_directory.path().to_str().expect("UTF-8 path")));
 }
 
 #[test]

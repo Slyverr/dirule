@@ -1,5 +1,6 @@
 use crate::{ApprovalRequirement, PreparedToolCall, Tool, ToolCatalog, ToolDefinition, ToolError};
 use dirule_app::configuration::{ConfigurationLoadError, ConfigurationSource};
+use dirule_app::presets::PresetStore;
 use dirule_app::{
     CategoryCatalog, Preview, PreviewSourceError, inspect_target, rename_preview_with_entry_limit,
     sort_selectors_preview_with_entry_limit,
@@ -13,6 +14,7 @@ const MAX_PREVIEW_CHANGES: usize = 40;
 const MAX_PREVIEW_RESULT_BYTES: usize = 24 * 1024;
 const MAX_SCANNED_ENTRIES: usize = 10_000;
 const MAX_TARGET_LISTING_ENTRIES: usize = 100;
+const MAX_PRESET_LISTING_ENTRIES: usize = 64;
 
 pub fn dirule_tool_catalog(target: PathBuf) -> Result<ToolCatalog, ToolError> {
     let categories =
@@ -24,7 +26,9 @@ pub fn dirule_tool_catalog_with_categories(
     target: PathBuf,
     categories: CategoryCatalog,
 ) -> Result<ToolCatalog, ToolError> {
-    build_tool_catalog(target, categories, None)
+    let presets = user_presets()?;
+
+    build_tool_catalog(target, categories, None, presets)
 }
 
 pub fn dirule_tool_catalog_with_source(
@@ -34,18 +38,39 @@ pub fn dirule_tool_catalog_with_source(
     source: Option<ConfigurationSource>,
 ) -> Result<ToolCatalog, ToolError> {
     let selected_source = source.map(|source| (source, base));
+    let presets = user_presets()?;
 
-    build_tool_catalog(target, categories, selected_source)
+    build_tool_catalog(target, categories, selected_source, presets)
+}
+
+/// Build a tool catalog with explicit preset storage for callers and tests.
+pub fn dirule_tool_catalog_with_sources(
+    target: PathBuf,
+    base: PathBuf,
+    categories: CategoryCatalog,
+    source: Option<ConfigurationSource>,
+    presets: Option<PresetStore>,
+) -> Result<ToolCatalog, ToolError> {
+    let selected_source = source.map(|source| (source, base));
+
+    build_tool_catalog(target, categories, selected_source, presets)
 }
 
 fn build_tool_catalog(
     target: PathBuf,
     categories: CategoryCatalog,
     source: Option<(ConfigurationSource, PathBuf)>,
+    presets: Option<PresetStore>,
 ) -> Result<ToolCatalog, ToolError> {
+    let selected_source = source.as_ref().map(|(source, _)| source.clone());
     let tools: Vec<Box<dyn Tool>> = vec![
         Box::new(InspectTargetTool {
             target: target.clone(),
+        }),
+        Box::new(ListConfigurationSourcesTool {
+            target: target.clone(),
+            selected_source,
+            presets,
         }),
         Box::new(ListCategoriesTool {
             categories: categories.clone(),
@@ -74,12 +99,22 @@ fn build_tool_catalog(
     ToolCatalog::new(tools)
 }
 
+fn user_presets() -> Result<Option<PresetStore>, ToolError> {
+    PresetStore::user_if_available().map_err(|_| ToolError::new("could not access global presets"))
+}
+
 struct InspectTargetTool {
     target: PathBuf,
 }
 
 struct ListCategoriesTool {
     categories: CategoryCatalog,
+}
+
+struct ListConfigurationSourcesTool {
+    target: PathBuf,
+    selected_source: Option<ConfigurationSource>,
+    presets: Option<PresetStore>,
 }
 
 struct PreviewSortTool {
@@ -170,6 +205,61 @@ impl Tool for ListCategoriesTool {
         Ok(PreparedToolCall::ReadOnly(
             json!({ "categories": categories }),
         ))
+    }
+}
+
+impl Tool for ListConfigurationSourcesTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "list_configuration_sources".into(),
+            description: "List whether the selected target has a local dirule.toml and the names of available global presets. This returns no configuration contents or storage paths.".into(),
+            parameters: empty_object_schema(),
+            approval: ApprovalRequirement::None,
+        }
+    }
+
+    fn prepare(&self, arguments: Value) -> Result<PreparedToolCall, ToolError> {
+        require_no_arguments("list_configuration_sources", arguments)?;
+
+        let project_config = ConfigurationSource::project_default(&self.target);
+        let project_config_available = project_config.path().is_file();
+        let project_config_selected = self
+            .selected_source
+            .as_ref()
+            .is_some_and(|source| source.path() == project_config.path());
+        let preset_names = self
+            .presets
+            .as_ref()
+            .map(PresetStore::list)
+            .transpose()
+            .map_err(|_| ToolError::new("could not list global preset names"))?
+            .unwrap_or_default();
+        let listed_presets = preset_names
+            .iter()
+            .take(MAX_PRESET_LISTING_ENTRIES)
+            .map(|name| {
+                json!({
+                    "name": name,
+                    "selected": self.selected_source.as_ref().is_some_and(|source| {
+                        source.kind() == dirule_app::configuration::ConfigurationSourceKind::Preset
+                            && source.name() == name
+                    }),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(PreparedToolCall::ReadOnly(json!({
+            "project_config": {
+                "name": "dirule.toml",
+                "available": project_config_available,
+                "selected": project_config_selected,
+            },
+            "global_presets": {
+                "count": preset_names.len(),
+                "truncated": preset_names.len() > listed_presets.len(),
+                "items": listed_presets,
+            },
+        })))
     }
 }
 

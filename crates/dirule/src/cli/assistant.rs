@@ -62,14 +62,14 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         },
     );
     let instructions = format!(
-        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to inspect categories or rules and create read-only previews, then explain the result plainly. Never claim that files were changed: this version can only inspect and preview. The selected target is {}. Keep operations within that target. {} Do not request or infer file contents.",
+        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, and create read-only previews, then explain the result plainly. Never claim that files were changed: this version can only inspect and preview. The selected target is {}. Keep operations within that target. {} Do not request or infer file contents. Listing another preset does not select it; tell the user to rerun with --preset NAME to inspect a different one.",
         target.display(),
         selected_config
     );
     let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
 
     eprintln!(
-        "Using profile {profile_name:?} with model {:?} at {}. The prompt, target path, selected rule excerpts, requested names, and preview data may be sent to that provider; file contents are not read by these tools.",
+        "Using profile {profile_name:?} with model {:?} at {}. The prompt, target path, selected rule excerpts, available preset names, requested names, and preview data may be sent to that provider; file contents are not read by these tools.",
         profile.model, profile.endpoint
     );
     eprintln!("Review the provider's data policy before sending project names or paths.");
