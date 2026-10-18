@@ -209,6 +209,45 @@ fn journal_state_uses_owner_only_permissions() {
 
 #[cfg(unix)]
 #[test]
+fn journal_state_does_not_change_existing_parent_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    let parent = temp.0.join("shared");
+    let journal_directory = parent.join("runs");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    std::fs::create_dir(&parent).expect("create shared parent");
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755))
+        .expect("set shared parent permissions");
+    let snapshot = scan(&target).expect("scan project");
+    let plan = one_file_plan("before.txt", "after.txt");
+    let store = JournalStore::new(&journal_directory);
+
+    apply_journaled(&target, &plan, &snapshot, ConflictPolicy::Abort, &store)
+        .expect("apply with journal");
+
+    assert_eq!(
+        std::fs::metadata(&parent)
+            .expect("read shared parent permissions")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+    assert_eq!(
+        std::fs::metadata(&journal_directory)
+            .expect("read journal directory permissions")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn journal_state_rejects_symlinked_private_directories_before_mutation() {
     use std::os::unix::fs::symlink;
 

@@ -734,17 +734,9 @@ fn prepare_state_directory(path: &Path) -> Result<(), JournalError> {
 
         if let Some(parent) = path
             .parent()
-            .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("/"))
+            .filter(|parent| !parent.as_os_str().is_empty())
         {
-            if let Some(ancestor) = parent
-                .parent()
-                .filter(|ancestor| !ancestor.as_os_str().is_empty())
-            {
-                fs::create_dir_all(ancestor)
-                    .map_err(|source| JournalError::io(ancestor, source))?;
-            }
-
-            create_private_directory(parent)?;
+            ensure_parent_directory(parent, true)?;
         }
 
         create_private_directory(path)?;
@@ -754,6 +746,68 @@ fn prepare_state_directory(path: &Path) -> Result<(), JournalError> {
     fs::create_dir_all(path).map_err(|source| JournalError::io(path, source))?;
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_parent_directory(path: &Path, reject_symlink: bool) -> Result<(), JournalError> {
+    let metadata = match if reject_symlink {
+        fs::symlink_metadata(path)
+    } else {
+        fs::metadata(path)
+    } {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty() && *parent != path)
+            {
+                ensure_parent_directory(parent, false)?;
+            }
+
+            return create_private_directory_if_missing(path);
+        }
+        Err(source) => return Err(JournalError::io(path, source)),
+    };
+
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(JournalError::io(
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "journal parent must be a directory and not a symlink",
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_directory_if_missing(path: &Path) -> Result<(), JournalError> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+
+    match builder.create(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let metadata =
+                fs::symlink_metadata(path).map_err(|source| JournalError::io(path, source))?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(JournalError::io(
+                    path,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "journal parent must be a directory and not a symlink",
+                    ),
+                ));
+            }
+
+            Ok(())
+        }
+        Err(source) => Err(JournalError::io(path, source)),
+    }
 }
 
 #[cfg(unix)]
