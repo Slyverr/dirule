@@ -4,7 +4,7 @@
 
 ### Added
 
-- Experimental `dirule ask` support for bounded inspection and previews, session-local selection of named global presets, and sort, rename, or configured-rule application after exact interactive approval.
+- Experimental `dirule ask` support for bounded inspection and previews, session-local selection of named global presets, sort/rename/rule application after exact approval, and selected-target journal inspection and undo after approval.
 
 ## Version 0.3.0
 

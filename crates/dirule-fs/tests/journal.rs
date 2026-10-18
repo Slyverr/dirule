@@ -1,5 +1,5 @@
 use dirule_core::{EntryKind, Plan, PlannedEntry};
-use dirule_fs::{ConflictPolicy, JournalStatus, JournalStore, apply_journaled, scan};
+use dirule_fs::{ConflictPolicy, JournalStatus, JournalStore, UndoAction, apply_journaled, scan};
 use fs4::FileExt;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -383,6 +383,19 @@ fn journaled_apply_can_be_listed_and_undone() {
     );
     assert_eq!(store.list().unwrap()[0].id, run_id);
 
+    let preview = store.preview_undo(&run_id).expect("preview journaled undo");
+    assert_eq!(preview.run.status, JournalStatus::Applied);
+    assert_eq!(
+        preview.actions,
+        [UndoAction::Move {
+            source: PathBuf::from("after.txt"),
+            destination: PathBuf::from("before.txt"),
+            kind: EntryKind::File,
+        }]
+    );
+    assert!(!target.join("before.txt").exists());
+    assert!(target.join("after.txt").is_file());
+
     store.undo(&run_id).expect("undo journaled apply");
 
     assert_eq!(
@@ -391,6 +404,45 @@ fn journaled_apply_can_be_listed_and_undone() {
     );
     assert!(!target.join("after.txt").exists());
     assert_eq!(store.list().unwrap()[0].status, JournalStatus::Undone);
+}
+
+#[test]
+fn undo_preview_includes_created_directories_and_move_order() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project");
+    std::fs::write(target.join("before.txt"), "contents").expect("write source file");
+    let snapshot = scan(&target).expect("scan project");
+    let store = store(&temp);
+    let applied = apply_journaled(
+        &target,
+        &one_file_plan("before.txt", "nested/after.txt"),
+        &snapshot,
+        ConflictPolicy::Abort,
+        &store,
+    )
+    .expect("apply with journal");
+    let run_id = applied.run_id.expect("mutation creates a journal run");
+
+    let preview = store
+        .preview_undo(&run_id)
+        .expect("preview directory restoration");
+
+    assert_eq!(
+        preview.actions,
+        [
+            UndoAction::Move {
+                source: PathBuf::from("nested/after.txt"),
+                destination: PathBuf::from("before.txt"),
+                kind: EntryKind::File,
+            },
+            UndoAction::RemoveDirectoryIfEmpty {
+                path: PathBuf::from("nested"),
+            },
+        ]
+    );
+    assert!(target.join("nested/after.txt").is_file());
+    assert!(!target.join("before.txt").exists());
 }
 
 #[test]
@@ -890,6 +942,12 @@ fn undo_refuses_to_overwrite_a_new_file_at_the_original_path() {
     let (_temp, target, store, run_id, journal) = journaled_file_run();
     let journal_before_undo = std::fs::read(&journal).expect("read applied journal");
     std::fs::write(target.join("before.txt"), "new file").expect("create new original path");
+
+    let preview = store.preview_undo(&run_id);
+    assert!(matches!(
+        preview,
+        Err(dirule_fs::JournalError::ExistingDestination(_))
+    ));
 
     let error = store
         .undo(&run_id)

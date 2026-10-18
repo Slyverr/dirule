@@ -1,7 +1,7 @@
-use dirule_app::CategoryCatalog;
 use dirule_app::configuration::ConfigurationSource;
 use dirule_app::journal::JournalService;
 use dirule_app::presets::PresetStore;
+use dirule_app::{CategoryCatalog, ConflictPolicy, apply_authorized, sort_selectors_preview};
 use dirule_assistant::{
     ApprovalHandler, Assistant, AssistantLimits, ChangeProposal, ModelProvider, ModelRequest,
     ModelResponse, ModelToolCall, ProviderError, ToolChange, ToolError,
@@ -48,6 +48,12 @@ struct PresetPreviewProvider {
 }
 
 struct ApplySortProvider {
+    requests: Mutex<Vec<ModelRequest>>,
+}
+
+struct ToolCallProvider {
+    name: String,
+    arguments: serde_json::Value,
     requests: Mutex<Vec<ModelRequest>>,
 }
 
@@ -173,6 +179,34 @@ impl ModelProvider for ApplySortProvider {
         } else {
             ModelResponse {
                 content: Some("The requested sort is complete.".into()),
+                tool_calls: Vec::new(),
+            }
+        };
+
+        Ok(response)
+    }
+}
+
+impl ModelProvider for ToolCallProvider {
+    fn complete_with_timeout(
+        &self,
+        request: &ModelRequest,
+        _timeout: Duration,
+    ) -> Result<ModelResponse, ProviderError> {
+        let mut requests = self.requests.lock().expect("request lock");
+        requests.push(request.clone());
+        let response = if requests.len() == 1 {
+            ModelResponse {
+                content: None,
+                tool_calls: vec![ModelToolCall {
+                    id: "requested-tool".into(),
+                    name: self.name.clone(),
+                    arguments: self.arguments.clone(),
+                }],
+            }
+        } else {
+            ModelResponse {
+                content: Some("I checked the journal.".into()),
                 tool_calls: Vec::new(),
             }
         };
@@ -465,7 +499,7 @@ fn apply_sort_waits_for_exact_approval_and_records_the_change() {
     assert_eq!(proposals.len(), 1);
     assert_eq!(
         proposals[0].changes,
-        [ToolChange {
+        [ToolChange::Move {
             source: "Portrait.JPG".into(),
             destination: "media/images/Portrait.JPG".into(),
         }]
@@ -484,6 +518,227 @@ fn apply_sort_waits_for_exact_approval_and_records_the_change() {
         .expect("apply tool result");
     assert!(apply_result.contains("\"status\":\"applied\""));
     assert!(!apply_result.contains("private image bytes"));
+}
+
+#[test]
+fn journal_tools_list_only_runs_for_the_selected_target() {
+    let target = tempdir().expect("temporary selected target");
+    let other_target = tempdir().expect("temporary unrelated target");
+    let journal_directory = tempdir().expect("temporary journal directory");
+    let journal = Arc::new(JournalService::at(journal_directory.path()));
+    let selected_run = record_image_sort(target.path(), &journal);
+    let unrelated_run = record_image_sort(other_target.path(), &journal);
+    let catalog = dirule_tool_catalog_with_services(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        None,
+        Some(Arc::clone(&journal)),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "list_journal_runs".into(),
+        arguments: json!({}),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    assistant
+        .run(
+            "test-model",
+            "List only selected-target history.",
+            "Show recent runs.",
+            &mut NoApproval,
+        )
+        .expect("assistant response");
+
+    let requests = provider.requests.lock().expect("request lock");
+    let result = requests[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("journal tool result");
+    let result: serde_json::Value = serde_json::from_str(result).expect("journal result JSON");
+    let runs = result["runs"].as_array().expect("run list");
+
+    assert!(runs.iter().any(|run| run["id"] == selected_run));
+    assert!(runs.iter().all(|run| run["id"] != unrelated_run));
+    assert!(
+        !result
+            .to_string()
+            .contains(other_target.path().to_str().unwrap())
+    );
+}
+
+#[test]
+fn undo_journal_run_shows_move_and_directory_actions_before_applying() {
+    let target = tempdir().expect("temporary target");
+    let original_name = target.path().join("Portrait.JPG");
+    let journal_directory = tempdir().expect("temporary journal directory");
+    let journal = Arc::new(JournalService::at(journal_directory.path()));
+    let run_id = record_image_sort(target.path(), &journal);
+    let catalog = dirule_tool_catalog_with_services(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        None,
+        Some(Arc::clone(&journal)),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "undo_journal_run".into(),
+        arguments: json!({ "run_id": run_id }),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let mut approval = RecordedApproval {
+        approved: true,
+        proposals: Mutex::new(Vec::new()),
+    };
+
+    let result = assistant
+        .run(
+            "test-model",
+            "Undo requires approval of the displayed actions.",
+            "Undo this apply run.",
+            &mut approval,
+        )
+        .expect("assistant response");
+
+    assert_eq!(result.approvals_granted, 1);
+    assert!(original_name.is_file());
+    assert!(!target.path().join("media/images/Portrait.JPG").exists());
+    assert_eq!(
+        journal.list_runs().expect("journal runs")[0].status,
+        dirule_app::journal::JournalStatus::Undone
+    );
+    let proposals = approval.proposals.lock().expect("proposal lock");
+    assert_eq!(proposals.len(), 1);
+    assert!(proposals[0].changes.contains(&ToolChange::Move {
+        source: "media/images/Portrait.JPG".into(),
+        destination: "Portrait.JPG".into(),
+    }));
+    assert!(
+        proposals[0]
+            .changes
+            .contains(&ToolChange::RemoveDirectoryIfEmpty {
+                path: "media/images".into(),
+            })
+    );
+}
+
+#[test]
+fn declined_journal_undo_preserves_the_applied_run() {
+    let target = tempdir().expect("temporary target");
+    let journal_directory = tempdir().expect("temporary journal directory");
+    let journal = Arc::new(JournalService::at(journal_directory.path()));
+    let run_id = record_image_sort(target.path(), &journal);
+    let catalog = dirule_tool_catalog_with_services(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        None,
+        Some(Arc::clone(&journal)),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "undo_journal_run".into(),
+        arguments: json!({ "run_id": run_id }),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+    let mut approval = RecordedApproval {
+        approved: false,
+        proposals: Mutex::new(Vec::new()),
+    };
+
+    assistant
+        .run(
+            "test-model",
+            "Undo requires approval of the displayed actions.",
+            "Undo this apply run.",
+            &mut approval,
+        )
+        .expect("assistant response");
+
+    assert!(!target.path().join("Portrait.JPG").exists());
+    assert!(target.path().join("media/images/Portrait.JPG").is_file());
+    assert_eq!(
+        journal.list_runs().expect("journal runs")[0].status,
+        dirule_app::journal::JournalStatus::Applied
+    );
+    assert_eq!(approval.proposals.lock().expect("proposal lock").len(), 1);
+}
+
+#[test]
+fn preview_journal_undo_preflights_without_changing_the_target() {
+    let target = tempdir().expect("temporary target");
+    let journal_directory = tempdir().expect("temporary journal directory");
+    let journal = Arc::new(JournalService::at(journal_directory.path()));
+    let run_id = record_image_sort(target.path(), &journal);
+    let catalog = dirule_tool_catalog_with_services(
+        target.path().to_path_buf(),
+        target.path().to_path_buf(),
+        CategoryCatalog::built_in(),
+        None,
+        None,
+        Some(Arc::clone(&journal)),
+    )
+    .expect("tool catalog");
+    let provider = ToolCallProvider {
+        name: "preview_journal_undo".into(),
+        arguments: json!({ "run_id": run_id }),
+        requests: Mutex::new(Vec::new()),
+    };
+    let assistant = Assistant::new(&provider, &catalog, AssistantLimits::default());
+
+    assistant
+        .run(
+            "test-model",
+            "Use read-only journal previews.",
+            "Can this run be undone?",
+            &mut NoApproval,
+        )
+        .expect("assistant response");
+
+    assert!(!target.path().join("Portrait.JPG").exists());
+    assert!(target.path().join("media/images/Portrait.JPG").is_file());
+    assert_eq!(
+        journal.list_runs().expect("journal runs")[0].status,
+        dirule_app::journal::JournalStatus::Applied
+    );
+    let requests = provider.requests.lock().expect("request lock");
+    let result = requests[1]
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            dirule_assistant::Message::Tool { content, .. } => Some(content),
+            _ => None,
+        })
+        .expect("undo preview result");
+    assert!(result.contains("remove_directory_if_empty"));
+    assert!(result.contains("Portrait.JPG"));
+}
+
+fn record_image_sort(target: &std::path::Path, journal: &JournalService) -> String {
+    fs::write(target.join("Portrait.JPG"), "image bytes").expect("create image");
+    let preview = sort_selectors_preview(
+        target,
+        &["images".into()],
+        &CategoryCatalog::built_in(),
+        false,
+    )
+    .expect("sort preview");
+    apply_authorized(preview, ConflictPolicy::Abort, journal)
+        .expect("apply and journal sort")
+        .run_id
+        .expect("run ID")
 }
 
 #[test]

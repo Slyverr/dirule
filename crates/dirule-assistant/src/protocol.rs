@@ -26,9 +26,11 @@ pub struct ModelToolCall {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ToolChange {
-    pub source: String,
-    pub destination: String,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolChange {
+    Move { source: String, destination: String },
+    CreateDirectory { path: String },
+    RemoveDirectoryIfEmpty { path: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

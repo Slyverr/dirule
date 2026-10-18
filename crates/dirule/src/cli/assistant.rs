@@ -20,8 +20,19 @@ impl ApprovalHandler for InteractiveApproval {
         writeln!(output, "\n{}", proposal.summary)
             .map_err(|error| ToolError::new(error.to_string()))?;
         for change in &proposal.changes {
-            writeln!(output, "  {:?} -> {:?}", change.source, change.destination)
-                .map_err(|error| ToolError::new(error.to_string()))?;
+            let line = match change {
+                dirule_assistant::ToolChange::Move {
+                    source,
+                    destination,
+                } => format!("  {source:?} -> {destination:?}"),
+                dirule_assistant::ToolChange::CreateDirectory { path } => {
+                    format!("  Create directory {path:?}")
+                }
+                dirule_assistant::ToolChange::RemoveDirectoryIfEmpty { path } => {
+                    format!("  Remove directory if empty {path:?}")
+                }
+            };
+            writeln!(output, "{line}").map_err(|error| ToolError::new(error.to_string()))?;
         }
         drop(output);
 
@@ -77,7 +88,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         .iter()
         .any(|tool| tool.name.starts_with("apply_"));
     let operation_policy = if write_tools_available {
-        "Filesystem changes require explicit approval of the exact path list in the terminal. Never claim a change was applied unless an apply tool succeeded."
+        "Filesystem changes require explicit terminal approval of the exact path and directory action list. Never claim a change was applied unless the matching tool succeeded."
     } else {
         "This invocation is read-only and can inspect or preview but cannot change paths."
     };
@@ -91,7 +102,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         },
     );
     let instructions = format!(
-        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, and create previews, then explain the result plainly. You may inspect or preview a listed global preset by passing its name to the rules tools. The selected target is {}. Keep operations within that target. {} {} Do not request or infer file contents.",
+        "You are Dirule Ask, a specialist assistant for Dirule's file and directory naming and sorting capabilities. Interpret the user's goal, use the provided Dirule tools to list available configuration sources, inspect categories or selected rules, create previews, and inspect the apply journal for the selected target. Explain results plainly. You may inspect or preview a listed global preset by passing its name to the rules tools. The selected target is {}. Keep operations within that target. {} {} Do not request or infer file contents.",
         target.display(),
         selected_config,
         operation_policy
@@ -99,7 +110,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
     let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
 
     eprintln!(
-        "Using profile {profile_name:?} with model {:?} at {}. The prompt, target path, selected rule excerpts, available preset names, requested names, and preview data may be sent to that provider; file contents are not read by these tools.",
+        "Using profile {profile_name:?} with model {:?} at {}. The prompt, target path, selected rule excerpts, available preset names, requested names, preview data, and selected-target journal entries may be sent to that provider; file contents are not read by these tools.",
         profile.model, profile.endpoint
     );
     eprintln!("Review the provider's data policy before sending project names or paths.");

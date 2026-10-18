@@ -1,3 +1,5 @@
+mod journal;
+
 use crate::{
     ApprovalRequirement, ChangeProposal, PreparedToolCall, Tool, ToolCatalog, ToolChange,
     ToolDefinition, ToolError,
@@ -136,10 +138,11 @@ fn build_tool_catalog(
         tools.push(Box::new(ApplyRulesTool {
             selected_source,
             base,
-            target,
+            target: target.clone(),
             presets,
-            journal,
+            journal: Arc::clone(&journal),
         }));
+        journal::register(&mut tools, target.clone(), Arc::clone(&journal));
     }
 
     ToolCatalog::new(tools)
@@ -614,7 +617,7 @@ fn prepare_apply(
     let changes = plan
         .entries
         .iter()
-        .map(|entry| ToolChange {
+        .map(|entry| ToolChange::Move {
             source: entry.source.display().to_string(),
             destination: entry.destination.display().to_string(),
         })

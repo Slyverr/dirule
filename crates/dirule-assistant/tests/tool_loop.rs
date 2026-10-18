@@ -83,7 +83,7 @@ impl Tool for FixedTool {
                 Ok(PreparedToolCall::Mutation {
                     proposal: ChangeProposal {
                         summary: "Rename one file".into(),
-                        changes: vec![ToolChange {
+                        changes: vec![ToolChange::Move {
                             source: "One.PDF".into(),
                             destination: "one.pdf".into(),
                         }],

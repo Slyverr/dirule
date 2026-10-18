@@ -1,5 +1,8 @@
 use crate::paths::{UserStateDirectoryUnavailable, user_journal_store};
-use dirule_fs::{JournalDetails, JournalError, JournalRun, JournalStore, UndoReport};
+pub use dirule_fs::{
+    JournalDetails, JournalError, JournalRun, JournalStatus, JournalUndoPreview, UndoAction,
+};
+use dirule_fs::{JournalStore, UndoReport};
 
 /// Frontend-neutral access to applied-run history and undo operations.
 pub struct JournalService {
@@ -30,6 +33,11 @@ impl JournalService {
     /// Read the recorded operations for one run.
     pub fn run_details(&self, run_id: &str) -> Result<JournalDetails, JournalError> {
         self.store.get(run_id)
+    }
+
+    /// Preview an undo after validating the recorded identities and current paths.
+    pub fn preview_undo(&self, run_id: &str) -> Result<JournalUndoPreview, JournalError> {
+        self.store.preview_undo(run_id)
     }
 
     /// Undo a selected run, subject to journal identity and conflict checks.

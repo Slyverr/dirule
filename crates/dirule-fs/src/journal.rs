@@ -96,10 +96,31 @@ pub struct JournalDetails {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalUndoPreview {
+    pub run: JournalRun,
+    pub actions: Vec<UndoAction>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JournalOperation {
     pub source: PathBuf,
     pub destination: PathBuf,
     pub kind: EntryKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UndoAction {
+    Move {
+        source: PathBuf,
+        destination: PathBuf,
+        kind: EntryKind,
+    },
+    CreateDirectory {
+        path: PathBuf,
+    },
+    RemoveDirectoryIfEmpty {
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -283,6 +304,51 @@ impl JournalStore {
             .collect();
 
         Ok(JournalDetails { run, operations })
+    }
+
+    pub fn preview_undo(&self, run_id: &str) -> Result<JournalUndoPreview, JournalError> {
+        let path = self.run_path(run_id)?;
+        let _lock = RunLock::acquire_existing(&path, run_id, LockMode::Shared)?;
+        let journal = read_records(&path)?;
+        let history = JournalHistory::from_records(&path, journal.records)?;
+        history.validate_undoable(run_id)?;
+
+        let target = history.target.clone();
+        validate_target(&history)?;
+        let mut mutations = history.mutations()?;
+        mutations.reverse();
+        preflight_undo(run_id, &target, &mutations)?;
+
+        let actions = mutations
+            .into_iter()
+            .map(|mutation| match mutation {
+                UndoMutation::Move {
+                    source,
+                    destination,
+                    identity,
+                    ..
+                } => UndoAction::Move {
+                    source: destination,
+                    destination: source,
+                    kind: identity.kind,
+                },
+                UndoMutation::Directory {
+                    path,
+                    action: DirectoryAction::Create,
+                    ..
+                } => UndoAction::RemoveDirectoryIfEmpty { path },
+                UndoMutation::Directory {
+                    path,
+                    action: DirectoryAction::Remove,
+                    ..
+                } => UndoAction::CreateDirectory { path },
+            })
+            .collect();
+
+        Ok(JournalUndoPreview {
+            run: run_from_history(&history),
+            actions,
+        })
     }
 
     pub fn undo(&self, run_id: &str) -> Result<UndoReport, JournalError> {
