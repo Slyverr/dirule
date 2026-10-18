@@ -106,6 +106,19 @@ impl ApprovalHandler for FixedApproval {
     }
 }
 
+#[derive(Default)]
+struct CountingApproval {
+    calls: usize,
+}
+
+impl ApprovalHandler for CountingApproval {
+    fn approve(&mut self, _proposal: &ChangeProposal) -> Result<bool, ToolError> {
+        self.calls += 1;
+
+        Ok(true)
+    }
+}
+
 fn tool_call(name: &str, arguments: Value) -> ModelToolCall {
     ModelToolCall {
         id: "call-1".into(),
@@ -237,6 +250,76 @@ fn unregistered_tool_is_reported_to_model_without_dispatching() {
     assert!(
         matches!(provider.requests()[1].messages.last(), Some(Message::Tool { content, .. }) if content.contains("unknown Dirule tool"))
     );
+}
+
+#[test]
+fn tool_call_limit_rejects_a_batch_before_requesting_approval_or_mutating() {
+    let provider = FakeProvider::new([ModelResponse {
+        content: None,
+        tool_calls: vec![
+            tool_call("inspect_target", json!({})),
+            ModelToolCall {
+                id: "call-2".into(),
+                name: "inspect_target".into(),
+                arguments: json!({}),
+            },
+        ],
+    }]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::Required, Arc::clone(&called));
+    let limits = AssistantLimits {
+        maximum_tool_calls: 1,
+        ..AssistantLimits::default()
+    };
+    let assistant = Assistant::new(&provider, &tools, limits);
+    let mut approval = CountingApproval::default();
+
+    let error = assistant
+        .run(
+            "test-model",
+            "Use Dirule tools.",
+            "Rename these files.",
+            &mut approval,
+        )
+        .expect_err("tool-call batch over the limit must be rejected");
+
+    assert!(error.to_string().contains("tool call limit (1)"));
+    assert_eq!(approval.calls, 0);
+    assert!(!*called.lock().expect("called lock"));
+    assert_eq!(provider.requests().len(), 1);
+}
+
+#[test]
+fn oversized_tool_results_are_replaced_before_the_next_provider_request() {
+    let provider = FakeProvider::new([
+        response_with_tool(tool_call("inspect_target", json!({}))),
+        response_text("The result was too large to include."),
+    ]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let limits = AssistantLimits {
+        maximum_tool_result_bytes: 8,
+        ..AssistantLimits::default()
+    };
+    let assistant = Assistant::new(&provider, &tools, limits);
+
+    assistant
+        .run(
+            "test-model",
+            "Use Dirule tools.",
+            "What is here?",
+            &mut FixedApproval(false),
+        )
+        .expect("assistant completes after reporting the bounded-result error");
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(matches!(
+        requests[1].messages.last(),
+        Some(Message::Tool { content, .. })
+            if content.contains("tool result exceeds the 8-byte limit")
+                && !content.contains("one.txt")
+    ));
 }
 
 #[test]
