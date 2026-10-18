@@ -19,6 +19,7 @@ Use this skill when managing files through Dirule in a user's project or persona
 - Create a starter project configuration with `dirule init` only when the user asks to configure that project and no `dirule.toml` exists. Never overwrite an existing config to start over.
 - Get the desired naming or sorting behavior from the user's request and existing project conventions. Do not invent broad rules that could move unrelated paths.
 - Rules are ordered: put specific rules before general ones. Patterns are globs, not regular expressions; named captures use angle brackets, such as `<year>`. Destinations use `builtin:` transformations or `template:` values.
+- A rule with `mode = "check"` reports a naming violation but is never applied; independent rules with the default `mode = "apply"` may still be applied.
 - Use `dirule validate` after editing a configuration. Resolve validation errors instead of attempting to apply an invalid config.
 - Treat exclusions deliberately: VCS ignore rules filter ignored untracked paths; top-level `ignore` in `dirule.toml` is a Dirule-specific exclusion; `.diruleignore` adds project-local exclusions. Do not edit `.gitignore` or another VCS ignore file unless the user asks.
 - Use the installed CLI's help and the [configuration guide](https://github.com/Slyverr/dirule/blob/main/docs/configuration.md) for exact syntax and behavior. The [usage guide](https://github.com/Slyverr/dirule/blob/main/docs/usage.md) covers commands, presets, sorting, and undo.

@@ -53,7 +53,7 @@ dirule check
 Rules live in the project's `dirule.toml`. Put specific rules before general rules because the first matching rule owns each original path.
 
 ```toml
-version = "1.3"
+version = "1.4"
 target = "."
 
 [[rules]]

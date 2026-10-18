@@ -5,7 +5,7 @@ Project rules live in `dirule.toml` at the target's root. Start with `dirule ini
 ## Example
 
 ```toml
-version = "1.3"
+version = "1.4"
 name = "Downloads"
 target = "."
 ignore = ["generated/api/**", "vendor/**"]
@@ -33,7 +33,17 @@ exclude = ["**/*.md"]
 to = "builtin:kebab-case"
 ```
 
-`version` is required. `name`, `target`, `ignore`, and `acronyms` are optional. Rules run in declaration order; the first rule matching an entry's original path and `kind` owns it. A rule's `exclude` skips that path for that rule, allowing later rules to match. `kind` accepts `file`, `directory`, or `any` and defaults to `any`.
+`version` is required. `name`, `target`, `ignore`, and `acronyms` are optional. Rules run in declaration order; the first rule matching an entry's original path and `kind` owns it. A rule's `exclude` skips that path for that rule, allowing later rules to match. `kind` accepts `file`, `directory`, or `any` and defaults to `any`. `mode` accepts `apply` or `check` and defaults to `apply`.
+
+A `check` mode rule reports the destination it expects but never renames that entry, including during `apply`. `check` fails while any check-mode rule has an unmet destination. Other matching `apply` rules can still run, and a check-mode directory does not virtually move its descendants.
+
+```toml
+[[rules]]
+name = "Require kebab case in CI"
+match = "src/**/*.rs"
+mode = "check"
+to = "builtin:kebab-case"
+```
 
 ## Matching and destinations
 

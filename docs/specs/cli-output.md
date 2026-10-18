@@ -1,4 +1,4 @@
-# CLI output 1.3
+# CLI output 1.4
 
 ## Output formats
 
@@ -16,7 +16,7 @@ An error document has this shape:
 
 ```json
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "error": {
     "code": "command_error",
     "kind": "command",
@@ -28,7 +28,7 @@ An error document has this shape:
 
 The stable error codes are:
 
-- `check_failed`: `check` completed, but found planned changes or conflicts. The command exits with status `1`.
+- `check_failed`: `check` completed, but found planned changes, check-only rule violations, or conflicts. The command exits with status `1`.
 - `command_error`: the command could not complete. The command exits with status `2`.
 
 The `message` is for display and may change between releases. Consumers should branch on `code`, `kind`, and `exit_code`, not parse the message. A successful command exits with status `0`.
@@ -65,7 +65,7 @@ When `check --format json` finds violations, stdout contains the versioned plan 
 
 For `apply --format json`, the apply result is written to stdout. If changes need confirmation and `--yes` was not supplied, Dirule writes a human-readable plan preview to stderr before prompting. In a non-interactive session, the confirmation error is also written to stderr as a JSON error document. Therefore, stderr is not JSON-only in this confirmation-required case. Automation should preview with `plan --format json` and apply with `--yes --format json`.
 
-In output 1.3, plan results add a `diagnostics` array. Each diagnostic has a stable `kind`, an optional target-relative `path`, the display-oriented `message`, and a human-readable `suggestion`. `path` is `null` when Dirule cannot faithfully represent it as Unicode. The existing `findings` array remains a list of message strings for compatibility. Consumers should branch on `kind`; `message` and `suggestion` may change between releases.
+In output 1.3, plan results added a `diagnostics` array. In output 1.4, `check_only_violation` is added as a diagnostic kind. It means a rule in check mode expects a different path, and apply will leave that rule's path unchanged. Each diagnostic has a stable `kind`, an optional target-relative `path`, the display-oriented `message`, and a human-readable `suggestion`. `path` is `null` when Dirule cannot faithfully represent it as Unicode. The existing `findings` array remains a list of message strings for compatibility. Consumers should branch on `kind`; `message` and `suggestion` may change between releases.
 
 Stable diagnostic kinds are:
 
@@ -73,5 +73,6 @@ Stable diagnostic kinds are:
 - `skipped_non_regular_entry`: a filesystem entry is neither a regular file nor directory.
 - `skipped_non_unicode_path`: a path cannot be represented as Unicode.
 - `skipped_symlink`: the path is a symbolic link, which Dirule skips.
+- `check_only_violation`: a rule in check mode expects a different destination but does not rename the path.
 
 Plan arrays have deterministic ordering for the same target and configuration. Entries follow planner order, conflicts follow planner order, and findings preserve planner order followed by scanner findings sorted lexically by message.
