@@ -1,7 +1,8 @@
 use dirule_assistant::{
-    ApprovalHandler, ApprovalRequirement, Assistant, AssistantLimits, ChangeProposal, Message,
-    ModelProvider, ModelRequest, ModelResponse, ModelToolCall, PreparedToolCall, ProviderError,
-    Tool, ToolCatalog, ToolChange, ToolDefinition, ToolError,
+    ApprovalHandler, ApprovalRequirement, Assistant, AssistantEvent, AssistantLimits,
+    AssistantObserver, ChangeProposal, Message, ModelProvider, ModelRequest, ModelResponse,
+    ModelToolCall, PreparedToolCall, ProviderError, Tool, ToolCatalog, ToolChange, ToolDefinition,
+    ToolError,
 };
 use serde_json::{Value, json};
 use std::collections::VecDeque;
@@ -111,6 +112,15 @@ struct CountingApproval {
     calls: usize,
 }
 
+#[derive(Default)]
+struct RecordingObserver(Vec<AssistantEvent>);
+
+impl AssistantObserver for RecordingObserver {
+    fn on_event(&mut self, event: AssistantEvent) {
+        self.0.push(event);
+    }
+}
+
 impl ApprovalHandler for CountingApproval {
     fn approve(&mut self, _proposal: &ChangeProposal) -> Result<bool, ToolError> {
         self.calls += 1;
@@ -174,6 +184,95 @@ fn routes_model_tool_calls_to_registered_tools_and_returns_final_response() {
     assert_eq!(requests[0].tools[0].name, "inspect_target");
     assert!(
         matches!(requests[1].messages.last(), Some(Message::Tool { content, .. }) if content.contains("one.txt"))
+    );
+}
+
+#[test]
+fn assistant_emits_progress_events_for_turns_tools_and_approval() {
+    let provider = FakeProvider::new([
+        response_with_tool(tool_call("inspect_target", json!({}))),
+        response_text("Done."),
+    ]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::Required, Arc::clone(&called));
+    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut approval = FixedApproval(true);
+    let mut observer = RecordingObserver::default();
+
+    assistant
+        .run_with_observer(
+            "test-model",
+            "Use Dirule tools.",
+            "Rename one file.",
+            &mut approval,
+            &mut observer,
+        )
+        .expect("assistant completes");
+
+    assert_eq!(
+        observer.0,
+        [
+            AssistantEvent::ModelRequestStarted {
+                turn: 1,
+                turn_limit: 8,
+            },
+            AssistantEvent::ModelRequestFinished {
+                turn: 1,
+                succeeded: true,
+            },
+            AssistantEvent::ToolCallStarted {
+                name: "inspect_target".into(),
+            },
+            AssistantEvent::ApprovalRequired {
+                name: "inspect_target".into(),
+            },
+            AssistantEvent::ToolCallFinished {
+                name: "inspect_target".into(),
+                succeeded: true,
+            },
+            AssistantEvent::ModelRequestStarted {
+                turn: 2,
+                turn_limit: 8,
+            },
+            AssistantEvent::ModelRequestFinished {
+                turn: 2,
+                succeeded: true,
+            },
+        ]
+    );
+}
+
+#[test]
+fn failed_provider_requests_emit_a_finished_progress_event() {
+    let provider = FakeProvider::new([]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut observer = RecordingObserver::default();
+
+    let error = assistant
+        .run_with_observer(
+            "test-model",
+            "Use Dirule tools.",
+            "What is here?",
+            &mut FixedApproval(false),
+            &mut observer,
+        )
+        .expect_err("empty fake provider fails");
+
+    assert!(error.to_string().contains("no fake response remains"));
+    assert_eq!(
+        observer.0,
+        [
+            AssistantEvent::ModelRequestStarted {
+                turn: 1,
+                turn_limit: 8,
+            },
+            AssistantEvent::ModelRequestFinished {
+                turn: 1,
+                succeeded: false,
+            },
+        ]
     );
 }
 

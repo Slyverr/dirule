@@ -27,6 +27,8 @@ Example requests include:
 
 The model may inspect available Dirule capabilities, request a preview, and explain findings. Any request to write configuration or change target paths must stop at a review step until the user approves the exact proposal.
 
+The CLI reports model-request turns and registered tool calls while the loop runs. Interactive terminals show an animated status on stderr; redirected stderr receives concise progress lines. The final answer remains a single response after the loop. Progress events describe observable requests, tools, and approval points; they do not expose private model reasoning. The event interface is frontend-neutral so another interface can render the same activity later.
+
 ## Model providers
 
 Provider wire formats are adapters around one provider-independent request, response, and tool-call model. Tool definitions and execution policy belong to Dirule, not to an external provider SDK.
@@ -72,6 +74,7 @@ Provider data policies differ. Google's Gemini free tier may use submitted conte
 - Define one normalized model conversation/tool-call contract. Provider adapters translate that contract to and from provider wire formats.
 - Keep model transport separate from a typed Dirule tool catalog and dispatcher.
 - Make the assistant service frontend-neutral so the CLI can use it first and a future TUI can reuse the same tool policy and services.
+- Expose frontend-neutral progress events for model requests, tool calls, and approval pauses; render them on stderr in the CLI without mixing progress into the final response.
 - Do not require MCP for `dirule ask`. A future MCP transport may expose the same catalog if a concrete external-host use case emerges.
 - Do not load arbitrary third-party code or user-supplied executable plugins in the initial implementation.
 

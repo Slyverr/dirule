@@ -4,6 +4,7 @@
 
 ### Added
 
+- Live `dirule ask` progress for model turns, tool calls, and approval pauses.
 - Per-rule `mode = "check"` policies that report naming violations without applying those rules' renames.
 
 ## Version 0.4.0

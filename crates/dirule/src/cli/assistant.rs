@@ -12,10 +12,13 @@ use std::path::{Path, PathBuf};
 
 const MAX_PROMPT_BYTES: usize = 32 * 1024;
 
-struct InteractiveApproval;
+struct InteractiveApproval {
+    progress: super::output::ProgressHandle,
+}
 
 impl ApprovalHandler for InteractiveApproval {
     fn approve(&mut self, proposal: &ChangeProposal) -> Result<bool, ToolError> {
+        self.progress.pause();
         let mut output = io::stderr().lock();
         writeln!(output, "\n{}", proposal.summary)
             .map_err(|error| ToolError::new(error.to_string()))?;
@@ -131,12 +134,18 @@ pub(super) fn ask(options: args::AskArgs, color: args::ColorChoice) -> Result<()
 
     super::output::assistant_notice(profile_name, &profile.model, &target, color)?;
 
-    let result = assistant.run(
+    let mut progress = super::output::AssistantProgress::new(color);
+    let mut approval = InteractiveApproval {
+        progress: progress.handle(),
+    };
+    let result = assistant.run_with_observer(
         &profile.model,
         &instructions,
         &prompt,
-        &mut InteractiveApproval,
+        &mut approval,
+        &mut progress,
     )?;
+    drop(progress);
     super::output::assistant_response(&result.response, color)?;
 
     Ok(())

@@ -18,8 +18,8 @@ pub use profile::{
     ProviderAdapter,
 };
 pub use protocol::{
-    ApprovalRequirement, ChangeProposal, Message, ModelProvider, ModelRequest, ModelResponse,
-    ModelToolCall, ToolChange, ToolDefinition,
+    ApprovalRequirement, AssistantEvent, AssistantObserver, ChangeProposal, Message, ModelProvider,
+    ModelRequest, ModelResponse, ModelToolCall, ToolChange, ToolDefinition,
 };
 pub use provider::{
     OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiResponsesConfig,

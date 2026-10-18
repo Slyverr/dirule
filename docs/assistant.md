@@ -102,6 +102,8 @@ Select the NVIDIA profile with `--profile nvidia`. The command sends the prompt,
 
 Ask renders the final response as terminal Markdown. Its styling follows the global `--color` option, and terminal control sequences in model responses are removed before display.
 
+During a run, Ask shows model-request turns and tool calls on standard error. It uses an animated status in an interactive terminal and concise progress lines when standard error is redirected. The final model response is printed after the tool loop completes; provider response tokens are not streamed yet.
+
 ## Approve a change
 
 Ask can apply a sort, rename, selected rule config, or journal undo after it displays every proposed path and directory action and you confirm with `y`. Approval is per operation. Declining leaves the target unchanged. Ask refuses filesystem changes when standard input is not an interactive terminal; it has no `--yes` bypass. Conflicting plans and plans with more than 40 actions are refused.

@@ -1,6 +1,6 @@
 use crate::{
-    ApprovalHandler, AssistantError, Message, ModelProvider, ModelRequest, ToolCatalog, ToolError,
-    protocol::encode_tool_result, tools::PreparedToolCall,
+    ApprovalHandler, AssistantError, AssistantEvent, AssistantObserver, Message, ModelProvider,
+    ModelRequest, ToolCatalog, ToolError, protocol::encode_tool_result, tools::PreparedToolCall,
 };
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -33,6 +33,12 @@ pub struct AssistantResult {
     pub approvals_granted: usize,
 }
 
+struct SilentObserver;
+
+impl AssistantObserver for SilentObserver {
+    fn on_event(&mut self, _event: AssistantEvent) {}
+}
+
 pub struct Assistant<'a> {
     provider: &'a dyn ModelProvider,
     tools: &'a ToolCatalog,
@@ -59,6 +65,17 @@ impl<'a> Assistant<'a> {
         prompt: &str,
         approvals: &mut dyn ApprovalHandler,
     ) -> Result<AssistantResult, AssistantError> {
+        self.run_with_observer(model, instructions, prompt, approvals, &mut SilentObserver)
+    }
+
+    pub fn run_with_observer(
+        &self,
+        model: &str,
+        instructions: &str,
+        prompt: &str,
+        approvals: &mut dyn ApprovalHandler,
+        observer: &mut dyn AssistantObserver,
+    ) -> Result<AssistantResult, AssistantError> {
         if prompt.len() > self.limits.maximum_prompt_bytes {
             return Err(AssistantError::PromptTooLarge {
                 limit: self.limits.maximum_prompt_bytes,
@@ -77,14 +94,23 @@ impl<'a> Assistant<'a> {
         let mut approvals_granted = 0;
         let started = Instant::now();
 
-        for _ in 0..self.limits.maximum_turns {
+        for turn in 1..=self.limits.maximum_turns {
             let remaining = self.remaining_time(started)?;
             let request = ModelRequest {
                 model: model.to_owned(),
                 messages: messages.clone(),
                 tools: self.tools.definitions().to_vec(),
             };
-            let response = self.provider.complete_with_timeout(&request, remaining)?;
+            observer.on_event(AssistantEvent::ModelRequestStarted {
+                turn,
+                turn_limit: self.limits.maximum_turns,
+            });
+            let response = self.provider.complete_with_timeout(&request, remaining);
+            observer.on_event(AssistantEvent::ModelRequestFinished {
+                turn,
+                succeeded: response.is_ok(),
+            });
+            let response = response?;
             self.remaining_time(started)?;
             if response.tool_calls.is_empty() {
                 return Ok(AssistantResult {
@@ -109,18 +135,30 @@ impl<'a> Assistant<'a> {
 
             for call in response.tool_calls {
                 self.remaining_time(started)?;
+                observer.on_event(AssistantEvent::ToolCallStarted {
+                    name: call.name.clone(),
+                });
                 let result = self.dispatch(
                     &call.name,
                     call.arguments,
                     approvals,
                     &mut approvals_granted,
+                    observer,
                 );
-                self.remaining_time(started)?;
-                let content = match result {
-                    Ok(value) => encode_tool_result(&value, self.limits.maximum_tool_result_bytes)
-                        .unwrap_or_else(error_result),
-                    Err(error) => error_result(error),
+                let (content, succeeded) = match result {
+                    Ok(value) => {
+                        match encode_tool_result(&value, self.limits.maximum_tool_result_bytes) {
+                            Ok(content) => (content, true),
+                            Err(error) => (error_result(error), false),
+                        }
+                    }
+                    Err(error) => (error_result(error), false),
                 };
+                observer.on_event(AssistantEvent::ToolCallFinished {
+                    name: call.name.clone(),
+                    succeeded,
+                });
+                self.remaining_time(started)?;
                 messages.push(Message::Tool {
                     tool_call_id: call.id,
                     name: call.name,
@@ -148,10 +186,14 @@ impl<'a> Assistant<'a> {
         arguments: serde_json::Value,
         approvals: &mut dyn ApprovalHandler,
         approvals_granted: &mut usize,
+        observer: &mut dyn AssistantObserver,
     ) -> Result<serde_json::Value, ToolError> {
         match self.tools.prepare(name, arguments)? {
             PreparedToolCall::ReadOnly(result) => Ok(result),
             PreparedToolCall::Mutation { proposal, action } => {
+                observer.on_event(AssistantEvent::ApprovalRequired {
+                    name: name.to_owned(),
+                });
                 if !approvals.approve(&proposal)? {
                     return Ok(json!({
                         "status": "declined",

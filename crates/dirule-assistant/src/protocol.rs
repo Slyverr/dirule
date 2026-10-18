@@ -84,6 +84,19 @@ pub trait ModelProvider: Send + Sync {
     ) -> Result<ModelResponse, ProviderError>;
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AssistantEvent {
+    ModelRequestStarted { turn: usize, turn_limit: usize },
+    ModelRequestFinished { turn: usize, succeeded: bool },
+    ToolCallStarted { name: String },
+    ApprovalRequired { name: String },
+    ToolCallFinished { name: String, succeeded: bool },
+}
+
+pub trait AssistantObserver {
+    fn on_event(&mut self, event: AssistantEvent);
+}
+
 pub(crate) fn encode_tool_result(result: &Value, maximum: usize) -> Result<String, ToolError> {
     let encoded = serde_json::to_string(result)
         .map_err(|error| ToolError::new(format!("could not encode tool result: {error}")))?;
