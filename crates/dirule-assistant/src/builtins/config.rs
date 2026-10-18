@@ -168,8 +168,18 @@ fn ensure_size(value: &Value) -> Result<(), ToolError> {
 }
 
 fn path_text(path: &Path) -> String {
-    path.components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+    let path = path.to_string_lossy();
+
+    #[cfg(windows)]
+    let path = path
+        .strip_prefix(r"\\?\UNC\")
+        .map(|unc| format!("//{unc}"))
+        .or_else(|| path.strip_prefix(r"\\?\").map(str::to_owned))
+        .unwrap_or_else(|| path.into_owned())
+        .replace('\\', "/");
+
+    #[cfg(not(windows))]
+    let path = path.into_owned();
+
+    path
 }

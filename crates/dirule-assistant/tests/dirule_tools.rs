@@ -815,7 +815,12 @@ fn save_project_config_requires_approval_of_exact_contents() {
             path: proposed_path,
             contents,
         } => {
-            assert_eq!(std::path::PathBuf::from(proposed_path), path);
+            assert_eq!(
+                std::path::PathBuf::from(proposed_path)
+                    .canonicalize()
+                    .expect("canonical proposed path"),
+                path
+            );
             assert_eq!(contents, &test_config());
         }
         change => panic!("expected file creation proposal, got {change:?}"),
