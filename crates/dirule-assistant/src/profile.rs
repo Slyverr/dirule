@@ -14,6 +14,8 @@ pub const CURRENT_ASSISTANT_CONFIG_VERSION: ConfigVersion = ConfigVersion::new(1
 pub enum ProviderAdapter {
     #[serde(rename = "openai-compatible")]
     OpenAiCompatible,
+    #[serde(rename = "openai-responses")]
+    OpenAiResponses,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -176,6 +178,7 @@ impl FromStr for ProviderAdapter {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "openai-compatible" => Ok(Self::OpenAiCompatible),
+            "openai-responses" => Ok(Self::OpenAiResponses),
             _ => Err(AssistantConfigError::new(format!(
                 "unsupported provider adapter {value:?}"
             ))),

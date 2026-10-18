@@ -29,6 +29,18 @@ On Windows, keep it in your user-only `%APPDATA%` directory. The file is plain t
 
 These examples use currently documented tool-capable endpoints. Model availability and free access can change, so check the linked provider catalog before testing.
 
+For OpenAI's native Responses API:
+
+```toml
+[profiles.openai]
+adapter = "openai-responses"
+endpoint = "https://api.openai.com/v1/responses"
+model = "YOUR_MODEL_ID"
+api_key_env = "OPENAI_API_KEY"
+```
+
+Replace `YOUR_MODEL_ID` with a model that supports function calling. This adapter sends `store = false` and keeps response items in memory only while the current Ask tool loop runs. OpenAI says Responses are stored for 30 days by default and that `store = false` disables that response storage; other provider data handling still applies. See OpenAI's [function-calling guide](https://developers.openai.com/api/docs/guides/function-calling) and [conversation-state and retention guide](https://developers.openai.com/api/docs/guides/conversation-state).
+
 For Google's OpenAI-compatible Gemini endpoint:
 
 ```toml
@@ -116,7 +128,7 @@ With no prompt argument, `dirule ask` prompts for a task in a terminal or reads 
 printf '%s\n' "Preview a kebab-case rename" | dirule ask --target ./project
 ```
 
-The selected provider receives your prompt and the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a draft-config tool, the proposed TOML is returned to the model for validation and explanation. If it calls a preview, apply, or journal tool, the provider also receives relevant entry names, run IDs, statuses, and proposed path or directory actions. Journal tools expose runs for the selected target only. The tools do not read project file bytes. A successful config creation, apply, or undo happens only after local approval. No conversation transcript is persisted.
+The selected provider receives your prompt and the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a draft-config tool, the proposed TOML is returned to the model for validation and explanation. If it calls a preview, apply, or journal tool, the provider also receives relevant entry names, run IDs, statuses, and proposed path or directory actions. Journal tools expose runs for the selected target only. The tools do not read project file bytes. A successful config creation, apply, or undo happens only after local approval. Dirule does not save conversations to local files. The native Responses adapter requests `store = false`; provider retention and safety logging still follow that provider's policies.
 
 Ask bounds each run to 10,000 scanned entries and three minutes. Target inspection returns at most 100 paths; larger listings are marked as truncated. If a preview reaches the scan limit, choose a narrower target.
 
@@ -124,10 +136,10 @@ Provider data policies differ. Google's [Gemini API pricing and data-use documen
 
 ## Test a live provider
 
-The ordinary test suite uses a local mock endpoint. To verify a real provider's tool-calling behavior, configure a profile above and make its named key available through the process environment or the per-user `credentials.env`, then run the opt-in smoke test:
+The ordinary test suite uses local mock endpoints. To verify a real provider's tool-calling behavior, configure a profile above and make its named key available through the process environment or the per-user `credentials.env`, then run the opt-in smoke test:
 
 ```sh
 DIRULE_LIVE_PROFILE=google cargo test -p dirule-assistant --test live_provider -- --ignored --nocapture
 ```
 
-Use `DIRULE_LIVE_PROFILE=nvidia` for the NVIDIA profile. The test creates a temporary folder with a synthetic image name, requires the model to call Dirule's read-only `preview_sort` tool, and checks that the file stays in place. It does not run in ordinary tests or CI. Set `DIRULE_ASSISTANT_CONFIG` to use a profile file outside Dirule's standard user config path.
+Set `DIRULE_LIVE_PROFILE` to any configured compatible or native Responses profile, such as `nvidia` or `openai`. The test creates a temporary folder with a synthetic image name, requires the model to call Dirule's read-only `preview_sort` tool, and checks that the file stays in place. It does not run in ordinary tests or CI. Set `DIRULE_ASSISTANT_CONFIG` to use a profile file outside Dirule's standard user config path.

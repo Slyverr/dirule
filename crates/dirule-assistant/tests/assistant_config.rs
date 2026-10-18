@@ -16,6 +16,12 @@ adapter = "openai-compatible"
 endpoint = "https://integrate.api.nvidia.com/v1/chat/completions"
 model = "nvidia-model-id"
 api_key_env = "NVIDIA_API_KEY"
+
+[profiles.openai]
+adapter = "openai-responses"
+endpoint = "https://api.openai.com/v1/responses"
+model = "gpt-5.6"
+api_key_env = "OPENAI_API_KEY"
 "#;
 
 #[test]
@@ -26,9 +32,14 @@ fn loads_versioned_profiles_and_selects_default_or_named_profile() {
     assert_eq!(config.default_profile_name(), "gemini");
     assert_eq!(config.profile(None).unwrap().0, "gemini");
     assert_eq!(config.profile(Some("nvidia")).unwrap().0, "nvidia");
+    assert_eq!(config.profile(Some("openai")).unwrap().0, "openai");
     assert_eq!(
         config.profile(Some("gemini")).unwrap().1.adapter,
         ProviderAdapter::OpenAiCompatible
+    );
+    assert_eq!(
+        config.profile(Some("openai")).unwrap().1.adapter,
+        ProviderAdapter::OpenAiResponses
     );
     assert_eq!(CURRENT_ASSISTANT_CONFIG_VERSION.to_string(), "1.0");
 }

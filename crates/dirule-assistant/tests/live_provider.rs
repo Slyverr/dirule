@@ -1,8 +1,8 @@
 use dirule_app::CategoryCatalog;
 use dirule_assistant::{
-    ApprovalHandler, Assistant, AssistantConfig, AssistantLimits, ChangeProposal,
-    OpenAiCompatibleConfig, OpenAiCompatibleProvider, ProviderAdapter, ToolError,
-    dirule_tool_catalog_with_categories,
+    ApprovalHandler, Assistant, AssistantConfig, AssistantLimits, ChangeProposal, ModelProvider,
+    OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiResponsesConfig,
+    OpenAiResponsesProvider, ProviderAdapter, ToolError, dirule_tool_catalog_with_categories,
 };
 use std::fs;
 use tempfile::tempdir;
@@ -26,16 +26,24 @@ fn configured_provider_calls_a_read_only_dirule_tool() {
     let (selected_name, profile) = config
         .profile(profile_name.as_deref())
         .expect("select live test profile");
-    match profile.adapter {
-        ProviderAdapter::OpenAiCompatible => {}
-    }
-
-    let provider = OpenAiCompatibleProvider::from_config(OpenAiCompatibleConfig::new(
-        profile.endpoint.clone(),
-        profile.model.clone(),
-        profile.api_key_env.clone(),
-    ))
-    .expect("construct configured provider");
+    let provider: Box<dyn ModelProvider> = match &profile.adapter {
+        ProviderAdapter::OpenAiCompatible => Box::new(
+            OpenAiCompatibleProvider::from_config(OpenAiCompatibleConfig::new(
+                profile.endpoint.clone(),
+                profile.model.clone(),
+                profile.api_key_env.clone(),
+            ))
+            .expect("construct configured provider"),
+        ),
+        ProviderAdapter::OpenAiResponses => Box::new(
+            OpenAiResponsesProvider::from_config(OpenAiResponsesConfig::new(
+                profile.endpoint.clone(),
+                profile.model.clone(),
+                profile.api_key_env.clone(),
+            ))
+            .expect("construct configured provider"),
+        ),
+    };
     let target = tempdir().expect("create synthetic target");
     let source = target.path().join("Summer Photo.JPG");
     fs::write(&source, "synthetic image placeholder").expect("create synthetic file");
@@ -44,7 +52,7 @@ fn configured_provider_calls_a_read_only_dirule_tool() {
         CategoryCatalog::built_in(),
     )
     .expect("create read-only Dirule tool catalog");
-    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let assistant = Assistant::new(provider.as_ref(), &tools, AssistantLimits::default());
 
     let result = assistant
         .run(

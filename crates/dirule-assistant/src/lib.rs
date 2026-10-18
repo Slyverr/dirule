@@ -21,5 +21,8 @@ pub use protocol::{
     ApprovalRequirement, ChangeProposal, Message, ModelProvider, ModelRequest, ModelResponse,
     ModelToolCall, ToolChange, ToolDefinition,
 };
-pub use provider::{OpenAiCompatibleConfig, OpenAiCompatibleProvider};
+pub use provider::{
+    OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiResponsesConfig,
+    OpenAiResponsesProvider,
+};
 pub use tools::{ApprovalHandler, PreparedToolCall, Tool, ToolCatalog};

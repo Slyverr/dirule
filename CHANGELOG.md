@@ -4,7 +4,7 @@
 
 ### Added
 
-- Experimental `dirule ask` support for bounded inspection and previews, session-local preset selection, validated config creation, sort/rename/rule application, and selected-target journal undo after exact approval.
+- Experimental `dirule ask` support for OpenAI Responses, bounded inspection and previews, session-local preset selection, validated config creation, sort/rename/rule application, and selected-target journal undo after exact approval.
 
 ## Version 0.3.0
 

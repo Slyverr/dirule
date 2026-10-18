@@ -8,9 +8,13 @@ use std::fmt;
 use std::time::Duration;
 use ureq::Agent;
 
-const MAX_REQUEST_BYTES: usize = 1024 * 1024;
-const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+mod responses;
+
+pub use responses::{OpenAiResponsesConfig, OpenAiResponsesProvider};
+
+pub(super) const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+pub(super) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Debug)]
 pub struct OpenAiCompatibleConfig {
@@ -66,10 +70,7 @@ impl OpenAiCompatibleProvider {
         endpoint: String,
         api_key: String,
     ) -> Result<Self, ProviderError> {
-        let agent_config = Agent::config_builder()
-            .timeout_global(Some(config.request_timeout))
-            .build();
-        let agent = Agent::new_with_config(agent_config);
+        let agent = build_agent(config.request_timeout);
 
         Ok(Self {
             agent,
@@ -95,7 +96,7 @@ fn validate_config(config: &OpenAiCompatibleConfig) -> Result<String, ProviderEr
     Ok(endpoint)
 }
 
-fn normalize_api_key(api_key: String) -> Result<String, ProviderError> {
+pub(super) fn normalize_api_key(api_key: String) -> Result<String, ProviderError> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Err(ProviderError::new("API key is empty"));
@@ -134,38 +135,62 @@ impl ModelProvider for OpenAiCompatibleProvider {
             &request.model
         };
         let payload = chat_request(model, &request.messages, &request.tools)?;
-        let body = serde_json::to_vec(&payload)
-            .map_err(|_| ProviderError::new("could not encode the model request"))?;
-        if body.len() > MAX_REQUEST_BYTES {
-            return Err(ProviderError::new(format!(
-                "model request exceeds the {MAX_REQUEST_BYTES}-byte limit"
-            )));
-        }
-
-        let mut response = self
-            .agent
-            .post(self.endpoint.clone())
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .config()
-            .timeout_global(Some(timeout))
-            .build()
-            .send(body)
-            .map_err(provider_request_error)?;
-        let body = response
-            .body_mut()
-            .with_config()
-            .limit(MAX_RESPONSE_BYTES as u64)
-            .read_to_vec()
-            .map_err(|_| ProviderError::new("could not read provider response"))?;
-        let response: Value = serde_json::from_slice(&body)
-            .map_err(|_| ProviderError::new("provider returned an invalid JSON response"))?;
+        let response = post_json(
+            &self.agent,
+            &self.endpoint,
+            &self.api_key,
+            &payload,
+            timeout,
+        )?;
 
         parse_chat_response(&response)
     }
 }
 
-fn validate_endpoint(endpoint: &str) -> Result<String, ProviderError> {
+pub(super) fn build_agent(timeout: Duration) -> Agent {
+    let config = Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .build();
+
+    Agent::new_with_config(config)
+}
+
+pub(super) fn post_json(
+    agent: &Agent,
+    endpoint: &str,
+    api_key: &str,
+    payload: &Value,
+    timeout: Duration,
+) -> Result<Value, ProviderError> {
+    let body = serde_json::to_vec(payload)
+        .map_err(|_| ProviderError::new("could not encode the model request"))?;
+    if body.len() > MAX_REQUEST_BYTES {
+        return Err(ProviderError::new(format!(
+            "model request exceeds the {MAX_REQUEST_BYTES}-byte limit"
+        )));
+    }
+
+    let mut response = agent
+        .post(endpoint.to_owned())
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .config()
+        .timeout_global(Some(timeout))
+        .build()
+        .send(body)
+        .map_err(provider_request_error)?;
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_RESPONSE_BYTES as u64)
+        .read_to_vec()
+        .map_err(|_| ProviderError::new("could not read provider response"))?;
+
+    serde_json::from_slice(&body)
+        .map_err(|_| ProviderError::new("provider returned an invalid JSON response"))
+}
+
+pub(super) fn validate_endpoint(endpoint: &str) -> Result<String, ProviderError> {
     let (scheme, rest) = endpoint
         .split_once("://")
         .ok_or_else(|| ProviderError::new("provider endpoint must be an absolute URL"))?;
@@ -269,7 +294,7 @@ fn chat_tool(tool: &ToolDefinition) -> Value {
     })
 }
 
-fn provider_request_error(error: ureq::Error) -> ProviderError {
+pub(super) fn provider_request_error(error: ureq::Error) -> ProviderError {
     match error {
         ureq::Error::StatusCode(status) => {
             ProviderError::new(format!("model provider returned HTTP status {status}"))

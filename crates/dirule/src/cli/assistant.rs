@@ -2,9 +2,9 @@ use super::args;
 use dirule_app::configuration::{self, ConfigurationSource, ConfigurationSourceKind};
 use dirule_app::presets::PresetStore;
 use dirule_assistant::{
-    ApprovalHandler, Assistant, AssistantConfig, AssistantLimits, ChangeProposal,
-    OpenAiCompatibleConfig, OpenAiCompatibleProvider, ProviderAdapter, ToolError,
-    dirule_tool_catalog_with_source,
+    ApprovalHandler, Assistant, AssistantConfig, AssistantLimits, ChangeProposal, ModelProvider,
+    OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiResponsesConfig,
+    OpenAiResponsesProvider, ProviderAdapter, ToolError, dirule_tool_catalog_with_source,
 };
 use std::error::Error;
 use std::io::{self, IsTerminal, Read, Write};
@@ -77,15 +77,22 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         None => AssistantConfig::load_user()?,
     };
     let (profile_name, profile) = config.profile(profile_name_argument.as_deref())?;
-    match &profile.adapter {
-        ProviderAdapter::OpenAiCompatible => {}
-    }
-
-    let provider = OpenAiCompatibleProvider::from_config(OpenAiCompatibleConfig::new(
-        profile.endpoint.clone(),
-        profile.model.clone(),
-        profile.api_key_env.clone(),
-    ))?;
+    let provider: Box<dyn ModelProvider> = match &profile.adapter {
+        ProviderAdapter::OpenAiCompatible => Box::new(OpenAiCompatibleProvider::from_config(
+            OpenAiCompatibleConfig::new(
+                profile.endpoint.clone(),
+                profile.model.clone(),
+                profile.api_key_env.clone(),
+            ),
+        )?),
+        ProviderAdapter::OpenAiResponses => Box::new(OpenAiResponsesProvider::from_config(
+            OpenAiResponsesConfig::new(
+                profile.endpoint.clone(),
+                profile.model.clone(),
+                profile.api_key_env.clone(),
+            ),
+        )?),
+    };
     let prompt = read_prompt(prompt_arguments)?;
     let base = std::env::current_dir()?;
     let target = dirule_app::paths::resolve_target(
@@ -120,7 +127,7 @@ pub(super) fn ask(options: args::AskArgs) -> Result<(), Box<dyn Error>> {
         selected_config,
         operation_policy
     );
-    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let assistant = Assistant::new(provider.as_ref(), &tools, AssistantLimits::default());
 
     eprintln!(
         "Using profile {profile_name:?} with model {:?} at {}. The prompt, target path, selected rule excerpts, available preset names, requested names, preview data, and selected-target journal entries may be sent to that provider; file contents are not read by these tools.",
