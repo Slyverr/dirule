@@ -2,26 +2,19 @@
 
 ## Unreleased
 
-### Added
-
-- Start a multi-turn Ask conversation by running `dirule ask` without a prompt in a terminal.
-- Keep conversation context in memory for the session and add `/help`, `/reset`, `/status`, and `/quit` commands. Models can end an interactive session when the user clearly asks to leave.
-
-### Improved
-
-- Make `dirule ask` more readable with color-coded activity, clearer progress labels, and separated responses.
-
 ## Version 0.4.0
 
 ### Added
 
 - Experimental `dirule ask` can use OpenAI-compatible Chat Completions or native OpenAI Responses profiles to inspect targets and rule sources, preview operations, and—with approval—create a project config, apply changes, or undo a journaled run.
+- Start a multi-turn Ask conversation by running `dirule ask` without a prompt in a terminal. Keep conversation context in memory for the session with `/help`, `/reset`, `/status`, and `/quit`; models can end an interactive session when the user clearly asks to leave.
 - Per-rule `mode = "check"` policies that report naming violations without applying those rules' renames.
 - Bare `dirule sort` that previews sorting with every category in the effective catalog.
 
 ### Improved
 
-- Live `dirule ask` progress for model turns, tool calls, and approval pauses.
+- Present Ask model and tool activity with colored progress, clear labels, and separated Markdown responses.
+- Show live `dirule ask` progress for model turns, tool calls, and approval pauses.
 
 ## Version 0.3.0
 
