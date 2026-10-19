@@ -6,7 +6,7 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const REQUEST_LIMIT_BYTES: usize = 1024 * 1024;
 const RESPONSE_LIMIT_BYTES: usize = 4 * 1024 * 1024;
@@ -72,6 +72,32 @@ fn rejects_oversized_requests_for_both_adapters_before_sending_them() {
             listener.accept(),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
         ));
+    }
+}
+
+#[test]
+fn applies_the_assistant_deadline_to_both_adapters() {
+    for adapter in ADAPTERS {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock provider");
+        let endpoint = adapter.endpoint(listener.local_addr().expect("listener address"));
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().expect("accept provider request");
+            thread::sleep(Duration::from_millis(500));
+        });
+        let provider = adapter.provider(endpoint);
+        let started = Instant::now();
+        let error = provider
+            .complete_with_timeout(&model_request("hello".into()), Duration::from_millis(100))
+            .expect_err("provider should time out before the server responds");
+        let elapsed = started.elapsed();
+
+        server.join().expect("mock provider thread");
+
+        assert!(
+            elapsed < Duration::from_millis(400),
+            "{adapter:?} took {elapsed:?} to honor the request deadline"
+        );
+        assert!(!error.to_string().contains("test-secret"));
     }
 }
 
