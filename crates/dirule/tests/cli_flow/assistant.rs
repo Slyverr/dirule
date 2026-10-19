@@ -105,9 +105,9 @@ fn ask_uses_a_profile_tool_loop_and_sends_no_file_contents() {
     assert!(stderr.contains("Target:"));
     assert!(stderr.contains("May send:"));
     assert!(stderr.contains("File contents are not read"));
-    assert!(stderr.contains("Waiting for model · turn 1/8"));
-    assert!(stderr.contains("Running tool · preview_sort"));
-    assert!(stderr.contains("Waiting for model · turn 2/8"));
+    assert!(stderr.contains("Thinking · model step 1/8"));
+    assert!(stderr.contains("Preparing a sort preview"));
+    assert!(stderr.contains("Thinking · model step 2/8"));
     assert!(!stderr.contains(&endpoint));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("dirule-test-secret"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("dirule-test-secret"));
@@ -189,7 +189,7 @@ fn ask_sanitizes_model_supplied_tool_names_in_progress_output() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Running tool · unsafe?"));
+    assert!(stderr.contains("Calling tool · unsafe?"));
     assert!(!stderr.contains('\u{1b}'));
     assert!(!stderr.contains("\nFORGED"));
     assert!(!stderr.contains("dirule-test-secret"));
@@ -234,7 +234,7 @@ fn ask_reports_provider_failure_without_echoing_response_body_or_credentials() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Waiting for model · turn 1/8"));
+    assert!(stderr.contains("Thinking · model step 1/8"));
     assert!(stderr.contains("HTTP status 503"));
     assert!(!stderr.contains("provider-private-response"));
     assert!(!stderr.contains("dirule-test-secret"));

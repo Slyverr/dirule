@@ -50,22 +50,22 @@ pub(super) fn is_broken_pipe(error: &(dyn std::error::Error + 'static)) -> bool 
 }
 
 #[derive(Clone, Copy)]
-struct Colorizer {
+pub(super) struct Colorizer {
     enabled: bool,
 }
 
-struct Styled<T> {
+pub(super) struct Styled<T> {
     value: T,
     ansi_code: &'static str,
     enabled: bool,
 }
 
 impl Colorizer {
-    fn stdout(choice: ColorChoice) -> Self {
+    pub(super) fn stdout(choice: ColorChoice) -> Self {
         Self::new(choice, std::io::stdout().is_terminal())
     }
 
-    fn stderr(choice: ColorChoice) -> Self {
+    pub(super) fn stderr(choice: ColorChoice) -> Self {
         Self::new(choice, std::io::stderr().is_terminal())
     }
 
@@ -75,7 +75,7 @@ impl Colorizer {
         }
     }
 
-    fn style<T: fmt::Display>(self, value: T, ansi_code: &'static str) -> Styled<T> {
+    pub(super) fn style<T: fmt::Display>(self, value: T, ansi_code: &'static str) -> Styled<T> {
         Styled {
             value,
             ansi_code,

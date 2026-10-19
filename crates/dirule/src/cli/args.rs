@@ -80,7 +80,7 @@ impl CliCommand {
 
 #[derive(Debug, Args)]
 pub(super) struct AskArgs {
-    /// Task to ask Dirule; reads standard input when omitted.
+    /// Ask Dirule a task, chat in a terminal, or read one request from standard input.
     #[arg(value_name = "PROMPT", num_args = 0..)]
     pub(super) prompt: Vec<String>,
 

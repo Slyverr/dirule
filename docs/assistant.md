@@ -41,7 +41,7 @@ model = "YOUR_MODEL_ID"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Replace `YOUR_MODEL_ID` with a model that supports function calling. This adapter sends `store = false` and keeps response items in memory only while the current Ask tool loop runs. OpenAI says Responses are stored for 30 days by default and that `store = false` disables that response storage; other provider data handling still applies. See OpenAI's [function-calling guide](https://developers.openai.com/api/docs/guides/function-calling) and [conversation-state and retention guide](https://developers.openai.com/api/docs/guides/conversation-state).
+Replace `YOUR_MODEL_ID` with a model that supports function calling. This adapter sends `store = false` and keeps response items in memory only while the current Ask session runs. OpenAI says Responses are stored for 30 days by default and that `store = false` disables that response storage; other provider data handling still applies. See OpenAI's [function-calling guide](https://developers.openai.com/api/docs/guides/function-calling) and [conversation-state and retention guide](https://developers.openai.com/api/docs/guides/conversation-state).
 
 For Google's OpenAI-compatible Gemini endpoint:
 
@@ -102,7 +102,7 @@ Select the NVIDIA profile with `--profile nvidia`. The command sends the prompt,
 
 Ask renders the final response as terminal Markdown. Its styling follows the global `--color` option, and terminal control sequences in model responses are removed before display.
 
-During a run, Ask shows model-request turns and tool calls on standard error. It uses an animated status in an interactive terminal and concise progress lines when standard error is redirected. The final model response is printed after the tool loop completes; provider response tokens are not streamed yet.
+During each request, Ask shows model activity and tool calls on standard error. It uses a colored animated status in an interactive terminal and readable progress lines when standard error is redirected. Each response is formatted and separated from the activity output; provider response tokens are not streamed yet.
 
 ## Approve a change
 
@@ -128,15 +128,25 @@ dirule ask --target ./project --preset downloads "Preview the configured rules"
 
 When no `--config` or `--preset` is given, Ask uses the shared rule-source discovery for the selected target: a target-local `dirule.toml`, then one global preset configured for that exact target. Ambiguous preset matches are reported as an error. With no match, Ask still supports category listing and quick sort or rename previews.
 
-With no prompt argument, `dirule ask` prompts for a task in a terminal or reads the prompt from standard input:
+With a prompt argument, Ask handles one request and exits. With no prompt in a terminal, it opens an interactive conversation:
+
+```sh
+dirule ask --target ~/Downloads
+```
+
+Enter a request at the `you>` prompt. Follow-up requests share the conversation context for this process, so you can refine a preview or ask a related question. Use `/help` to see the session commands, `/reset` to clear conversation context, `/status` to show the active profile, model, and target, and `/quit` or `/exit` to leave. If you clearly ask the model to end the chat, it can close the session after its final reply. Dirule keeps no transcript after the process exits. `Ctrl+D` also exits at the input prompt.
+
+With no prompt and non-terminal standard input, Ask reads one request and exits. This keeps it usable in pipelines:
 
 ```sh
 printf '%s\n' "Preview a kebab-case rename" | dirule ask --target ./project
 ```
 
-The selected provider receives your prompt and the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a draft-config tool, the proposed TOML is returned to the model for validation and explanation. If it calls a preview, apply, or journal tool, the provider also receives relevant entry names, run IDs, statuses, and proposed path or directory actions. Journal tools expose runs for the selected target only. The tools do not read project file bytes. A successful config creation, apply, or undo happens only after local approval. Dirule does not save conversations to local files. The native Responses adapter requests `store = false`; provider retention and safety logging still follow that provider's policies.
+The selected provider receives your prompt and, during a conversation, earlier user and assistant messages from the same process. It also receives the target path. If Dirule lists sources, it sends available preset names; if it inspects a rule config or preset, its rule names, patterns, templates, and exclusions are sent. If Dirule calls a draft-config tool, the proposed TOML is returned to the model for validation and explanation. If it calls a preview, apply, or journal tool, the provider also receives relevant entry names, run IDs, statuses, and proposed path or directory actions. Journal tools expose runs for the selected target only. The tools do not read project file bytes. A successful config creation, apply, or undo happens only after local approval. Dirule does not save conversations to local files. The native Responses adapter requests `store = false`; provider retention and safety logging still follow that provider's policies.
 
-Ask bounds each run to 10,000 scanned entries and three minutes. Target inspection returns at most 100 paths; larger listings are marked as truncated. If a preview reaches the scan limit, choose a narrower target.
+Each user turn is bounded to 10,000 scanned entries and three minutes. A conversation retains at most 256 KiB of serialized message history; use `/reset` to start fresh when that limit is reached. Target inspection returns at most 100 paths; larger listings are marked as truncated. If a preview reaches the scan limit, choose a narrower target.
+
+Dirule does not currently provide a universal setting to disable model thinking or reasoning. Those controls vary by provider and model, so the current profile format does not send a cross-provider toggle.
 
 Provider data policies differ. Google's [Gemini API pricing and data-use documentation](https://ai.google.dev/gemini-api/docs/pricing) describes how free and paid tier data is handled. Review the terms for your configured provider before sending private paths or names.
 

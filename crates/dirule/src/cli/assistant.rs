@@ -2,26 +2,32 @@ use super::args;
 use dirule_app::configuration::{self, ConfigurationSource, ConfigurationSourceKind};
 use dirule_app::presets::PresetStore;
 use dirule_assistant::{
-    ApprovalHandler, Assistant, AssistantConfig, AssistantLimits, ChangeProposal, ModelProvider,
-    OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiResponsesConfig,
-    OpenAiResponsesProvider, ProviderAdapter, ToolError, dirule_tool_catalog_with_source,
+    ApprovalHandler, Assistant, AssistantConfig, AssistantConversation, AssistantError,
+    AssistantLimits, ChangeProposal, ModelProvider, OpenAiCompatibleConfig,
+    OpenAiCompatibleProvider, OpenAiResponsesConfig, OpenAiResponsesProvider, ProviderAdapter,
+    ToolError, dirule_tool_catalog_with_source,
 };
 use std::error::Error;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-
-const MAX_PROMPT_BYTES: usize = 32 * 1024;
 
 struct InteractiveApproval {
     progress: super::output::ProgressHandle,
+    color: args::ColorChoice,
 }
 
 impl ApprovalHandler for InteractiveApproval {
     fn approve(&mut self, proposal: &ChangeProposal) -> Result<bool, ToolError> {
         self.progress.pause();
+        let styles = super::output::Colorizer::stderr(self.color);
         let mut output = io::stderr().lock();
-        writeln!(output, "\n{}", proposal.summary)
-            .map_err(|error| ToolError::new(error.to_string()))?;
+        writeln!(
+            output,
+            "\n{} {}",
+            styles.style("Approval required", "33"),
+            styles.style(&proposal.summary, "1")
+        )
+        .map_err(|error| ToolError::new(error.to_string()))?;
         for change in &proposal.changes {
             let line = match change {
                 dirule_assistant::ToolChange::Move {
@@ -96,7 +102,7 @@ pub(super) fn ask(options: args::AskArgs, color: args::ColorChoice) -> Result<()
             ),
         )?),
     };
-    let prompt = read_prompt(prompt_arguments)?;
+    let input = read_prompt(prompt_arguments)?;
     let base = std::env::current_dir()?;
     let target = dirule_app::paths::resolve_target(
         &base,
@@ -134,21 +140,33 @@ pub(super) fn ask(options: args::AskArgs, color: args::ColorChoice) -> Result<()
 
     super::output::assistant_notice(profile_name, &profile.model, &target, color)?;
 
-    let mut progress = super::output::AssistantProgress::new(color);
-    let mut approval = InteractiveApproval {
-        progress: progress.handle(),
-    };
-    let result = assistant.run_with_observer(
-        &profile.model,
-        &instructions,
-        &prompt,
-        &mut approval,
-        &mut progress,
-    )?;
-    drop(progress);
-    super::output::assistant_response(&result.response, color)?;
-
-    Ok(())
+    match input {
+        AskInput::OneShot(prompt) => {
+            let mut conversation = assistant.conversation(&instructions);
+            let result = run_turn(
+                &assistant,
+                &profile.model,
+                &mut conversation,
+                &prompt,
+                color,
+            )?;
+            super::output::assistant_response(&result.response, color).map_err(Into::into)
+        }
+        AskInput::Interactive => {
+            let session_instructions = format!(
+                "{instructions} In interactive chat, call end_session only when the user clearly asks to end this conversation. Do not use it when the user asks to stop or cancel a filesystem task."
+            );
+            let mut conversation = assistant.conversation_with_session_end(&session_instructions);
+            run_chat(
+                &assistant,
+                profile_name,
+                &profile.model,
+                &target,
+                &mut conversation,
+                color,
+            )
+        }
+    }
 }
 
 fn select_rule_source(
@@ -182,28 +200,184 @@ fn select_rule_source(
     Ok(Some(source))
 }
 
-fn read_prompt(arguments: Vec<String>) -> Result<String, Box<dyn Error>> {
+enum AskInput {
+    OneShot(String),
+    Interactive,
+}
+
+fn read_prompt(arguments: Vec<String>) -> Result<AskInput, Box<dyn Error>> {
+    let maximum_bytes = AssistantLimits::default().maximum_prompt_bytes;
     if !arguments.is_empty() {
         let prompt = arguments.join(" ");
-        if prompt.len() > MAX_PROMPT_BYTES {
-            return Err(format!("prompt exceeds the {MAX_PROMPT_BYTES}-byte limit").into());
-        }
+        return validate_prompt(prompt, maximum_bytes).map(AskInput::OneShot);
+    }
 
-        return Ok(prompt);
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        return Ok(AskInput::Interactive);
     }
 
     if io::stdin().is_terminal() {
-        eprint!("What would you like Dirule to do? ");
-        io::stderr().flush()?;
+        return Err("interactive Ask needs both stdin and stdout attached to a terminal; pass a prompt or pipe one on stdin".into());
     }
 
     let mut bytes = Vec::new();
     io::stdin()
-        .take((MAX_PROMPT_BYTES + 1) as u64)
+        .take(maximum_bytes.saturating_add(1) as u64)
         .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_PROMPT_BYTES {
-        return Err(format!("prompt exceeds the {MAX_PROMPT_BYTES}-byte limit").into());
+    if bytes.len() > maximum_bytes {
+        return Err(format!("prompt exceeds the {maximum_bytes}-byte limit").into());
     }
 
-    Ok(String::from_utf8(bytes)?)
+    validate_prompt(String::from_utf8(bytes)?, maximum_bytes).map(AskInput::OneShot)
+}
+
+fn validate_prompt(prompt: String, maximum_bytes: usize) -> Result<String, Box<dyn Error>> {
+    if prompt.len() > maximum_bytes {
+        return Err(format!("prompt exceeds the {maximum_bytes}-byte limit").into());
+    }
+    if prompt.trim().is_empty() {
+        return Err("provide a prompt, pipe one on stdin, or run `dirule ask` in a terminal to start a conversation".into());
+    }
+
+    Ok(prompt.trim().to_owned())
+}
+
+fn run_turn(
+    assistant: &Assistant<'_>,
+    model: &str,
+    conversation: &mut AssistantConversation,
+    prompt: &str,
+    color: args::ColorChoice,
+) -> Result<dirule_assistant::AssistantResult, AssistantError> {
+    let mut progress = super::output::AssistantProgress::new(color);
+    let mut approval = InteractiveApproval {
+        progress: progress.handle(),
+        color,
+    };
+    let result = assistant.run_conversation_turn_with_observer(
+        model,
+        conversation,
+        prompt,
+        &mut approval,
+        &mut progress,
+    );
+    drop(progress);
+
+    result
+}
+
+fn run_chat(
+    assistant: &Assistant<'_>,
+    profile: &str,
+    model: &str,
+    target: &Path,
+    conversation: &mut AssistantConversation,
+    color: args::ColorChoice,
+) -> Result<(), Box<dyn Error>> {
+    let styles = super::output::Colorizer::stdout(color);
+    writeln!(
+        io::stdout().lock(),
+        "Type a request and press Enter. Use {} for commands.",
+        styles.style("/help", "36")
+    )?;
+
+    let stdin = io::stdin();
+    let mut line = String::new();
+    loop {
+        write!(io::stdout().lock(), "{} ", styles.style("you>", "36"))?;
+        io::stdout().flush()?;
+        line.clear();
+        if stdin.lock().read_line(&mut line)? == 0 {
+            writeln!(io::stdout().lock())?;
+            return Ok(());
+        }
+
+        let prompt = line.trim();
+        if prompt.is_empty() {
+            continue;
+        }
+
+        match prompt {
+            "/help" => {
+                write_chat_help(color)?;
+                continue;
+            }
+            "/reset" => {
+                conversation.reset();
+                writeln!(
+                    io::stdout().lock(),
+                    "{} Conversation context cleared; target and profile stay the same.",
+                    styles.style("✓", "32")
+                )?;
+                continue;
+            }
+            "/status" => {
+                let mut stdout = io::stdout().lock();
+                writeln!(stdout, "{} {profile}", styles.style("Profile:", "90"))?;
+                writeln!(stdout, "{} {model}", styles.style("Model:", "90"))?;
+                writeln!(
+                    stdout,
+                    "{} {}\n",
+                    styles.style("Target:", "90"),
+                    target.display()
+                )?;
+                continue;
+            }
+            "/quit" | "/exit" => {
+                writeln!(io::stdout().lock())?;
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        match run_turn(assistant, model, conversation, prompt, color) {
+            Ok(result) => {
+                if result.response.trim().is_empty() && result.session_ended {
+                    writeln!(
+                        io::stdout().lock(),
+                        "{} Session ended.",
+                        styles.style("✓", "32")
+                    )?;
+                } else {
+                    super::output::assistant_response(&result.response, color)?;
+                }
+                if result.session_ended {
+                    return Ok(());
+                }
+            }
+            Err(error) => report_turn_error(&error, color)?,
+        }
+    }
+}
+
+fn write_chat_help(color: args::ColorChoice) -> io::Result<()> {
+    let styles = super::output::Colorizer::stdout(color);
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "\n{}", styles.style("Conversation commands", "1"))?;
+    writeln!(stdout, "  {}  Show this help", styles.style("/help", "36"))?;
+    writeln!(
+        stdout,
+        "  {}  Clear conversation context",
+        styles.style("/reset", "36")
+    )?;
+    writeln!(
+        stdout,
+        "  {}  Show the active profile, model, and target",
+        styles.style("/status", "36")
+    )?;
+    writeln!(
+        stdout,
+        "  {}  End the conversation (`/exit` also works)",
+        styles.style("/quit", "36")
+    )?;
+    writeln!(stdout)
+}
+
+fn report_turn_error(error: &dyn Error, color: args::ColorChoice) -> io::Result<()> {
+    let styles = super::output::Colorizer::stderr(color);
+    writeln!(
+        io::stderr().lock(),
+        "\n{} {error}\n",
+        styles.style("Ask error:", "31")
+    )
 }

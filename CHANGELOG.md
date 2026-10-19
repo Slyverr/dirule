@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- Start a multi-turn Ask conversation by running `dirule ask` without a prompt in a terminal.
+- Keep conversation context in memory for the session and add `/help`, `/reset`, `/status`, and `/quit` commands. Models can end an interactive session when the user clearly asks to leave.
+
+### Improved
+
+- Make `dirule ask` more readable with color-coded activity, clearer progress labels, and separated responses.
+
 ## Version 0.4.0
 
 ### Added

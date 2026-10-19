@@ -10,13 +10,16 @@ The model interprets intent. Dirule supplies its usage guidance and relevant tar
 
 ## User interaction
 
-The first interface is a one-shot command with a prompt supplied as arguments or standard input:
+The CLI supports one-shot requests and interactive conversations:
 
 ```text
 dirule ask [PROMPT...]
+dirule ask [OPTIONS...]
 ```
 
-The initial CLI accepts a target, a provider profile, an explicit assistant profile file, and a rule config or preset. The default target is the current directory. When no rule source is explicit, Ask uses the shared target-local config and exact-target global-preset discovery. One invocation can run a bounded provider and tool-call loop, then ends with one final response. It does not support interactive user clarification or persist chat transcripts.
+With a prompt argument, Ask sends one request and exits. With no prompt and a terminal attached to both stdin and stdout, it opens a conversation. Each request can build on earlier turns in that session. `/help` lists session commands, `/reset` clears conversation context, `/status` shows the selected profile, model, and target, and `/quit` or `/exit` ends the session. Exact command names are reserved; other input, including absolute paths, remains a prompt. The model can end the session with a dedicated control call only when the user clearly asks to leave the conversation. Conversation history stays in memory for the process and is sent with later requests; Dirule does not save transcripts. A no-prompt invocation with non-terminal stdin reads one request from stdin and exits, so pipelines remain one-shot.
+
+The CLI accepts a target, a provider profile, an explicit assistant profile file, and a rule config or preset. The default target is the current directory. When no rule source is explicit, Ask uses the shared target-local config and exact-target global-preset discovery. Each user turn runs a bounded provider and tool-call loop and returns a response before the next input prompt.
 
 Example requests include:
 
@@ -27,7 +30,9 @@ Example requests include:
 
 The model may inspect available Dirule capabilities, request a preview, and explain findings. Any request to write configuration or change target paths must stop at a review step until the user approves the exact proposal.
 
-The CLI reports model-request turns and registered tool calls while the loop runs. Interactive terminals show an animated status on stderr; redirected stderr receives concise progress lines. The final answer remains a single response after the loop. Progress events describe observable requests, tools, and approval points; they do not expose private model reasoning. The event interface is frontend-neutral so another interface can render the same activity later.
+The CLI reports model requests, registered tool calls, and approval points while they run. Interactive terminals show a colored animated status on stderr; redirected stderr receives readable status lines. Responses are formatted and separated from activity output. Progress events describe observable requests, tools, and approval points; they do not expose private model reasoning. The event interface is frontend-neutral so another interface can render the same activity later.
+
+The assistant profile does not expose a universal setting to disable model thinking or reasoning. Providers and models use different request controls, so Dirule must add such controls through explicit adapter support rather than one shared boolean.
 
 ## Model providers
 
@@ -63,7 +68,7 @@ The model can request only tools registered by the active Dirule version. Each t
 
 ## Data sent to providers
 
-Before a request, the CLI identifies the selected provider profile and model and states that the prompt, target path, and requested names or preview data will be sent. Tool definitions and Dirule's instructions are also part of the model request. File bytes are excluded by default. Any future feature that sends file contents must define its own explicit data flow and user consent.
+Before a request or conversation, the CLI identifies the selected provider profile and model and states what data may be sent. Each conversation turn includes prior user and assistant messages from that process. Tool definitions and Dirule's instructions are also part of each model request. File bytes are excluded by default. Any future feature that sends file contents must define its own explicit data flow and user consent.
 
 Provider data policies differ. Google's Gemini free tier may use submitted content to improve its products, while paid-tier content is not used for that purpose. Dirule cannot infer which account tier an API key belongs to, so it must not claim that a configured profile is on a particular tier. Documentation links to current provider terms; live tests should use synthetic paths and names unless the user chooses otherwise.
 
@@ -100,6 +105,7 @@ The first runnable milestone is the read-only CLI slice. Its live-provider check
 ## Full assistant acceptance
 
 - The model can interpret a natural-language Dirule task and either explain it or request a supported tool.
+- A terminal session can carry conversation history across user turns, reset that context, and exit without saving a transcript.
 - Provider adapters use the normalized contract, and offline tests cover tool-call parsing and dispatch with fake providers.
 - Tool requests are validated, bounded, and dispatched only through the active Dirule tool catalog.
 - Read-only requests and previews do not mutate target paths or project configuration.

@@ -33,7 +33,7 @@ Use this skill when managing files through Dirule in a user's project or persona
 
 ## Use model-assisted tasks
 
-- Use `dirule ask [PROMPT...]` when a user wants natural-language help inspecting or previewing operations, creating a project config, applying a sort, rename, or configured-rule plan, or undoing a journaled run. Ask is experimental and uses a bounded model/tool loop.
+- Use `dirule ask [PROMPT...]` when a user wants natural-language help inspecting or previewing operations, creating a project config, applying a sort, rename, or configured-rule plan, or undoing a journaled run. A prompt argument is one-shot; with no prompt in a terminal, Ask opens a conversation that accepts follow-up turns. Piped input remains one-shot. Use `/reset` to clear session context and `/quit` to leave. Ask is experimental and uses a bounded model/tool loop.
 - Check the installed `dirule ask --help` and provider setup in the [Ask guide](https://github.com/Slyverr/dirule/blob/main/docs/assistant.md). Ask does not read file contents, but the provider may receive the prompt, target path, entry names, selected rule excerpts, preview data, and relevant journal details. Avoid sending sensitive names or paths without the user's direction.
 - Ask requires an interactive terminal and explicit approval of the exact config or filesystem actions before it creates a config, applies a plan, or undoes a run. There is no `--yes` bypass; a natural-language request alone is not approval. Never claim a change succeeded until Dirule reports it was applied.
 - Prefer the normal deterministic CLI commands when the user already knows the desired operation. Ask is optional and requires a configured provider profile and credentials.

@@ -88,7 +88,7 @@ A bare `sort` previews every category in the effective catalog, including custom
 
 ## Ask a model (experimental)
 
-`dirule ask` lets a configured model interpret a file-organization request and use Dirule's category, sort-preview, and rename-preview tools. This first slice only inspects and previews; it does not edit configs or change paths. Set up a model profile as described in the [Ask guide](docs/assistant.md). Dirule sends the prompt and any requested path names or preview data to that provider; these tools do not read file contents.
+`dirule ask "..."` sends one request to a configured model. Run `dirule ask` in a terminal to start a conversation with follow-up turns, or pipe one request to it for scripting. The assistant can inspect and preview Dirule operations, and can create a config or apply a change after you approve the exact proposal. It does not read file contents or save conversation transcripts. See the [Ask guide](docs/assistant.md) for provider setup, data handling, and session commands.
 
 ## Check in CI
 

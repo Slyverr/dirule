@@ -50,29 +50,23 @@ impl AssistantObserver for AssistantProgress {
         match event {
             AssistantEvent::ModelRequestStarted { turn, turn_limit } => self
                 .handle
-                .begin(format!("Waiting for model · turn {turn}/{turn_limit}")),
+                .begin(format!("Thinking · model step {turn}/{turn_limit}")),
             AssistantEvent::ModelRequestFinished { turn, succeeded } => {
-                let state = if succeeded {
-                    "Model reply received"
-                } else {
-                    "Model request failed"
-                };
-                self.handle
-                    .finish(succeeded, format!("{state} · turn {turn}"));
+                self.handle.finish(
+                    succeeded,
+                    if succeeded {
+                        format!("Model replied · step {turn}")
+                    } else {
+                        format!("Model request failed · step {turn}")
+                    },
+                );
             }
             AssistantEvent::ToolCallStarted { name } => {
-                self.handle
-                    .begin(format!("Running tool · {}", safe_tool_name(&name)));
+                self.handle.begin(tool_activity(&name));
             }
             AssistantEvent::ApprovalRequired { .. } => self.handle.pause(),
             AssistantEvent::ToolCallFinished { name, succeeded } => {
-                let state = if succeeded {
-                    "Tool returned"
-                } else {
-                    "Tool failed"
-                };
-                self.handle
-                    .finish(succeeded, format!("{state} · {}", safe_tool_name(&name)));
+                self.handle.finish(succeeded, tool_result(&name, succeeded));
             }
         }
     }
@@ -97,13 +91,65 @@ fn safe_tool_name(name: &str) -> String {
     }
 }
 
+fn tool_activity(name: &str) -> String {
+    match name {
+        "list_categories" => "Checking available categories".into(),
+        "list_configuration_sources" => "Checking available rule sources".into(),
+        "inspect_target" => "Inspecting target paths".into(),
+        "inspect_rules" => "Reading configured rules".into(),
+        "preview_configured_rules" => "Preparing a rules preview".into(),
+        "preview_sort" => "Preparing a sort preview".into(),
+        "preview_rename" => "Preparing a rename preview".into(),
+        "apply_sort" => "Preparing proposed sort changes".into(),
+        "apply_rename" => "Preparing proposed rename changes".into(),
+        "apply_configured_rules" => "Preparing proposed rule changes".into(),
+        "draft_project_config" => "Drafting a project config".into(),
+        "save_project_config" => "Preparing proposed config save".into(),
+        "list_journal_runs" => "Checking recent runs".into(),
+        "inspect_journal_run" => "Inspecting a saved run".into(),
+        "preview_journal_undo" => "Preparing an undo preview".into(),
+        "undo_journal_run" => "Preparing proposed undo".into(),
+        "end_session" => "Ending the Ask session".into(),
+        other => format!("Calling tool · {}", safe_tool_name(other)),
+    }
+}
+
+fn tool_result(name: &str, succeeded: bool) -> String {
+    if !succeeded {
+        return format!("Tool failed · {}", safe_tool_name(name));
+    }
+
+    let result = match name {
+        "list_categories" => "Categories ready",
+        "list_configuration_sources" => "Rule sources ready",
+        "inspect_target" => "Target paths inspected",
+        "inspect_rules" => "Rules inspected",
+        "preview_configured_rules" => "Rules preview ready",
+        "preview_sort" => "Sort preview ready",
+        "preview_rename" => "Rename preview ready",
+        "apply_sort" => "Sort approval result ready",
+        "apply_rename" => "Rename approval result ready",
+        "apply_configured_rules" => "Rule approval result ready",
+        "draft_project_config" => "Config draft ready",
+        "save_project_config" => "Config save result ready",
+        "list_journal_runs" => "Run history ready",
+        "inspect_journal_run" => "Run details ready",
+        "preview_journal_undo" => "Undo preview ready",
+        "undo_journal_run" => "Undo result ready",
+        "end_session" => "Ask session ended",
+        other => return format!("Tool completed · {}", safe_tool_name(other)),
+    };
+
+    result.into()
+}
+
 impl ProgressHandle {
     fn begin(&self, message: String) {
         if self.0.terminal {
             let _output = lock(&self.0.output);
             *lock(&self.0.message) = Some(message.clone());
             let mut stderr = io::stderr().lock();
-            let spinner = self.0.styles.style("|", "36");
+            let spinner = self.0.styles.style("⠋", "36");
             let message = self.0.styles.style(message, "90");
             let _ = write!(stderr, "\r{spinner} {message}");
             let _ = stderr.flush();
@@ -117,6 +163,14 @@ impl ProgressHandle {
     fn finish(&self, succeeded: bool, label: String) {
         if self.0.terminal {
             self.complete_terminal(Some((succeeded, label)));
+        } else {
+            let (symbol, color) = if succeeded {
+                ("✓", "32")
+            } else {
+                ("✕", "31")
+            };
+            let mut stderr = io::stderr().lock();
+            let _ = writeln!(stderr, "  {} {label}", self.0.styles.style(symbol, color));
         }
     }
 
@@ -135,7 +189,7 @@ impl ProgressHandle {
             let (symbol, color) = if succeeded {
                 ("✓", "32")
             } else {
-                ("!", "31")
+                ("✕", "31")
             };
             let _ = writeln!(
                 stderr,
@@ -160,8 +214,8 @@ impl Drop for AssistantProgress {
 
 fn run_spinner(state: Arc<ProgressState>) -> JoinHandle<()> {
     thread::spawn(move || {
-        let frames = ["|", "/", "-", "\\"];
-        let mut frame = 0;
+        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let mut frame = 1;
 
         while !state.stopped.load(Ordering::Acquire) {
             {

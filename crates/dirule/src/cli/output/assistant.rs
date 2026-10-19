@@ -16,12 +16,12 @@ pub(in crate::cli) fn assistant_notice(
     writeln!(
         stderr,
         "{} · profile {profile:?} · model {model:?}",
-        styles.style("Ask", "36")
+        styles.style("Dirule Ask", "36")
     )?;
     writeln!(stderr, "{} {target:?}", styles.style("Target:", "36"))?;
     writeln!(
         stderr,
-        "{} your prompt, target path, rule excerpts, preset names, requested paths, previews, and target history. File contents are not read.",
+        "{} your conversation, target path, rule excerpts, preset names, requested paths, previews, and target history. File contents are not read.",
         styles.style("May send:", "33")
     )?;
     writeln!(
@@ -29,6 +29,7 @@ pub(in crate::cli) fn assistant_notice(
         "{} review provider terms before sharing sensitive names or paths.",
         styles.style("Privacy:", "90")
     )?;
+    writeln!(stderr)?;
 
     Ok(())
 }
@@ -43,12 +44,19 @@ pub(in crate::cli) fn assistant_response(response: &str, color: ColorChoice) -> 
         MadSkin::no_style()
     };
     let mut stdout = stdout.lock();
-
-    if is_terminal {
-        write!(stdout, "{}", skin.term_text(&response))?;
+    let rendered = if is_terminal {
+        skin.term_text(&response)
     } else {
-        write!(stdout, "{}", skin.text(&response, None))?;
+        skin.text(&response, None)
     }
+    .to_string();
+
+    writeln!(stdout, "{}", Colorizer::stdout(color).style("Dirule", "36"))?;
+    write!(stdout, "{rendered}")?;
+    if !rendered.ends_with('\n') {
+        writeln!(stdout)?;
+    }
+    writeln!(stdout)?;
 
     stdout.flush()
 }
