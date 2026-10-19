@@ -6,7 +6,7 @@
 
 ### Added
 
-- Experimental `dirule ask` support for OpenAI-compatible and OpenAI Responses providers, bounded tools and previews, credential resolution, validated config creation, and approval-gated path changes and undo.
+- Experimental `dirule ask` can use OpenAI-compatible Chat Completions or native OpenAI Responses profiles to inspect targets and rule sources, preview operations, and—with approval—create a project config, apply changes, or undo a journaled run.
 - Per-rule `mode = "check"` policies that report naming violations without applying those rules' renames.
 - Bare `dirule sort` that previews sorting with every category in the effective catalog.
 
