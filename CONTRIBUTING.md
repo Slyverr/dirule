@@ -63,6 +63,17 @@ cargo dist plan --tag=vX.Y.Z --output-format=json
 
 Use the `cargo-dist` version pinned in `dist-workspace.toml`.
 
+On Linux x86_64, smoke-test the release archive before tagging:
+
+```sh
+cargo dist build --tag=vX.Y.Z --target=x86_64-unknown-linux-gnu --artifacts=local
+(cd target/distrib && sha256sum -c dirule-x86_64-unknown-linux-gnu.tar.xz.sha256)
+smoke_dir="$(mktemp -d)"
+trap 'rm -rf "$smoke_dir"' EXIT
+tar -xJf target/distrib/dirule-x86_64-unknown-linux-gnu.tar.xz -C "$smoke_dir"
+"$smoke_dir/dirule-x86_64-unknown-linux-gnu/dirule" --version
+```
+
 After the release commit is on the intended release branch and its CI checks pass, push a matching `vX.Y.Z` tag. The release workflow builds the configured archives, installers, and checksums, then creates a GitHub release. A version tag with a prerelease suffix is published as a prerelease.
 
 ## Commits
