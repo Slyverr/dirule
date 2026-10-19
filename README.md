@@ -114,10 +114,12 @@ The journal stores paths and filesystem metadata, not file contents. It is recov
 
 ## Use with coding agents
 
-Dirule includes an [Agent Skill](.agents/skills/dirule/SKILL.md) that helps compatible coding agents configure and use Dirule in a project or personal folder. Install it with the [Skills CLI](https://github.com/vercel-labs/skills):
+Dirule includes an [Agent Skill](.agents/skills/dirule/SKILL.md) that helps compatible coding agents configure and use Dirule in a project or personal folder. Run the [Skills CLI](https://github.com/vercel-labs/skills) with `npx` or Bun's `bunx`:
 
 ```sh
 npx skills add Slyverr/dirule --skill dirule
+# or
+bunx skills add Slyverr/dirule --skill dirule
 ```
 
 Add `-g` to make the skill available globally for your agent. The skill provides instructions; install Dirule itself separately using the [installation guide](docs/installation.md).
