@@ -31,10 +31,11 @@ Use this skill when managing files through Dirule in a user's project or persona
 - Apply only when the user has asked for the filesystem changes. `dirule apply` previews again and normally asks for confirmation. Do not use `--yes` unless the user explicitly requested non-interactive application after the plan has been reviewed.
 - After applying configured rules, run `dirule check`; after a quick operation, rerun that operation as a preview and confirm no moves remain. Report the result and any run ID. Dirule changes paths, not file contents or code references; warn the user when a rename may require reference updates. Do not run `dirule undo` unless requested or needed to recover from a failed operation the user authorized.
 
-## Use model-assisted previews
+## Use model-assisted tasks
 
-- Use `dirule ask [PROMPT...]` when a user wants natural-language help selecting a category or understanding a selected configuration's preview. Ask uses a bounded model/tool loop but currently exposes read-only tools only; it cannot write configuration or change paths.
-- Check the installed `dirule ask --help` and provider setup in the [Ask guide](https://github.com/Slyverr/dirule/blob/main/docs/assistant.md) before using it. The prompt, target path, selected rule excerpts, entry names, and preview results may be sent to the configured provider. Do not send sensitive names or paths without the user's direction, and never claim the model applied changes.
+- Use `dirule ask [PROMPT...]` when a user wants natural-language help inspecting or previewing operations, creating a project config, applying a sort, rename, or configured-rule plan, or undoing a journaled run. Ask is experimental and uses a bounded model/tool loop.
+- Check the installed `dirule ask --help` and provider setup in the [Ask guide](https://github.com/Slyverr/dirule/blob/main/docs/assistant.md). Ask does not read file contents, but the provider may receive the prompt, target path, entry names, selected rule excerpts, preview data, and relevant journal details. Avoid sending sensitive names or paths without the user's direction.
+- Ask requires an interactive terminal and explicit approval of the exact config or filesystem actions before it creates a config, applies a plan, or undoes a run. There is no `--yes` bypass; a natural-language request alone is not approval. Never claim a change succeeded until Dirule reports it was applied.
 - Prefer the normal deterministic CLI commands when the user already knows the desired operation. Ask is optional and requires a configured provider profile and credentials.
 
 ## Keep user-wide settings separate
