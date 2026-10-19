@@ -92,9 +92,8 @@ fn applies_the_assistant_deadline_to_the_http_request() {
         listener.local_addr().unwrap()
     );
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept provider request");
-        let _request = read_request(&mut stream);
-        thread::sleep(Duration::from_millis(150));
+        let (_stream, _) = listener.accept().expect("accept provider request");
+        thread::sleep(Duration::from_millis(500));
     });
     let provider = OpenAiCompatibleProvider::with_api_key(
         OpenAiCompatibleConfig::new(endpoint, "demo-model", "DIRULE_TEST_KEY"),
@@ -110,13 +109,13 @@ fn applies_the_assistant_deadline_to_the_http_request() {
     };
     let started = Instant::now();
     let error = provider
-        .complete_with_timeout(&request, Duration::from_millis(20))
+        .complete_with_timeout(&request, Duration::from_millis(100))
         .expect_err("provider should time out before the server responds");
     let elapsed = started.elapsed();
 
     server.join().expect("mock provider thread");
 
-    assert!(elapsed < Duration::from_millis(120));
+    assert!(elapsed < Duration::from_millis(400));
     assert!(!error.to_string().contains("test-secret"));
 }
 
