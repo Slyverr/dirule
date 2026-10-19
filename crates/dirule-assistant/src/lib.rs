@@ -7,7 +7,7 @@ mod protocol;
 mod provider;
 mod tools;
 
-pub use assistant::{Assistant, AssistantLimits, AssistantResult};
+pub use assistant::{Assistant, AssistantConversation, AssistantLimits, AssistantResult};
 pub use builtins::{
     dirule_tool_catalog, dirule_tool_catalog_with_categories, dirule_tool_catalog_with_services,
     dirule_tool_catalog_with_source, dirule_tool_catalog_with_sources,

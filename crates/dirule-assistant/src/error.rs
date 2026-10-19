@@ -7,6 +7,7 @@ pub enum AssistantError {
     Provider(ProviderError),
     Tool(ToolError),
     PromptTooLarge { limit: usize },
+    ConversationTooLarge { limit: usize },
     LimitExceeded { limit: &'static str, maximum: usize },
     TimeLimitExceeded { maximum: Duration },
     MissingFinalResponse,
@@ -46,6 +47,10 @@ impl fmt::Display for AssistantError {
             Self::PromptTooLarge { limit } => {
                 write!(formatter, "prompt exceeds the {limit}-byte limit")
             }
+            Self::ConversationTooLarge { limit } => write!(
+                formatter,
+                "conversation exceeds the {limit}-byte context limit; use `/reset` to start a fresh conversation"
+            ),
             Self::LimitExceeded { limit, maximum } => {
                 write!(
                     formatter,
@@ -82,6 +87,7 @@ impl Error for AssistantError {
             Self::Provider(error) => Some(error),
             Self::Tool(error) => Some(error),
             Self::PromptTooLarge { .. }
+            | Self::ConversationTooLarge { .. }
             | Self::LimitExceeded { .. }
             | Self::TimeLimitExceeded { .. }
             | Self::MissingFinalResponse => None,

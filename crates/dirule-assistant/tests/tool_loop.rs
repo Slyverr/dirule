@@ -101,6 +101,27 @@ impl Tool for FixedTool {
 
 struct FixedApproval(bool);
 
+struct ReservedSessionControlTool;
+
+impl Tool for ReservedSessionControlTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "end_session".into(),
+            description: "Try to take the assistant session control name.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            approval: ApprovalRequirement::None,
+        }
+    }
+
+    fn prepare(&self, _arguments: Value) -> Result<PreparedToolCall, ToolError> {
+        Ok(PreparedToolCall::ReadOnly(Value::Null))
+    }
+}
+
 impl ApprovalHandler for FixedApproval {
     fn approve(&mut self, _proposal: &ChangeProposal) -> Result<bool, ToolError> {
         Ok(self.0)
@@ -178,10 +199,17 @@ fn routes_model_tool_calls_to_registered_tools_and_returns_final_response() {
     assert_eq!(result.response, "There are two files.");
     assert_eq!(result.tool_calls, 1);
     assert_eq!(result.approvals_granted, 0);
+    assert!(!result.session_ended);
 
     let requests = provider.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].tools[0].name, "inspect_target");
+    assert!(
+        !requests[0]
+            .tools
+            .iter()
+            .any(|tool| tool.name == "end_session")
+    );
     assert!(
         matches!(requests[1].messages.last(), Some(Message::Tool { content, .. }) if content.contains("one.txt"))
     );
@@ -471,6 +499,198 @@ fn prompt_limit_is_checked_before_calling_provider() {
 }
 
 #[test]
+fn conversation_keeps_context_until_reset() {
+    let provider = FakeProvider::new([
+        response_text("First answer."),
+        response_text("Follow-up answer."),
+        response_text("Fresh answer."),
+    ]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut conversation = assistant.conversation("Use Dirule tools.");
+
+    assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "First question.",
+            &mut FixedApproval(false),
+        )
+        .expect("first conversation turn");
+    assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "Follow up.",
+            &mut FixedApproval(false),
+        )
+        .expect("second conversation turn");
+    conversation.reset();
+    assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "Start over.",
+            &mut FixedApproval(false),
+        )
+        .expect("turn after reset");
+
+    let requests = provider.requests();
+    assert!(matches!(
+        requests[1].messages.as_slice(),
+        [
+            Message::System { .. },
+            Message::User { content: first },
+            Message::Assistant { content: Some(answer), .. },
+            Message::User { content: follow_up },
+        ] if first == "First question." && answer == "First answer." && follow_up == "Follow up."
+    ));
+    assert!(matches!(
+        requests[2].messages.as_slice(),
+        [
+            Message::System { .. },
+            Message::User { content: prompt },
+        ] if prompt == "Start over."
+    ));
+}
+
+#[test]
+fn interactive_conversation_can_end_when_the_model_calls_the_control_tool() {
+    let provider = FakeProvider::new([ModelResponse {
+        content: Some("Goodbye for now.".into()),
+        tool_calls: vec![tool_call("end_session", json!({}))],
+    }]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut conversation = assistant.conversation_with_session_end("Use Dirule tools.");
+    conversation.reset();
+
+    let result = assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "Please end this chat.",
+            &mut FixedApproval(false),
+        )
+        .expect("session end is accepted");
+
+    assert_eq!(result.response, "Goodbye for now.");
+    assert!(result.session_ended);
+    assert_eq!(result.tool_calls, 1);
+    assert!(
+        provider.requests()[0]
+            .tools
+            .iter()
+            .any(|tool| tool.name == "end_session")
+    );
+}
+
+#[test]
+fn session_end_mixed_with_other_tools_runs_none_and_requests_a_retry() {
+    let provider = FakeProvider::new([
+        ModelResponse {
+            content: None,
+            tool_calls: vec![
+                tool_call("end_session", json!({})),
+                ModelToolCall {
+                    id: "call-2".into(),
+                    name: "inspect_target".into(),
+                    arguments: json!({}),
+                },
+            ],
+        },
+        response_text("No tools were run."),
+    ]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::Required, Arc::clone(&called));
+    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut conversation = assistant.conversation_with_session_end("Use Dirule tools.");
+    let mut approval = CountingApproval::default();
+
+    let result = assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "Please end this chat.",
+            &mut approval,
+        )
+        .expect("assistant retries after rejecting mixed control calls");
+
+    assert_eq!(result.response, "No tools were run.");
+    assert!(!result.session_ended);
+    assert_eq!(result.tool_calls, 2);
+    assert_eq!(approval.calls, 0);
+    assert!(!*called.lock().expect("called lock"));
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].messages.iter().all(|message| match message {
+        Message::Tool { content, .. } => content.contains("no tools were executed"),
+        _ => true,
+    }));
+}
+
+#[test]
+fn session_end_rejects_arguments_and_requests_a_retry() {
+    let provider = FakeProvider::new([
+        response_with_tool(tool_call("end_session", json!({"reason": "done"}))),
+        response_text("I’ll stay available."),
+    ]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let assistant = Assistant::new(&provider, &tools, AssistantLimits::default());
+    let mut conversation = assistant.conversation_with_session_end("Use Dirule tools.");
+
+    let result = assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "Please end this chat.",
+            &mut FixedApproval(false),
+        )
+        .expect("assistant retries after rejecting control arguments");
+
+    assert_eq!(result.response, "I’ll stay available.");
+    assert!(!result.session_ended);
+    assert!(provider.requests()[1].messages.iter().any(|message| matches!(
+        message,
+        Message::Tool { content, .. }
+            if content.contains("end_session must be the only tool call and take no arguments")
+    )));
+}
+
+#[test]
+fn conversation_context_limit_is_checked_before_provider_request() {
+    let provider = FakeProvider::new([]);
+    let called = Arc::new(Mutex::new(false));
+    let tools = catalog(ApprovalRequirement::None, called);
+    let assistant = Assistant::new(
+        &provider,
+        &tools,
+        AssistantLimits {
+            maximum_conversation_bytes: 32,
+            ..AssistantLimits::default()
+        },
+    );
+    let mut conversation = assistant.conversation("rules");
+
+    let error = assistant
+        .run_conversation_turn(
+            "test-model",
+            &mut conversation,
+            "This message makes the context too large.",
+            &mut FixedApproval(false),
+        )
+        .expect_err("oversized conversation must be rejected");
+
+    assert!(error.to_string().contains("32-byte context limit"));
+    assert!(error.to_string().contains("/reset"));
+    assert!(provider.requests().is_empty());
+}
+
+#[test]
 fn assistant_rejects_a_provider_response_after_the_overall_time_limit() {
     let called = Arc::new(Mutex::new(false));
     let tools = catalog(ApprovalRequirement::None, called);
@@ -509,4 +729,18 @@ fn duplicate_tool_names_are_rejected() {
     };
 
     assert!(error.to_string().contains("registered more than once"));
+}
+
+#[test]
+fn tool_catalog_rejects_the_reserved_session_control_name() {
+    let error = match ToolCatalog::new([Box::new(ReservedSessionControlTool) as Box<dyn Tool>]) {
+        Ok(_) => panic!("session control name should be reserved"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("reserved for assistant session control")
+    );
 }

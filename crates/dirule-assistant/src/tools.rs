@@ -85,6 +85,13 @@ impl ToolCatalog {
 }
 
 fn validate_definition(definition: &ToolDefinition) -> Result<(), ToolError> {
+    if definition.name == crate::assistant::END_SESSION_TOOL {
+        return Err(ToolError::new(format!(
+            "tool name {:?} is reserved for assistant session control",
+            definition.name
+        )));
+    }
+
     if definition.name.trim().is_empty() {
         return Err(ToolError::new("tool names must not be empty"));
     }
