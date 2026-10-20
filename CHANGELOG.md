@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## Version 0.4.1
+
+### Added
+
+- Install the CLI from crates.io with `cargo install --locked dirule`.
+
 ## Version 0.4.0
 
 ### Added

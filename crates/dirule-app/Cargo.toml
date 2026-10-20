@@ -4,11 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
 rust-version.workspace = true
 description = "Shared application services for Dirule frontends."
+keywords = ["configuration", "presets", "sorting", "filesystem", "rule-engine"]
+categories = ["filesystem", "development-tools"]
 
 [dependencies]
-dirule-core = { version = "0.4.0", path = "../dirule-core" }
-dirule-fs = { version = "0.4.0", path = "../dirule-fs" }
+dirule-core = { version = "0.4.1", path = "../dirule-core" }
+dirule-fs = { version = "0.4.1", path = "../dirule-fs" }
 tempfile = "3"
 toml_edit = "0.25"

@@ -4,16 +4,20 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 rust-version.workspace = true
-description = "A local-first CLI for applying reusable rules to file and directory names."
+description = "Local-first CLI for naming, renaming, sorting, and checking files and directories."
+keywords = ["cli", "file-management", "renaming", "sorting", "naming"]
+categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-dirule-app = { version = "0.4.0", path = "../dirule-app" }
-dirule-assistant = { version = "0.4.0", path = "../dirule-assistant" }
-dirule-core = { version = "0.4.0", path = "../dirule-core" }
-dirule-fs = { version = "0.4.0", path = "../dirule-fs" }
+dirule-app = { version = "0.4.1", path = "../dirule-app" }
+dirule-assistant = { version = "0.4.1", path = "../dirule-assistant" }
+dirule-core = { version = "0.4.1", path = "../dirule-core" }
+dirule-fs = { version = "0.4.1", path = "../dirule-fs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 strip-ansi-escapes = "0.2.1"

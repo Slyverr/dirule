@@ -4,8 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
 rust-version.workspace = true
 description = "Configuration, matching, transformation, and planning core for Dirule."
+keywords = ["glob", "file-naming", "paths", "rule-engine", "transformation"]
+categories = ["filesystem", "development-tools"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
