@@ -1,0 +1,80 @@
+name: Publish crates
+
+on:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - README.md
+      - LICENSE*
+      - .cargo/**
+      - crates/**
+      - .github/workflows/publish-crates.yml
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Check crate packages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo publish --workspace --dry-run --locked
+
+  publish:
+    name: Publish stable release to crates.io
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify release tag and workspace versions
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t tags < <(git tag --points-at "$RELEASE_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          if [ "${#tags[@]}" -ne 1 ]; then
+            echo "Expected one stable vX.Y.Z tag at $RELEASE_SHA; found ${#tags[@]}." >&2
+            exit 1
+          fi
+
+          version="${tags[0]#v}"
+          cargo metadata --no-deps --format-version 1 \
+            | jq -e --arg version "$version" '(.packages | length > 0) and all(.packages[]; .version == $version)' \
+            > /dev/null
+
+      - run: cargo publish --workspace --dry-run --locked
+
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish workspace crates
+        run: cargo publish --workspace --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

@@ -76,6 +76,25 @@ tar -xJf target/distrib/dirule-x86_64-unknown-linux-gnu.tar.xz -C "$smoke_dir"
 
 After the release commit is on the intended release branch and its CI checks pass, push a matching `vX.Y.Z` tag. The release workflow builds the configured archives, installers, and checksums, then creates a GitHub release. A version tag with a prerelease suffix is published as a prerelease.
 
+The `Publish crates` workflow runs `cargo publish --workspace --dry-run --locked` on relevant pull requests. This checks the crate archives without uploading them. For a stable release, it waits for the GitHub `Release` workflow to succeed, checks that the tag and all workspace package versions match, then publishes with crates.io Trusted Publishing. Prerelease tags and failed release runs do not publish. GitHub only starts `workflow_run` workflows that exist on the default branch.
+
+The `dirule` CLI depends on the other workspace crates, so publish all five packages together in lockstep. Before the first upload, review the crate names, versions, metadata, and packaged files: crates.io does not let you delete a published version.
+
+The first upload is a one-time manual step because crates.io cannot configure trusted publishers for crates that do not exist yet. For that initial release, publish manually **before** merging `publish-crates.yml` into the default branch; otherwise the workflow may also try to publish the same tag. From the checkout containing the intended release version, inspect and validate the packages:
+
+```sh
+cargo package --workspace --list --locked
+cargo publish --workspace --dry-run --locked
+```
+
+After the dry run succeeds and the package contents are reviewed, authenticate Cargo locally with a crates.io API token (`cargo login` reads it from stdin) and upload once:
+
+```sh
+cargo publish --workspace --locked
+```
+
+Then add a trusted publisher on crates.io for **each** package, using owner `Slyverr`, repository `dirule`, workflow `publish-crates.yml`, and GitHub Actions environment `crates-io`. Merge the workflow into the default branch after the initial upload and publisher setup, and before the next stable tag. Future stable tags can then publish automatically. Do not store the API token in the repository or GitHub secrets; the workflow exchanges GitHub's OIDC identity for a short-lived token.
+
 ## Commits
 
 Use this first-line format:
