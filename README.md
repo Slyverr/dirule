@@ -53,7 +53,7 @@ dirule check
 Rules live in the project's `dirule.toml`. Put specific rules before general rules because the first matching rule owns each original path.
 
 ```toml
-version = "1.4"
+version = "1.5"
 target = "."
 
 [[rules]]
@@ -115,7 +115,7 @@ dirule runs show RUN_ID
 dirule undo RUN_ID
 ```
 
-The journal stores paths and filesystem metadata, not file contents. It is recovery history, not a backup. Dirule verifies paths before undoing and will not overwrite a file that has changed or appeared since the run. See [Usage](https://github.com/Slyverr/dirule/blob/main/docs/usage.md#review-and-undo-applied-runs) for preset management and run details.
+The journal does not copy renamed files. When LSP updates references, it stores the complete before-and-after text of changed source documents so undo can restore them. It is recovery history, not a general backup. Dirule verifies paths before undoing and will not overwrite a file that has changed or appeared since the run. See [Usage](https://github.com/Slyverr/dirule/blob/main/docs/usage.md#review-and-undo-applied-runs) for run details.
 
 ## Use with coding agents
 

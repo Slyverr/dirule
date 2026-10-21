@@ -74,7 +74,7 @@ dirule runs show RUN_ID
 dirule undo RUN_ID
 ```
 
-Undo asks for confirmation; use `--yes` in a non-interactive session. Dirule refuses to overwrite a path or undo a file whose recorded identity has changed. It removes only empty destination-parent directories that the run created. The journal stores paths and filesystem metadata, not file contents, so it is recovery history rather than a backup. See the [journal specification](specs/dirule-journal.md) for recovery details.
+Undo asks for confirmation; use `--yes` in a non-interactive session. Dirule refuses to overwrite a path or undo a file whose recorded identity has changed. It removes only empty destination-parent directories that the run created. The journal does not copy renamed files, but it stores complete before-and-after text for source documents changed by LSP reference updates so undo can restore them. It is recovery history, not a general file backup. See the [journal specification](specs/dirule-journal.md) for recovery details.
 
 ## Output for scripts
 
