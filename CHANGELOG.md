@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Reusable GitHub Actions workflow that installs a pinned Dirule release and checks project paths.
+
 ## Version 0.4.1
 
 ### Added

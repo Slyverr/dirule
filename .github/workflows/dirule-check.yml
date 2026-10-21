@@ -1,0 +1,32 @@
+name: Dirule path check
+
+on:
+  workflow_call:
+    inputs:
+      dirule-version:
+        description: Published Dirule version to install from crates.io.
+        required: false
+        type: string
+        default: "0.4.1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check project paths
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Dirule
+        env:
+          DIRULE_VERSION: ${{ inputs.dirule-version }}
+        run: cargo install --locked --version "$DIRULE_VERSION" dirule
+
+      - name: Check project paths
+        run: dirule check --color never

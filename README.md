@@ -98,7 +98,7 @@ Commit `dirule.toml` with the project and run:
 dirule check --format json --color never
 ```
 
-The command does not rename anything. It exits `0` when paths comply, `1` when a rename or conflict is found, and `2` when Dirule cannot complete the check. The [CI guide](https://github.com/Slyverr/dirule/blob/main/docs/ci.md) shows how to run the check in GitHub Actions or pre-commit.
+The command does not rename anything. It exits `0` when paths comply, `1` when a rename or conflict is found, and `2` when Dirule cannot complete the check. The [CI guide](https://github.com/Slyverr/dirule/blob/main/docs/ci.md) includes a reusable GitHub Actions workflow and a pre-commit hook.
 
 ## Review and undo
 

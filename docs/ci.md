@@ -12,16 +12,37 @@ Successful JSON output goes to stdout. A check that finds violations also writes
 
 ## GitHub Actions
 
-After checking out the project and setting up Rust, install a pinned Dirule release and run the check:
+The reusable workflow checks out the calling repository, installs a pinned Dirule release from crates.io, and runs `dirule check` on Ubuntu:
 
 ```yaml
+name: Dirule
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: Slyverr/dirule/.github/workflows/dirule-check.yml@main
+    with:
+      dirule-version: "0.4.1"
+```
+
+The workflow version reference and CLI version are independent: use a full commit SHA instead of `@main` when you need to pin the workflow itself, and update `dirule-version` when upgrading the CLI. A failing check exits nonzero and fails the job.
+
+For a custom job or runner, install Dirule and run the check directly:
+
+```yaml
+- uses: actions/checkout@v7
+- uses: dtolnay/rust-toolchain@stable
 - name: Install Dirule
-  run: cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.4.0 dirule
+  run: cargo install --locked --version 0.4.1 dirule
 - name: Check project paths
   run: dirule check --color never
 ```
-
-The pinned tag makes CI reproducible; update it when upgrading Dirule. A failing check exits nonzero and fails the job.
 
 ## Pre-commit
 
