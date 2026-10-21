@@ -8,6 +8,7 @@ Dirule is a Rust workspace for a local-first filesystem rules CLI. Use the [READ
 - When feature specs are present in `docs/specs/`, follow their explicit decisions; illustrative examples are not additional requirements.
 - Source code and tests describe what is implemented. Do not describe planned behavior as available functionality.
 - Do not convert a CLI experiment, generated output, or an uncommitted prototype into accepted product direction or a commit without the user's direction.
+- Treat the config `version` as a schema version, not a software or commit version. Group schema additions made for the same unreleased change set into one schema bump; do not bump once per field, feature, commit, or implementation pass. Before choosing the next value, check the latest schema version exposed to users and follow the migration policy in `CONTRIBUTING.md`.
 
 ## Consumer-facing agent skill
 
