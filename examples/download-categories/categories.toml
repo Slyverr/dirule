@@ -1,0 +1,11 @@
+version = "1.0"
+
+[[categories]]
+name = "spreadsheets"
+extensions = ["csv", "ods", "xls", "xlsx"]
+destination = "documents/spreadsheets"
+
+[[categories]]
+name = "archives"
+extensions = ["7z", "bz2", "gz", "rar", "tar", "xz", "zip"]
+destination = "archives"

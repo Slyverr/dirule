@@ -71,6 +71,8 @@ to = "builtin:kebab-case"
 
 The glob captures `<year>`, `<vendor>`, and `<title>` provide values for the destination template. Built-in transformations include `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`; project-specific acronyms can be listed in the config. Use `ignore` for paths Dirule must always skip, and `.diruleignore` for additional project-local exclusions. Dirule also respects VCS ignore rules. The [configuration guide](https://github.com/Slyverr/dirule/blob/main/docs/configuration.md) covers matching, targets, transformations, and exclusions.
 
+See the [project naming example](examples/project-naming/README.md) for a copyable rules config.
+
 ## Sort common files
 
 For a one-off sort, use a quick operation instead of creating a project config. These commands preview by default:
@@ -86,6 +88,8 @@ dirule rename kebab-case --target ~/Downloads
 
 A bare `sort` previews every category in the effective catalog, including custom categories and built-in overrides. It scans direct files by default; add `--recursive` for nested files. Built-in categories group common extensions into destinations such as `media/images/` and `documents/`. Add categories or customize those defaults with `categories.toml`. Quick operations use the same conflict checks and undo history as configured rules. See [Usage](https://github.com/Slyverr/dirule/blob/main/docs/usage.md#sort-and-rename-without-a-project-config) for custom categories and more examples.
 
+For a ready-to-adapt `categories.toml`, see the [custom download categories example](examples/download-categories/README.md).
+
 ## Ask a model (experimental)
 
 `dirule ask "..."` sends one request to a configured model. Run `dirule ask` in a terminal to start a conversation with follow-up turns, or pipe one request to it for scripting. The assistant can inspect and preview Dirule operations, and can create a config or apply a change after you approve the exact proposal. It does not read file contents or save conversation transcripts. See the [Ask guide](https://github.com/Slyverr/dirule/blob/main/docs/assistant.md) for provider setup, data handling, and session commands.
@@ -99,6 +103,7 @@ dirule check --format json --color never
 ```
 
 The command does not rename anything. It exits `0` when paths comply, `1` when a rename or conflict is found, and `2` when Dirule cannot complete the check. The [CI guide](https://github.com/Slyverr/dirule/blob/main/docs/ci.md) includes a reusable GitHub Actions workflow and a pre-commit hook.
+For rules that report violations without renaming, see the [check-only rules example](examples/check-only/README.md).
 
 ## Review and undo
 

@@ -1,0 +1,15 @@
+version = "1.4"
+name = "Project naming"
+target = "."
+
+[[rules]]
+name = "Normalize Rust source filenames"
+match = "src/**/*.rs"
+kind = "file"
+to = "builtin:snake-case"
+
+[[rules]]
+name = "Normalize asset directory names"
+match = "assets/**"
+kind = "directory"
+to = "builtin:kebab-case"

@@ -1,0 +1,10 @@
+version = "1.4"
+name = "Check script filenames"
+target = "."
+
+[[rules]]
+name = "Require kebab-case shell script names"
+match = "scripts/**/*.sh"
+kind = "file"
+mode = "check"
+to = "builtin:kebab-case"

@@ -44,6 +44,8 @@ extensions = ["epub", "mobi"]
 destination = "reading/books"
 ```
 
+See the [custom download categories example](../examples/download-categories/README.md) for a ready-to-adapt catalog and commands.
+
 Category names and destinations are validated before scanning. Defining a built-in name replaces that category's extensions and destination. See the [quick operations specification](specs/quick-operations.md) for exact matching, recursive behavior, and category rules.
 
 Dirule changes paths only; it does not rewrite file contents or update references in source code.

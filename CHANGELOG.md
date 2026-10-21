@@ -5,6 +5,7 @@
 ### Added
 
 - Reusable GitHub Actions workflow that installs a pinned Dirule release and checks project paths.
+- Copyable examples for project naming rules, check-only rules, and custom sorting categories.
 
 ## Version 0.4.1
 
