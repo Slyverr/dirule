@@ -283,15 +283,16 @@ fn extension(path: &Path) -> Option<&str> {
 }
 
 fn server_root(target: &Path, markers: &[String]) -> PathBuf {
-    if markers.is_empty() {
-        return target.to_path_buf();
-    }
-    for candidate in target.ancestors() {
-        if markers.iter().any(|marker| candidate.join(marker).exists()) {
-            return candidate.to_path_buf();
-        }
-    }
-    target.to_path_buf()
+    let root = if markers.is_empty() {
+        target.to_path_buf()
+    } else {
+        target
+            .ancestors()
+            .find(|candidate| markers.iter().any(|marker| candidate.join(marker).exists()))
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| target.to_path_buf())
+    };
+    root.canonicalize().unwrap_or(root)
 }
 
 fn rename_files_by_root(
@@ -505,7 +506,12 @@ fn documents_to_open(
             .map_err(|error| LspError(format!("invalid rename file URI: {error}")))?
             .to_file_path()
             .map_err(|()| LspError(format!("rename operation is not a local file URI: {uri}")))?;
-        let relative = path.strip_prefix(target).map_err(|_| {
+        // File URIs may preserve a lexical alias such as macOS `/var` or a
+        // Windows non-extended path while the operation target is canonical.
+        // Resolve the existing source before enforcing the target boundary.
+        let path = canonicalize_with_missing_tail(&path)?;
+        let target = canonicalize_with_missing_tail(target)?;
+        let relative = path.strip_prefix(&target).map_err(|_| {
             LspError(format!(
                 "rename operation is outside target {}: {}",
                 target.display(),
@@ -954,52 +960,33 @@ fn edit_path(
                 "language-server edit is not a local file URI: {uri}"
             ))
         })?;
-    let normalized = normalize_absolute_path(&requested)?;
-    // `canonicalize` may use Windows' extended-length `\\?\` prefix, while
-    // file URIs use a normal drive or UNC prefix. Normalize both before
-    // comparing paths that may not exist yet, such as post-rename URIs.
-    let normalized_target = Url::from_file_path(target)
-        .ok()
-        .and_then(|url| url.to_file_path().ok())
-        .map(|path| normalize_absolute_path(&path))
-        .transpose()?
-        .unwrap_or_else(|| target.to_path_buf());
-
-    // Existing source URIs are the common LSP response form. Resolve them
-    // canonically so symlink aliases cannot escape the operation target.
-    if let Ok(canonical) = requested.canonicalize() {
-        if !canonical.starts_with(target) {
-            return Err(LspError(format!(
-                "language-server edit is outside target {}: {}",
-                target.display(),
-                canonical.display()
-            )));
-        }
-        if let Ok(relative) = canonical.strip_prefix(target)
-            && scanned_files.contains(relative)
-        {
-            return Ok(canonical);
-        }
-    }
-
+    // Resolve existing ancestors as well as OS-specific path aliases. The
+    // final component may not exist yet when the server returns a post-rename
+    // URI, so canonicalize the longest existing prefix and append its tail.
+    let normalized = canonicalize_with_missing_tail(&requested)?;
+    let normalized_target = canonicalize_with_missing_tail(target)?;
     let requested_relative = normalized.strip_prefix(&normalized_target).map_err(|_| {
         LspError(format!(
             "language-server edit is outside target {}: {}",
-            target.display(),
+            normalized_target.display(),
             normalized.display()
         ))
     })?;
 
+    if scanned_files.contains(requested_relative) {
+        return Ok(normalized);
+    }
+
     // A server may key an edit by the post-rename URI, which does not exist
     // until apply. Translate that URI back to its scanned source document.
     if let Some(source) = destination_sources.get(requested_relative) {
-        let canonical = target.join(source).canonicalize().map_err(|error| {
+        let canonical = canonicalize_with_missing_tail(&target.join(source)).map_err(|error| {
             LspError(format!(
                 "cannot resolve scanned language-server document {}: {error}",
                 source.display()
             ))
         })?;
-        if canonical.starts_with(target) && scanned_files.contains(source) {
+        if canonical.starts_with(&normalized_target) && scanned_files.contains(source) {
             return Ok(canonical);
         }
     }
@@ -1010,6 +997,62 @@ fn edit_path(
         "language server returned an edit for a document Dirule did not scan: {}",
         requested_relative.display()
     )))
+}
+
+fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, LspError> {
+    let normalized = normalize_absolute_path(path)?;
+    let mut existing = normalized.as_path();
+    let mut missing = Vec::new();
+
+    loop {
+        match existing.canonicalize() {
+            Ok(mut canonical) => {
+                for component in missing.into_iter().rev() {
+                    canonical.push(component);
+                }
+                return normalize_absolute_path(&canonical);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // Do not treat a broken symlink as an ordinary missing path
+                // component. That could otherwise hide an escaping symlink.
+                match fs::symlink_metadata(existing) {
+                    Ok(_) => {
+                        return Err(LspError(format!(
+                            "cannot resolve language-server path {}: {error}",
+                            path.display()
+                        )));
+                    }
+                    Err(metadata_error) if metadata_error.kind() == io::ErrorKind::NotFound => {}
+                    Err(metadata_error) => {
+                        return Err(LspError(format!(
+                            "cannot inspect language-server path {}: {metadata_error}",
+                            path.display()
+                        )));
+                    }
+                }
+
+                let Some(name) = existing.file_name() else {
+                    return Err(LspError(format!(
+                        "cannot resolve language-server path {}: {error}",
+                        path.display()
+                    )));
+                };
+                missing.push(name.to_os_string());
+                existing = existing.parent().ok_or_else(|| {
+                    LspError(format!(
+                        "cannot resolve language-server path {}: {error}",
+                        path.display()
+                    ))
+                })?;
+            }
+            Err(error) => {
+                return Err(LspError(format!(
+                    "cannot resolve language-server path {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
 }
 
 fn normalize_absolute_path(path: &Path) -> Result<PathBuf, LspError> {
@@ -1351,6 +1394,24 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn missing_path_tail_resolves_through_symlinked_ancestor() {
+        let directory = tempfile::tempdir().expect("create temporary directory");
+        let target = directory.path().join("target");
+        let alias = directory.path().join("alias");
+        fs::create_dir(&target).expect("create target directory");
+        std::os::unix::fs::symlink(&target, &alias).expect("create target alias");
+
+        let requested = alias.join("nested/new.rs");
+        let resolved = super::canonicalize_with_missing_tail(&requested)
+            .expect("resolve missing path below the symlink");
+        assert_eq!(
+            resolved,
+            target.canonicalize().unwrap().join("nested/new.rs")
+        );
+    }
+
     #[test]
     fn renamed_files_are_grouped_by_language_server_root_below_target() {
         let directory = tempfile::tempdir().expect("create multi-project target");
@@ -1385,8 +1446,22 @@ mod tests {
         .expect("group rename operations by workspace marker");
 
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups.get(&rust_root).map(Vec::len), Some(1));
-        assert_eq!(groups.get(&typescript_root).map(Vec::len), Some(1));
+        assert_eq!(
+            groups
+                .get(&rust_root.canonicalize().expect("canonical Rust root"))
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            groups
+                .get(
+                    &typescript_root
+                        .canonicalize()
+                        .expect("canonical TypeScript root")
+                )
+                .map(Vec::len),
+            Some(1)
+        );
     }
 
     #[test]
