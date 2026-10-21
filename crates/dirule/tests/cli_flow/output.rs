@@ -476,7 +476,7 @@ fn cli_plan_shows_language_server_reference_diffs() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Reference updates:"), "{stdout}");
     assert!(
-        stdout.contains(&Path::new("src/api.rs").display().to_string()),
+        stdout.contains(&Path::new("src").join("api.rs").display().to_string()),
         "{stdout}"
     );
     assert!(
