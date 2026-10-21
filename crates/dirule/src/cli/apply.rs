@@ -21,6 +21,7 @@ pub(super) fn execute(
         output::plan(
             target,
             plan,
+            preview.reference_updates(),
             options.format,
             options.color,
             output::PlanContext::Apply,
@@ -30,6 +31,7 @@ pub(super) fn execute(
         output::plan_to_stderr(
             target,
             plan,
+            preview.reference_updates(),
             options.color,
             output::PlanContext::Apply,
             options.verbose,
@@ -43,9 +45,11 @@ pub(super) fn execute(
         output::apply_result(
             target,
             plan,
+            preview.reference_updates(),
             output::ApplySummary {
                 status: output::ApplyStatus::NoChanges,
                 moved: 0,
+                reference_files: 0,
                 skipped: 0,
                 run_id: None,
             },
@@ -63,9 +67,11 @@ pub(super) fn execute(
         output::apply_result(
             target,
             plan,
+            preview.reference_updates(),
             output::ApplySummary {
                 status: output::ApplyStatus::Cancelled,
                 moved: 0,
+                reference_files: 0,
                 skipped: 0,
                 run_id: None,
             },
@@ -80,14 +86,17 @@ pub(super) fn execute(
         args::ConflictAction::Abort => ConflictPolicy::Abort,
         args::ConflictAction::Skip => ConflictPolicy::Skip,
     };
+    let reference_updates = preview.reference_updates().clone();
     let journal = dirule_app::journal::JournalService::user()?;
     let applied = dirule_app::apply_authorized(preview, policy, &journal)?;
     output::apply_result(
         &applied.target,
         &applied.plan,
+        &reference_updates,
         output::ApplySummary {
             status: output::ApplyStatus::Applied,
             moved: applied.report.moved.len(),
+            reference_files: applied.reference_files,
             skipped: applied.report.skipped.len(),
             run_id: applied.run_id.as_deref(),
         },

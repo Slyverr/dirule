@@ -53,6 +53,9 @@ impl ApprovalHandler for InteractiveApproval {
                     }
                     continue;
                 }
+                dirule_assistant::ToolChange::RestoreFileContents { path } => {
+                    format!("  Restore file contents {path:?}")
+                }
             };
             writeln!(output, "{line}").map_err(|error| ToolError::new(error.to_string()))?;
         }

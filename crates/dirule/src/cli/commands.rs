@@ -31,6 +31,7 @@ pub(super) fn run(
             output::plan(
                 target,
                 result,
+                preview.reference_updates(),
                 format,
                 color,
                 output::PlanContext::Check,
@@ -53,6 +54,7 @@ pub(super) fn run(
             output::plan(
                 target,
                 result,
+                preview.reference_updates(),
                 format,
                 color,
                 output::PlanContext::Preview,
@@ -100,6 +102,9 @@ pub(super) fn run(
         },
         args::CliCommand::Undo(options) => journal::undo(options, color),
         args::CliCommand::Ask(options) => assistant::ask(options, color),
+        args::CliCommand::Lsp(options) => match options.command {
+            args::LspCommand::Status(status) => config::lsp_status(status.rules),
+        },
         args::CliCommand::Completions { shell } => {
             let mut command = args::Cli::command();
             let binary_name = command.get_name().to_owned();

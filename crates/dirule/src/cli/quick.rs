@@ -70,6 +70,7 @@ fn execute(
         output::plan(
             target,
             plan,
+            &dirule_app::ReferenceUpdatePreview::default(),
             format,
             color,
             output::PlanContext::Preview,

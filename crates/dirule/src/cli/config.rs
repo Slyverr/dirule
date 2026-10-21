@@ -30,6 +30,57 @@ pub(super) fn validate(
     Ok(())
 }
 
+pub(super) fn lsp_status(rules: args::RuleSourceArgs) -> Result<(), Box<dyn Error>> {
+    let cwd = std::env::current_dir()?;
+    let source = config_source(&cwd, rules, None)?;
+    let loaded = load_configuration(&source)?;
+    let servers = &loaded.config().lsp.servers;
+
+    if servers.is_empty() {
+        println!(
+            "No language servers are configured in {}.",
+            loaded.path().display()
+        );
+
+        return Ok(());
+    }
+
+    println!("Language servers from {}:", loaded.path().display());
+    let config_directory = loaded.path().parent().unwrap_or(&cwd);
+    let mut missing = Vec::new();
+
+    for server in servers {
+        let languages = server
+            .languages
+            .iter()
+            .map(|(extension, language)| format!(".{extension} ({language})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        match resolve_executable(&server.command, config_directory) {
+            Some(path) => println!(
+                "  {} [{languages}] -> {}",
+                server.command.display(),
+                path.display()
+            ),
+            None => {
+                println!("  {} [{languages}] -> not found", server.command.display());
+                missing.push(server.command.display().to_string());
+            }
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(format!(
+            "{} configured language-server executable(s) could not be found in PATH or relative to the config file: {}",
+            missing.len(),
+            missing.join(", ")
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 pub(super) fn evaluate(
     options: args::OperationArgs,
 ) -> Result<dirule_app::Preview, Box<dyn Error>> {
@@ -94,5 +145,64 @@ fn preview_source_error(error: dirule_app::PreviewSourceError) -> Box<dyn Error>
         )
         .into(),
         error => Box::new(error),
+    }
+}
+
+fn resolve_executable(command: &Path, config_directory: &Path) -> Option<std::path::PathBuf> {
+    let has_path_component = command.is_absolute() || command.components().count() > 1;
+    let candidates = if has_path_component {
+        let path = if command.is_absolute() {
+            command.to_path_buf()
+        } else {
+            config_directory.join(command)
+        };
+        executable_candidates(&path)
+    } else {
+        std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+            .flat_map(|directory| executable_candidates(&directory.join(command)))
+            .collect()
+    };
+
+    candidates.into_iter().find(|path| is_executable_file(path))
+}
+
+#[cfg(windows)]
+fn executable_candidates(path: &Path) -> Vec<std::path::PathBuf> {
+    if path.extension().is_some() {
+        return vec![path.to_path_buf()];
+    }
+
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    extensions
+        .split(';')
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| path.with_extension(extension.trim_start_matches('.')))
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn executable_candidates(path: &Path) -> Vec<std::path::PathBuf> {
+    vec![path.to_path_buf()]
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
     }
 }

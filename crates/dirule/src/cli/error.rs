@@ -129,7 +129,9 @@ fn classify_error_category(error: &(dyn Error + 'static)) -> CliErrorCategory {
                 | dirule_app::PreviewError::EntryLimitExceeded { .. } => {
                     return CliErrorCategory::Scan;
                 }
-                dirule_app::PreviewError::Plan(_) => return CliErrorCategory::Configuration,
+                dirule_app::PreviewError::Plan(_) | dirule_app::PreviewError::Lsp(_) => {
+                    return CliErrorCategory::Configuration;
+                }
                 dirule_app::PreviewError::Destinations(_) => return CliErrorCategory::Apply,
                 dirule_app::PreviewError::Operation(_) => return CliErrorCategory::Command,
             }

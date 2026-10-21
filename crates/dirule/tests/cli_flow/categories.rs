@@ -24,7 +24,7 @@ fn category_listing_reports_effective_user_and_builtin_categories() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(value["categories"][0]["name"], "audio");
     assert_eq!(value["categories"][1]["name"], "documents");
     assert_eq!(value["categories"][2]["name"], "ebooks");

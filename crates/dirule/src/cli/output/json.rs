@@ -1,4 +1,5 @@
 use super::{ApplySummary, CURRENT_OUTPUT_VERSION};
+use dirule_app::ReferenceUpdatePreview;
 use dirule_core::{Conflict, Finding, Plan, PlannedEntry};
 use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
@@ -7,23 +8,37 @@ use std::fmt;
 use std::io::{self, Write};
 use std::path::Path;
 
-pub(super) fn write_plan(target: &Path, plan: &Plan) -> Result<(), Box<dyn Error>> {
-    write_document(&PlanDocument { target, plan })
+pub(super) fn write_plan(
+    target: &Path,
+    plan: &Plan,
+    reference_updates: &ReferenceUpdatePreview,
+) -> Result<(), Box<dyn Error>> {
+    write_document(&PlanDocument {
+        target,
+        plan,
+        reference_updates,
+    })
 }
 
 pub(super) fn write_apply(
     target: &Path,
     plan: &Plan,
+    reference_updates: &ReferenceUpdatePreview,
     summary: &ApplySummary<'_>,
 ) -> Result<(), Box<dyn Error>> {
     let document = ApplyDocument {
         execution: ExecutionDocument {
             moved: summary.moved,
+            reference_files: summary.reference_files,
             run_id: summary.run_id,
             skipped: summary.skipped,
             status: summary.status.as_str(),
         },
-        plan: PlanDocument { target, plan },
+        plan: PlanDocument {
+            target,
+            plan,
+            reference_updates,
+        },
         schema_version: CURRENT_OUTPUT_VERSION,
     };
 
@@ -43,6 +58,7 @@ fn write_document<T: Serialize>(document: &T) -> Result<(), Box<dyn Error>> {
 struct PlanDocument<'a> {
     target: &'a Path,
     plan: &'a Plan,
+    reference_updates: &'a ReferenceUpdatePreview,
 }
 
 impl Serialize for PlanDocument<'_> {
@@ -50,15 +66,43 @@ impl Serialize for PlanDocument<'_> {
     where
         S: Serializer,
     {
-        let mut document = serializer.serialize_struct("PlanDocument", 6)?;
+        let reference_files = self
+            .reference_updates
+            .changes
+            .iter()
+            .map(|change| ReferenceFileDocument {
+                path: change.path.to_string_lossy().into_owned(),
+                before: &change.before,
+                after: &change.after,
+            })
+            .collect::<Vec<_>>();
+        let reference_updates = ReferenceUpdatesDocument {
+            files: reference_files,
+            warnings: &self.reference_updates.warnings,
+        };
+        let mut document = serializer.serialize_struct("PlanDocument", 7)?;
         document.serialize_field("conflicts", &ConflictList(&self.plan.conflicts))?;
         document.serialize_field("diagnostics", &DiagnosticList(&self.plan.findings))?;
         document.serialize_field("entries", &EntryList(&self.plan.entries))?;
         document.serialize_field("findings", &FindingMessages(&self.plan.findings))?;
+        document.serialize_field("reference_updates", &reference_updates)?;
         document.serialize_field("schema_version", CURRENT_OUTPUT_VERSION)?;
         document.serialize_field("target", &TargetPath(self.target))?;
         document.end()
     }
+}
+
+#[derive(Serialize)]
+struct ReferenceFileDocument<'a> {
+    path: String,
+    before: &'a str,
+    after: &'a str,
+}
+
+#[derive(Serialize)]
+struct ReferenceUpdatesDocument<'a> {
+    files: Vec<ReferenceFileDocument<'a>>,
+    warnings: &'a [String],
 }
 
 struct DiagnosticList<'a>(&'a [Finding]);
@@ -118,6 +162,7 @@ struct ApplyDocument<'a> {
 #[derive(Serialize)]
 struct ExecutionDocument<'a> {
     moved: usize,
+    reference_files: usize,
     run_id: Option<&'a str>,
     skipped: usize,
     status: &'a str,

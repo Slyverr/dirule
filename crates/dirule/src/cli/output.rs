@@ -17,7 +17,7 @@ macro_rules! eprintln {
     }};
 }
 
-const CURRENT_OUTPUT_VERSION: &str = "1.4";
+const CURRENT_OUTPUT_VERSION: &str = "1.5";
 
 mod apply;
 mod assistant;

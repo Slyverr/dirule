@@ -63,7 +63,7 @@ fn json_command_errors_emit_a_versioned_error_document_to_stderr() {
     assert!(output.stdout.is_empty());
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("command error is a JSON document");
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(value["error"]["code"], "command_error");
     assert_eq!(value["error"]["kind"], "configuration");
     assert_eq!(value["error"]["exit_code"], 2);
@@ -94,7 +94,7 @@ fn json_command_errors_classify_unavailable_targets() {
     assert!(output.stdout.is_empty());
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("target error is a JSON document");
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(value["error"]["code"], "command_error");
     assert_eq!(value["error"]["kind"], "target");
     assert_eq!(value["error"]["exit_code"], 2);
@@ -109,7 +109,7 @@ fn json_journal_errors_are_classified() {
     assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("journal error is a JSON document");
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(value["error"]["kind"], "journal");
 }
 
@@ -135,7 +135,7 @@ fn json_config_selection_errors_are_classified() {
     assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value =
         serde_json::from_slice(&output.stderr).expect("selection error is a JSON document");
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(value["error"]["kind"], "configuration_selection");
 }
 
@@ -247,7 +247,7 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
 
     assert_eq!(check.status.code(), Some(1));
     let value: serde_json::Value = serde_json::from_slice(&check.stdout).expect("valid check JSON");
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     let entries = value["entries"].as_array().expect("entries array");
     assert!(
         entries.iter().any(|entry| {
@@ -262,7 +262,7 @@ fn check_json_reports_violations_with_failure_status_without_mutation() {
     );
     let error: serde_json::Value =
         serde_json::from_slice(&check.stderr).expect("check failure is a JSON document");
-    assert_eq!(error["schema_version"], "1.4");
+    assert_eq!(error["schema_version"], "1.5");
     assert_eq!(error["error"]["code"], "check_failed");
     assert_eq!(error["error"]["kind"], "check_failure");
     assert_eq!(error["error"]["exit_code"], 1);
@@ -355,7 +355,7 @@ fn plan_json_keeps_finding_messages_and_exposes_structured_diagnostics() {
     let output = project.run(&["plan", "--format", "json"]);
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
 
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(
         value["findings"],
         serde_json::json!(["skipped symlink MyLink"])
@@ -459,4 +459,193 @@ fn plan_json_reports_git_tracked_non_unicode_path_diagnostics() {
                 diagnostic["kind"] == "skipped_git_non_unicode_path" && diagnostic["path"].is_null()
             })
     );
+}
+
+#[test]
+fn cli_plan_shows_language_server_reference_diffs() {
+    let project = lsp_fixture_project();
+
+    let output = project.run(&["plan"]);
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Reference updates:"), "{stdout}");
+    assert!(stdout.contains("src/api.rs"), "{stdout}");
+    assert!(
+        stdout.contains("- use crate::{HTTPClient::Client as ApiClient, model::Record};"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("+ use crate::{http_client::Client as ApiClient, model::Record};"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("- pub mod HTTPClient;"), "{stdout}");
+    assert!(stdout.contains("+ pub mod http_client;"), "{stdout}");
+    assert!(project.0.join("src/HTTPClient.rs").is_file());
+    assert!(!project.0.join("src/http_client.rs").exists());
+}
+
+#[test]
+fn cli_plan_json_includes_language_server_reference_edits() {
+    let project = lsp_fixture_project();
+
+    let output = project.run(&["plan", "--format", "json"]);
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid plan JSON");
+    assert_eq!(plan["reference_updates"]["warnings"], serde_json::json!([]));
+    let files = plan["reference_updates"]["files"]
+        .as_array()
+        .expect("reference update files");
+    let lib_path = Path::new("src/lib.rs").to_string_lossy();
+    let lib = files
+        .iter()
+        .find(|file| file["path"] == lib_path.as_ref())
+        .expect("lib.rs reference edit");
+    assert_eq!(
+        lib["before"],
+        "pub mod HTTPClient;\npub use HTTPClient::Client as SharedClient;\n"
+    );
+    assert_eq!(
+        lib["after"],
+        "pub mod http_client;\npub use http_client::Client as SharedClient;\n"
+    );
+    let api_path = Path::new("src/api.rs").to_string_lossy();
+    let api = files
+        .iter()
+        .find(|file| file["path"] == api_path.as_ref())
+        .expect("api.rs reference edit");
+    assert_eq!(
+        api["after"],
+        "use crate::{http_client::Client as ApiClient, model::Record};\n"
+    );
+    assert!(project.0.join("src/HTTPClient.rs").is_file());
+    assert!(!project.0.join("src/http_client.rs").exists());
+}
+
+#[test]
+fn cli_plan_fails_when_required_language_server_is_missing() {
+    let project = TempProject::new();
+    fs::write(project.0.join("HTTPClient.rs"), "pub struct Client;\n")
+        .expect("write Rust source fixture");
+    fs::write(
+        project.0.join("dirule.toml"),
+        format!(
+            r#"version = "{}"
+target = "."
+
+[lsp]
+reference_updates = "required"
+
+[[rules]]
+name = "Normalize Rust module filename"
+match = "HTTPClient.rs"
+kind = "file"
+to = "builtin:snake-case"
+
+[[lsp.servers]]
+command = "dirule-test-missing-lsp-server-8f0a66d2"
+
+[lsp.servers.languages]
+rs = "rust"
+"#,
+            dirule_core::CURRENT_CONFIG_VERSION
+        ),
+    )
+    .expect("write required LSP config");
+
+    let output = project.run(&["plan"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("required language-server reference update failed"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("dirule-test-missing-lsp-server-8f0a66d2"));
+    assert!(project.0.join("HTTPClient.rs").is_file());
+    assert!(!project.0.join("http_client.rs").exists());
+}
+
+fn lsp_fixture_project() -> TempProject {
+    let project = TempProject::new();
+    fs::create_dir(project.0.join("src")).expect("create Rust source directory");
+    fs::write(
+        project.0.join("Cargo.toml"),
+        "[package]\nname = \"dirule-cli-lsp-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("write Cargo workspace marker");
+    fs::write(project.0.join("src/HTTPClient.rs"), "pub struct Client;\n")
+        .expect("write module source");
+    fs::write(
+        project.0.join("src/lib.rs"),
+        "pub mod HTTPClient;\npub use HTTPClient::Client as SharedClient;\n",
+    )
+    .expect("write module references");
+    fs::write(
+        project.0.join("src/api.rs"),
+        "use crate::{HTTPClient::Client as ApiClient, model::Record};\n",
+    )
+    .expect("write API reference");
+    fs::write(project.0.join("src/model.rs"), "pub struct Record;\n").expect("write model source");
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli_flow/lsp_server.rs");
+    let executable = project.0.join(if cfg!(windows) {
+        "dirule-test-lsp-server.exe"
+    } else {
+        "dirule-test-lsp-server"
+    });
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let compiled = Command::new(rustc)
+        .arg("--edition=2024")
+        .arg(fixture)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .expect("compile CLI LSP fixture server");
+    assert!(
+        compiled.status.success(),
+        "failed to compile LSP fixture server: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let executable = format!("{:?}", executable.to_string_lossy().to_string());
+    fs::write(
+        project.0.join("dirule.toml"),
+        format!(
+            r#"version = "{}"
+target = "."
+
+[lsp]
+reference_updates = "required"
+
+[[rules]]
+name = "Normalize Rust module filename"
+match = "src/HTTPClient.rs"
+kind = "file"
+to = "builtin:snake-case"
+
+[[lsp.servers]]
+command = {executable}
+root_markers = ["Cargo.toml"]
+
+[lsp.servers.languages]
+rs = "rust"
+"#,
+            dirule_core::CURRENT_CONFIG_VERSION
+        ),
+    )
+    .expect("write project LSP config");
+    project
 }

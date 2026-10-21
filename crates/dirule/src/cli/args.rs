@@ -44,6 +44,8 @@ pub(super) enum CliCommand {
     Undo(UndoArgs),
     /// Ask a configured model to inspect and preview Dirule operations.
     Ask(AskArgs),
+    /// Inspect configured language-server executables.
+    Lsp(LspArgs),
     /// Generate shell completions.
     Completions {
         /// Shell to generate completions for.
@@ -73,9 +75,29 @@ impl CliCommand {
                 RunsCommand::List { format } | RunsCommand::Show { format, .. } => *format,
             },
             Self::Undo(options) => options.format,
-            Self::Init | Self::Ask(_) | Self::Completions { .. } => OutputFormat::Human,
+            Self::Init | Self::Ask(_) | Self::Lsp(_) | Self::Completions { .. } => {
+                OutputFormat::Human
+            }
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct LspArgs {
+    #[command(subcommand)]
+    pub(super) command: LspCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum LspCommand {
+    /// Show configured servers and whether their executables can be found.
+    Status(LspStatusArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct LspStatusArgs {
+    #[command(flatten)]
+    pub(super) rules: RuleSourceArgs,
 }
 
 #[derive(Debug, Args)]
