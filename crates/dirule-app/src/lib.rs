@@ -6,12 +6,13 @@
 use self::configuration::{ConfigurationLoadError, ConfigurationSource};
 use self::paths::HomeDirectoryUnavailable;
 use dirule_core::{
-    AcronymOptions, Config, Entry, MatcherSet, Plan, Rule, RuleKind, RuleMode, Transform,
-    plan_compiled,
+    AcronymOptions, Config, Entry, EntryKind, MatcherSet, Plan, Rule, RuleKind, RuleMode,
+    Transform, plan_compiled,
 };
 use dirule_fs::{
-    ApplyError, ApplyReport, ScanError, ScanResult, apply_journaled, scan_with_entry_limit,
-    scan_with_ignore_set, validate_destinations,
+    ApplyError, ApplyReport, FileTextEdit, ScanError, ScanResult, apply_journaled,
+    apply_journaled_with_text_edits, scan_with_entry_limit, scan_with_ignore_set,
+    validate_destinations,
 };
 use std::error::Error;
 use std::fmt;
@@ -23,16 +24,20 @@ pub mod categories;
 pub mod configuration;
 /// List and undo journaled filesystem operations.
 pub mod journal;
+mod lsp;
 /// Resolve target, configuration, and user-state paths.
 pub mod paths;
 /// Read and manage reusable user presets.
 pub mod presets;
 mod sort;
 
+pub use lsp::ReferenceChange;
+
 pub use categories::{
     CURRENT_CATEGORY_CATALOG_VERSION, CategoryCatalog, CategoryCatalogError, SortCategory,
 };
 pub use dirule_fs::ConflictPolicy;
+pub use lsp::ReferenceUpdatePreview;
 pub use sort::{
     sort_all_categories_preview, sort_by_extension_preview, sort_extension_preview,
     sort_selectors_preview, sort_selectors_preview_with_entry_limit,
@@ -50,6 +55,8 @@ pub struct Preview {
     plan: Plan,
     /// Scanned entries and findings used to validate an apply operation.
     snapshot: ScanResult,
+    /// LSP-proposed source-document edits associated with the plan.
+    reference_updates: ReferenceUpdatePreview,
 }
 
 /// A bounded, read-only listing of paths visible to Dirule in one target.
@@ -77,6 +84,11 @@ impl Preview {
     pub fn snapshot(&self) -> &ScanResult {
         &self.snapshot
     }
+
+    /// Return proposed LSP reference edits and best-effort warnings.
+    pub fn reference_updates(&self) -> &ReferenceUpdatePreview {
+        &self.reference_updates
+    }
 }
 
 /// The result of applying a previously reviewed preview.
@@ -89,6 +101,8 @@ pub struct Applied {
     pub report: ApplyReport,
     /// Journal run identifier, when the apply created a journal entry.
     pub run_id: Option<String>,
+    /// Number of source documents updated by language-server edits.
+    pub reference_files: usize,
 }
 
 #[derive(Debug)]
@@ -114,6 +128,8 @@ pub enum PreviewError {
     Plan(dirule_core::Error),
     /// A proposed destination failed filesystem validation.
     Destinations(ApplyError),
+    /// A configured language server could not safely prepare reference edits.
+    Lsp(String),
 }
 
 impl fmt::Display for PreviewError {
@@ -134,6 +150,7 @@ impl fmt::Display for PreviewError {
             Self::Scan(source) => fmt::Display::fmt(source, formatter),
             Self::Plan(source) => fmt::Display::fmt(source, formatter),
             Self::Destinations(source) => fmt::Display::fmt(source, formatter),
+            Self::Lsp(message) => formatter.write_str(message),
         }
     }
 }
@@ -146,6 +163,7 @@ impl Error for PreviewError {
             Self::Scan(source) => Some(source),
             Self::Plan(source) => Some(source),
             Self::Destinations(source) => Some(source),
+            Self::Lsp(_) => None,
         }
     }
 }
@@ -273,6 +291,7 @@ pub fn preview_with_entry_limit(
         target,
         plan,
         snapshot,
+        reference_updates: ReferenceUpdatePreview::default(),
     })
 }
 
@@ -304,8 +323,17 @@ pub fn preview_source_with_entry_limit(
         paths::resolve_operation_target(base, explicit_target, loaded.config().target.clone())
             .map_err(PreviewSourceError::Target)?;
 
-    preview_with_entry_limit(loaded.config(), &target, maximum_entries)
-        .map_err(PreviewSourceError::Preview)
+    let mut preview = preview_with_entry_limit(loaded.config(), &target, maximum_entries)
+        .map_err(PreviewSourceError::Preview)?;
+    preview.reference_updates = lsp::preview_reference_updates(
+        loaded.config(),
+        loaded.path(),
+        &preview.target,
+        &preview.snapshot.entries,
+        &preview.plan,
+    )
+    .map_err(|error| PreviewSourceError::Preview(PreviewError::Lsp(error.to_string())))?;
+    Ok(preview)
 }
 
 /// Inspect visible target entries without building a plan or reading file contents.
@@ -341,13 +369,55 @@ pub fn apply_authorized(
         target,
         plan,
         snapshot,
+        reference_updates,
     } = preview;
-    let applied = apply_journaled(&target, &plan, &snapshot, policy, journal.store())?;
+    let mut text_edits = Vec::with_capacity(reference_updates.changes.len());
+    for change in &reference_updates.changes {
+        let path = mapped_destination(&change.path, &plan);
+        text_edits.push(FileTextEdit {
+            path,
+            before: change.before.clone(),
+            after: change.after.clone(),
+        });
+    }
+    if policy == ConflictPolicy::Skip && !text_edits.is_empty() {
+        return Err(ApplyError::ReferenceEditsRequireAbort);
+    }
+    let reference_files = text_edits.len();
+    let applied = if text_edits.is_empty() {
+        apply_journaled(&target, &plan, &snapshot, policy, journal.store())?
+    } else {
+        apply_journaled_with_text_edits(
+            &target,
+            &plan,
+            &snapshot,
+            policy,
+            &text_edits,
+            journal.store(),
+        )?
+    };
 
     Ok(Applied {
         target,
         plan,
         report: applied.report,
         run_id: applied.run_id,
+        reference_files,
     })
+}
+
+fn mapped_destination(path: &Path, plan: &Plan) -> PathBuf {
+    if let Some(entry) = plan.entries.iter().find(|entry| entry.source == path) {
+        return entry.destination.clone();
+    }
+    plan.entries
+        .iter()
+        .filter(|entry| entry.kind == EntryKind::Directory && path.starts_with(&entry.source))
+        .max_by_key(|entry| entry.source.components().count())
+        .map(|entry| {
+            entry
+                .destination
+                .join(path.strip_prefix(&entry.source).unwrap_or(path))
+        })
+        .unwrap_or_else(|| path.to_path_buf())
 }
