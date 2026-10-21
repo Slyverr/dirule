@@ -32,6 +32,20 @@ cargo deny check
 
 For changes to rule behavior, cover the behavior and its edge cases. For filesystem changes, also cover conflicts, ignored paths, and failure paths. State which checks ran when reporting the change.
 
+## GitHub workflows
+
+The repository uses separate workflows for code validation, dependency policy, crate publishing, and downloadable GitHub releases. A green CI run validates code; it does not publish packages or create a release.
+
+| Workflow | When it runs | What it does |
+| --- | --- | --- |
+| `CI` (`ci.yml`) | Branch pushes, pull requests, or manual runs | Skips the expensive jobs for documentation-only changes. Otherwise checks the Nix package, runs format/check/test/Clippy on Rust 1.88, and runs check/test/Clippy plus CLI install smoke tests on stable Rust for Linux, macOS, and Windows. Version tags are handled by `Release`, not by this workflow. |
+| `Dependency audit` (`dependency-audit.yml`) | Dependency-policy changes in pull requests or pushes to `main`/`develop`; weekly; or manually | Runs `cargo deny` against the workspace dependencies. |
+| `Publish crates` (`publish-crates.yml`) | Relevant pull requests; or called by `Release` | Pull requests dry-run packaging. On a stable version tag, it tests on Linux, macOS, and Windows, verifies that the tag matches every workspace version and points to a commit on `main`, and dry-runs only crate versions that are not already on crates.io. It publishes missing versions through Trusted Publishing and safely skips versions already uploaded. |
+| `Release` (`release.yml`) | Pull requests; or version tags such as `v0.5.0` | Pull requests validate the cargo-dist plan. A pushed version tag builds the configured archives, installers, and checksums, then calls `Publish crates`. It creates the GitHub Release only after crate publishing succeeds. Prerelease tags create prereleases and skip crates.io publishing. |
+| `Dirule path check` (`dirule-check.yml`) | Only when another repository calls this reusable workflow | Installs a selected published Dirule version and runs `dirule check` in that repository. It does not run automatically as part of this repository's CI. |
+
+The release tag is the single release trigger. Update all workspace package versions and the changelog, merge that commit to `main`, wait for CI to pass, then push a matching `vX.Y.Z` tag at that commit. The tag run builds the downloadable assets, checks the tag is on `main`, publishes any crate versions that are not already on crates.io, and creates the GitHub Release only after publishing succeeds. Re-running the same tag does not try to upload versions that already exist. A normal branch push never publishes or announces a release. Repository rulesets must mark checks as required if pushes or merges should be blocked until they pass.
+
 Put integration tests for public behavior in the crate's `tests/` directory and group larger suites by behavior. For a multi-file suite, use one integration-test entry point with sibling modules, such as `tests/cli_flow.rs` and `tests/cli_flow/`; keep shared fixtures in that suite's `common.rs`. Exercise public APIs as a downstream caller would, or invoke the real CLI in an isolated temporary project. Keep focused unit tests beside the implementation only when they need private behavior that cannot be covered meaningfully through the public API; do not expose internals just to test them. Avoid duplicating the same behavior at both levels or collecting crate-wide behavior tests in `lib.rs`.
 
 Prefer real deterministic logic over mocks. Use mocks or fakes at genuine external boundaries when they make a test more reliable; use temporary directories for filesystem behavior and invoke the CLI for end-to-end command behavior.
@@ -76,9 +90,7 @@ tar -xJf target/distrib/dirule-x86_64-unknown-linux-gnu.tar.xz -C "$smoke_dir"
 "$smoke_dir/dirule-x86_64-unknown-linux-gnu/dirule" --version
 ```
 
-After a lockstep release version is merged to `main` and pushed, the `Publish crates` workflow runs automatically because the workspace manifests changed. It tests the workspace on Linux, macOS, and Windows, checks that every package has the same stable version, runs a crates.io dry run, then publishes all five packages with Trusted Publishing. It does not run for ordinary pushes that do not change Cargo version manifests.
-
-Once the crate publishing checks pass, push a matching `vX.Y.Z` tag. The `Release` workflow builds the configured archives, installers, and checksums, then creates a GitHub release. A version tag with a prerelease suffix is published as a prerelease. Relevant pull requests also run `cargo publish --workspace --dry-run --locked`; this checks package contents without uploading.
+Relevant pull requests run `cargo publish --workspace --dry-run --locked` to check package contents without uploading. The tag workflow uses crates.io's public version endpoint to avoid duplicate uploads, fails closed if that check cannot be completed, and publishes only versions that are still missing. Crates.io publishing uses a short-lived Trusted Publishing token; no registry token belongs in GitHub secrets.
 
 The `dirule` CLI depends on the other workspace crates, so publish all five packages together in lockstep. Before the first upload, review the crate names, versions, metadata, and packaged files: crates.io does not let you delete a published version.
 
@@ -95,7 +107,9 @@ After the dry run succeeds and the package contents are reviewed, authenticate C
 cargo publish --workspace --locked
 ```
 
-Dirule's five crates already have an initial published version. Before merging the next version bump to `main`, configure a trusted publisher on crates.io for **each** crate, using owner `Slyverr`, repository `dirule`, workflow `publish-crates.yml`, and GitHub Actions environment `crates-io`. The workflow exchanges GitHub's OIDC identity for a short-lived token. Do not store a crates.io API token in the repository or GitHub secrets.
+Dirule's five crates already have an initial published version. Configure a trusted publisher on crates.io for **each** crate, using owner `Slyverr`, repository `dirule`, workflow `release.yml`, and GitHub Actions environment `crates-io`. The tag-triggered release workflow calls the reusable publisher and exchanges GitHub's OIDC identity for a short-lived token. Do not store a crates.io API token in the repository or GitHub secrets. If a crate is already configured for `publish-crates.yml`, update its workflow filename to `release.yml` before the next tag that needs to upload a new version.
+
+The generated cargo-dist workflow keeps `contents: write` only on the job that creates the GitHub Release; other jobs retain read-only permissions, and the release job does not inherit repository secrets. `cargo-dist` cannot currently express that built-in job permission split. To regenerate `.github/workflows/release.yml`, temporarily remove `allow-dirty = ["ci"]`, run `cargo dist generate --mode ci`, restore the permission split and remove secret inheritance, then restore `allow-dirty = ["ci"]`.
 
 ## Commits
 

@@ -28,7 +28,7 @@ jobs:
   check:
     uses: Slyverr/dirule/.github/workflows/dirule-check.yml@main
     with:
-      dirule-version: "0.4.1"
+      dirule-version: "0.5.0"
 ```
 
 The workflow version reference and CLI version are independent: use a full commit SHA instead of `@main` when you need to pin the workflow itself, and update `dirule-version` when upgrading the CLI. A failing check exits nonzero and fails the job.
@@ -39,7 +39,7 @@ For a custom job or runner, install Dirule and run the check directly:
 - uses: actions/checkout@v7
 - uses: dtolnay/rust-toolchain@stable
 - name: Install Dirule
-  run: cargo install --locked --version 0.4.1 dirule
+  run: cargo install --locked --version 0.5.0 dirule
 - name: Check project paths
   run: dirule check --color never
 ```

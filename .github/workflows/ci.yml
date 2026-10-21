@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -16,15 +17,15 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      code: ${{ steps.filter_fallback.outputs.code || steps.filter.outputs.code }}
+      code: ${{ steps.filter_fallback.outputs.code || steps.filter.outputs.code || 'true' }}
 
     steps:
       - uses: actions/checkout@v7
-        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
 
       - name: Filter code changes
         id: filter
-        if: github.event_name != 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
+        if: github.event_name != 'workflow_dispatch'
         continue-on-error: true
         uses: dorny/paths-filter@v4
         with:
@@ -62,8 +63,6 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: nix flake check --all-systems --no-build
-      - run: nix develop --command cargo fmt --all -- --check
-      - run: nix develop --command cargo deny check
       - run: nix build --no-link .#dirule
       - run: nix run .#dirule -- --version
       - run: nix run .#dirule -- check --color never
@@ -89,6 +88,7 @@ jobs:
             ~/.cargo/git
             target
           key: msrv-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: msrv-cargo-
 
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --locked
@@ -111,7 +111,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy
 
       - uses: actions/cache@v6
         with:
@@ -122,7 +122,6 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - run: cargo fmt --all -- --check
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
       - run: cargo run -p dirule -- check --color never

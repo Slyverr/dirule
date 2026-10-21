@@ -1,11 +1,6 @@
 name: Publish crates
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - Cargo.toml
-      - crates/**/Cargo.toml
   pull_request:
     paths:
       - Cargo.toml
@@ -15,6 +10,12 @@ on:
       - .cargo/**
       - crates/**
       - .github/workflows/publish-crates.yml
+  workflow_call:
+    inputs:
+      plan:
+        description: Release plan passed by cargo-dist.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -27,15 +28,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-
       - uses: dtolnay/rust-toolchain@stable
-
       - run: cargo publish --workspace --dry-run --locked
 
   verify-release:
-    name: Verify release (${{ matrix.os }})
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Test release (${{ matrix.os }})
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -49,12 +49,133 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
       - run: cargo test --workspace --locked
 
-  publish:
-    name: Publish workspace to crates.io
+  prepare-release:
+    name: Validate version and package crates
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
     needs: verify-release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      published: ${{ steps.registry.outputs.published }}
+      should_publish: ${{ steps.registry.outputs.should_publish }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag and workspace versions
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable releases must use a vMAJOR.MINOR.PATCH tag; found '$GITHUB_REF_NAME'." >&2
+            exit 1
+          fi
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+          workspace_version="$(jq -er '.packages[] | select(.name == "dirule") | .version' <<< "$metadata")"
+          if [[ "$tag_version" != "$workspace_version" ]]; then
+            echo "Tag '$GITHUB_REF_NAME' does not match the dirule package version '$workspace_version'." >&2
+            exit 1
+          fi
+          jq -e --arg version "$workspace_version" \
+            '(.packages | length > 0) and all(.packages[]; .version == $version)' \
+            <<< "$metadata" > /dev/null || {
+              echo "Every workspace crate must use the lockstep version '$workspace_version'." >&2
+              exit 1
+            }
+
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+          echo "Release tag and all workspace package versions match: $tag_version"
+
+      - name: Require the tagged commit to be on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${GITHUB_SHA}...main" --jq '.status')"
+          if [[ "$status" != "ahead" && "$status" != "identical" ]]; then
+            echo "Release commit $GITHUB_SHA is not on main (comparison status: $status)." >&2
+            exit 1
+          fi
+          echo "Release commit is reachable from main."
+
+      - name: Check which package versions are already on crates.io
+        id: registry
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+          already_published=()
+          to_publish=()
+
+          while IFS=$'\t' read -r crate version; do
+            status="$(curl --location --silent --show-error --output /dev/null \
+              --write-out '%{http_code}' --retry 3 --retry-all-errors --max-time 30 \
+              -H 'User-Agent: Dirule release workflow (https://github.com/Slyverr/dirule)' \
+              "https://crates.io/api/v1/crates/${crate}/${version}")"
+
+            case "$status" in
+              200)
+                already_published+=("$crate")
+                echo "$crate $version is already published; it will be skipped."
+                ;;
+              404)
+                to_publish+=("$crate")
+                echo "$crate $version is not published yet."
+                ;;
+              *)
+                echo "Could not determine whether $crate $version is published (crates.io returned HTTP $status)." >&2
+                exit 1
+                ;;
+            esac
+          done < <(jq -r '.packages[] | [.name, .version] | @tsv' <<< "$metadata")
+
+          published_json="$(printf '%s\n' "${already_published[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+          echo "published=$published_json" >> "$GITHUB_OUTPUT"
+
+          if ((${#to_publish[@]} == 0)); then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "All workspace crates at $RELEASE_VERSION are already published; no crates.io upload is needed."
+            echo "All workspace crates for $RELEASE_VERSION already exist on crates.io. Publishing was skipped." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          exclude_args=()
+          for crate in "${already_published[@]}"; do
+            exclude_args+=(--exclude "$crate")
+          done
+
+          echo "Dry-running the crates that still need publishing."
+          cargo publish --workspace --dry-run --locked "${exclude_args[@]}"
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          echo "Crates to publish for $RELEASE_VERSION: ${to_publish[*]}" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish new crate versions
+    needs: [verify-release, prepare-release]
+    if: needs.prepare-release.outputs.should_publish == 'true'
     runs-on: ubuntu-24.04
     environment: crates-io
     permissions:
@@ -69,28 +190,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify lockstep stable workspace versions
-        run: |
-          set -euo pipefail
-
-          metadata="$(cargo metadata --no-deps --format-version 1)"
-          version="$(jq -er '.packages[] | select(.name == "dirule") | .version' <<< "$metadata")"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Expected a stable workspace version, found '$version'." >&2
-            exit 1
-          fi
-          jq -e --arg version "$version" \
-            '(.packages | length > 0) and all(.packages[]; .version == $version)' \
-            <<< "$metadata" > /dev/null
-          echo "Publishing lockstep workspace version $version."
-
-      - run: cargo publish --workspace --dry-run --locked
-
       - name: Authenticate with crates.io
         id: auth
         uses: rust-lang/crates-io-auth-action@v1
 
-      - name: Publish workspace crates
-        run: cargo publish --workspace --locked
+      - name: Publish workspace crates not already on crates.io
+        shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          ALREADY_PUBLISHED: ${{ needs.prepare-release.outputs.published }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t already_published < <(jq -r '.[]' <<< "$ALREADY_PUBLISHED")
+          exclude_args=()
+          for crate in "${already_published[@]}"; do
+            exclude_args+=(--exclude "$crate")
+          done
+
+          cargo publish --workspace --locked "${exclude_args[@]}"
