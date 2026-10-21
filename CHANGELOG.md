@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## Version 0.5.0
+
 ### Added
 
 - Configure language servers to update source references when paths are renamed. Plans show returned edits, and apply journals them so undo can restore both paths and document text.

@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "dirule"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "dirule-app"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "dirule-core",
  "dirule-fs",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "dirule-assistant"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "dirule-app",
  "dirule-core",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "dirule-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "serde",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "dirule-fs"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "dirule-core",

@@ -12,7 +12,7 @@ keywords = ["filesystem", "file-management", "file-renaming", "ignore-rules", "u
 categories = ["filesystem"]
 
 [dependencies]
-dirule-core = { version = "0.4.1", path = "../dirule-core" }
+dirule-core = { version = "0.5.0", path = "../dirule-core" }
 fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 ignore = "0.4"
 renamore = "0.3"

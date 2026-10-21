@@ -9,7 +9,7 @@ repository = "https://github.com/Slyverr/dirule"
 homepage = "https://github.com/Slyverr/dirule"
 readme = "README.md"
 rust-version = "1.88"
-version = "0.4.1"
+version = "0.5.0"
 
 # The profile that 'dist' will build with
 [profile.dist]
