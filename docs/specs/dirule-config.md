@@ -1,4 +1,4 @@
-# Dirule configuration 1.4
+# Dirule configuration 1.5
 
 ## Purpose and scope
 
@@ -14,16 +14,27 @@ A migration must preserve the document's meaning, update its version, and produc
 
 ## Configuration shape
 
-`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `ignore` is an optional list of target-relative path patterns that excludes matching source paths before rule matching. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. `mode` accepts `apply` or `check` and defaults to `apply`. The optional per-rule `exclude` list skips entries from that rule while allowing later rules to match. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters.
+`name` is optional and labels the configuration. `target` is optional and defaults to `.`. `ignore` is an optional list of target-relative path patterns that excludes matching source paths before rule matching. `rules` is an ordered, non-empty array. Each rule may set `kind` to `any`, `file`, or `directory`; it defaults to `any`. `mode` accepts `apply` or `check` and defaults to `apply`. The optional per-rule `exclude` list skips entries from that rule while allowing later rules to match. The optional `acronyms` table lists project-specific spellings for the word splitter used by built-in case transformations and template filters. The optional `lsp` table sets a project-wide reference-update policy and configures language-server executables.
 
 ```toml
-version = "1.4"
+version = "1.5"
 name = "Downloads"
 target = "."
 ignore = ["generated/api/**", "vendor/**"]
 
 [acronyms]
 entries = ["iOS", "eBay"]
+
+[lsp]
+reference_updates = "required"
+
+[[lsp.servers]]
+command = "rust-analyzer"
+args = []
+root_markers = ["Cargo.toml"]
+
+[lsp.servers.languages]
+rs = "rust"
 
 [[rules]]
 name = "Sort invoices by year and vendor"
@@ -122,6 +133,16 @@ The `[acronyms]` table has an optional `entries` list, empty by default. Add exa
 
 There is no bundled acronym dictionary. Generic case rules already recognize uppercase runs such as `HTTP` and `XML`; project entries cover ambiguous mixed-case spellings. The lexicon does not infer product-specific capitalization or perform dictionary-based word segmentation.
 
+## Language-server reference updates
+
+`lsp.reference_updates` is a project-wide policy with values `required`, `best-effort`, and `off`; it defaults to `required`. It applies to file extensions mapped by configured servers; other paths remain ordinary path-only renames. `required` blocks planning when a matching server cannot start, does not advertise rename support, or returns an unsupported or invalid edit. `best-effort` keeps the path plan and reports the failure as a warning. `off` skips server requests. The policy applies to all configured servers; per-server overrides are not supported.
+
+The optional `lsp.servers` list configures one executable and maps its file extensions to LSP document language identifiers. For example, one TypeScript server can map `ts` to `typescript` and `tsx` to `typescriptreact`. `command` may be an executable name resolved through `PATH`, an absolute path, or a path relative to the configuration file. `args` are passed as separate process arguments; Dirule does not invoke a shell. `root_markers` are relative paths searched upward from each renamed path to identify a language-server workspace root. Dirule groups rename requests by that root, which supports several language projects under one target. When no marker is found, the operation target is used. A file extension may be assigned to only one configured server.
+
+`dirule lsp status` loads the selected project config or preset and reports whether each executable can be found. It does not start the server or send LSP requests. During `plan`, Dirule starts each matching server, opens the scanned source files that are being renamed, sends `workspace/willRenameFiles`, validates the returned workspace edit, and includes document changes in the preview. Opening renamed files lets servers such as TypeScript initialize project state before searching for references; only files Dirule scanned are opened. The configured server receives their text through its local stdio process, so configure a server command you trust. `apply` applies the edits together with the path changes and records both in the journal. `undo` restores both paths and document contents, and refuses to overwrite document changes made after the apply.
+
+Configs migrate from 1.4 to 1.5 with `lsp.reference_updates = "required"` and an empty `lsp.servers` list.
+
 Output styles are defined as follows:
 
 - `snake-case` lowercases tokens and joins them with `_`.
@@ -184,7 +205,7 @@ For example, if a specific `HTTPServer.pdf` rule precedes a general `**/*.pdf` r
 
 ## Boundaries
 
-A rename changes filesystem paths only. It must not silently rewrite references inside source files. Language-aware reference updates through editor LSP clients require a separate integration and preview design.
+LSP edits are limited to regular text files inside the selected target. Resource operations and edits outside the target are rejected. Dynamic imports, reflection, generated code, and non-source references are only updated when the configured language server returns edits for them. Review the plan before applying; language servers cannot promise to find every semantic reference.
 
 The configuration is shared by the CLI and any future frontend. Matching, transformation, and planning must have consistent semantics regardless of which frontend loads it.
 

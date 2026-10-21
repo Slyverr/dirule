@@ -9,7 +9,8 @@ mod transform;
 
 pub use acronyms::{AcronymLexicon, AcronymOptions};
 pub use config::{
-    CURRENT_CONFIG_VERSION, CompiledConfig, Config, ConfigVersion, Rule, RuleKind, RuleMode,
+    CURRENT_CONFIG_VERSION, CompiledConfig, Config, ConfigVersion, LspOptions, LspServerConfig,
+    ReferenceUpdatePolicy, Rule, RuleKind, RuleMode,
 };
 pub use error::{Error, Result};
 pub use finding::{Finding, FindingKind};

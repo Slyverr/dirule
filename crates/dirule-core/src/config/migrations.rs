@@ -27,6 +27,11 @@ const MIGRATIONS: &[Migration] = &[
         to: ConfigVersion::new(1, 4),
         apply: advance_check_mode_version,
     },
+    Migration {
+        from: ConfigVersion::new(1, 4),
+        to: ConfigVersion::new(1, 5),
+        apply: add_lsp_defaults,
+    },
 ];
 
 fn advance_version(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
@@ -74,6 +79,31 @@ fn advance_check_mode_version(
     }
 
     advance_version(document, version)
+}
+
+fn add_lsp_defaults(mut document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {
+    let document_table = document
+        .as_table_mut()
+        .ok_or_else(|| Error::Config("configuration document must be a table".into()))?;
+    if document_table.contains_key("lsp") {
+        return Err(Error::Config(format!(
+            "`lsp` requires configuration version {version}"
+        )));
+    }
+
+    document_table.insert(
+        "lsp".into(),
+        toml::Value::Table(toml::map::Map::from_iter([
+            (
+                "reference_updates".into(),
+                toml::Value::String("required".into()),
+            ),
+            ("servers".into(), toml::Value::Array(Vec::new())),
+        ])),
+    );
+    document_table.insert("version".into(), toml::Value::String(version.to_string()));
+
+    Ok(document)
 }
 
 pub(super) fn upgrade(document: toml::Value, version: ConfigVersion) -> Result<toml::Value> {

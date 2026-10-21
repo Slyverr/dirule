@@ -78,6 +78,7 @@ fn benchmark_planning(criterion: &mut Criterion) {
         acronyms: AcronymOptions {
             entries: vec!["API".into(), "HTTP".into(), "XML".into()],
         },
+        lsp: Default::default(),
         rules: vec![
             Rule {
                 name: "Normalize invoices".into(),
@@ -171,6 +172,7 @@ fn benchmark_acronym_scaling(criterion: &mut Criterion) {
             acronyms: AcronymOptions {
                 entries: synthetic_acronyms(count),
             },
+            lsp: Default::default(),
             rules: vec![Rule {
                 name: "Normalize files".into(),
                 pattern: "**/*".into(),
@@ -219,6 +221,7 @@ fn exclusion_config(count: usize) -> Config {
         target: Some(PathBuf::from(".")),
         ignore: Vec::new(),
         acronyms: AcronymOptions::default(),
+        lsp: Default::default(),
         rules: vec![Rule {
             name: "Normalize files".into(),
             pattern: "**/*".into(),

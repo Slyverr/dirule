@@ -805,6 +805,7 @@ fn planning_propagates_directory_names_from_unsorted_entries() {
         target: None,
         ignore: Vec::new(),
         acronyms: AcronymOptions::default(),
+        lsp: Default::default(),
         rules: vec![
             Rule {
                 name: "Normalize project folder".into(),

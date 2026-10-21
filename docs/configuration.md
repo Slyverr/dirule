@@ -5,7 +5,7 @@ Project rules live in `dirule.toml` at the target's root. Start with `dirule ini
 ## Example
 
 ```toml
-version = "1.4"
+version = "1.5"
 name = "Downloads"
 target = "."
 ignore = ["generated/api/**", "vendor/**"]
@@ -52,6 +52,31 @@ Patterns match the full target-relative path, use `/` on every platform, and are
 `to` uses `builtin:` or `template:`. Built-in transformations are `snake-case`, `kebab-case`, `camel-case`, and `pascal-case`. Templates can combine captures and common values such as `${name}`, `${stem}`, `${extension}`, `${parent}`, and `${path}`. A filter such as `${vendor|kebab-case}` transforms a value before inserting it. Built-in transformations share a word splitter that recognizes common case boundaries and configured acronym spellings.
 
 The `[acronyms]` table is project-specific and empty by default. Add spellings whose boundaries cannot be inferred, for example `iOS` in `iOSGuide`. There is no bundled acronym dictionary.
+
+## Language-server reference updates
+
+Configure language servers to update source references when a planned rename changes a filename. For example:
+
+```toml
+[lsp]
+reference_updates = "required"
+
+[[lsp.servers]]
+command = "rust-analyzer"
+args = []
+root_markers = ["Cargo.toml"]
+
+[lsp.servers.languages]
+rs = "rust"
+```
+
+`reference_updates` accepts `required`, `best-effort`, or `off` and defaults to `required`. The policy is project-wide; individual servers do not override it. It applies to file extensions mapped by configured servers; other paths remain ordinary path-only renames. With `required`, planning fails if a matching server is missing, cannot start, or cannot return a supported edit. `best-effort` keeps the path plan and shows a warning when reference updates are unavailable. `off` skips LSP requests.
+
+Before requesting edits, Dirule opens the scanned source files that are being renamed in the configured server session. This gives servers that build their project view from opened documents enough context to find references. The configured server receives those source texts through its local stdio process; choose a server command you trust.
+
+`dirule plan` starts each matching server and requests `workspace/willRenameFiles`; its preview includes the returned source edits. `dirule apply` applies those edits with the path changes and journals both, so `dirule undo RUN_ID` restores the previous paths and source contents if they have not changed since the apply. The preview reads source documents selected by the server, but it does not send them to a remote service.
+
+`root_markers` are searched upward from each renamed path to find the language-server workspace root. Dirule groups rename requests by the matching root, which supports several language projects under one target; if no marker is found, the operation target is used. This also works when the config comes from a global preset. Run `dirule lsp status` to check whether configured executables can be found. Executable names are looked up in `PATH`; an absolute path or a path relative to the config file also works. Arguments are passed directly without a shell. Status only checks executable availability; `plan` is the command that tests whether a server can handle a real rename request.
 
 See the [configuration specification](specs/dirule-config.md) for the full pattern grammar, template rules, migrations, and edge-case behavior.
 

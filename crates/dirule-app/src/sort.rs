@@ -170,6 +170,7 @@ fn quick_config(rules: Vec<Rule>) -> Config {
         target: None,
         ignore: Vec::new(),
         acronyms: AcronymOptions::default(),
+        lsp: Default::default(),
         rules,
     }
 }

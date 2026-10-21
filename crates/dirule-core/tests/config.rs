@@ -127,6 +127,24 @@ to = "builtin:kebab-case"
 }
 
 #[test]
+fn version_1_4_migrates_to_lsp_defaults() {
+    let config = parse_config(
+        r#"
+version = "1.4"
+
+[[rules]]
+name = "Normalize names"
+match = "**/*"
+to = "builtin:kebab-case"
+"#,
+    )
+    .expect("configuration migrates with required reference updates and no servers");
+
+    assert_eq!(config.lsp.reference_updates, Default::default());
+    assert!(config.lsp.servers.is_empty());
+}
+
+#[test]
 fn version_1_0_migrates_to_the_default_rule_kind() {
     let config = parse_config(
         r#"

@@ -8,6 +8,7 @@ use crate::{
     AcronymLexicon, AcronymOptions, CompiledTemplate, Error, Matcher, MatcherSet, Result, Transform,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
@@ -16,7 +17,42 @@ pub struct Config {
     pub target: Option<PathBuf>,
     pub ignore: Vec<String>,
     pub acronyms: AcronymOptions,
+    pub lsp: LspOptions,
     pub rules: Vec<Rule>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LspOptions {
+    pub reference_updates: ReferenceUpdatePolicy,
+    pub servers: Vec<LspServerConfig>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReferenceUpdatePolicy {
+    Off,
+    BestEffort,
+    #[default]
+    Required,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LspServerConfig {
+    /// Executable name from `PATH`, or a path relative to this configuration file.
+    pub command: PathBuf,
+
+    /// Arguments passed directly to the executable without a shell.
+    #[serde(default)]
+    pub args: Vec<String>,
+
+    /// File extension to LSP document language identifier mappings.
+    pub languages: BTreeMap<String, String>,
+
+    /// Optional project-root markers used when starting the server.
+    #[serde(default)]
+    pub root_markers: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +149,7 @@ pub fn parse(source: &str) -> Result<Config> {
         target: document.target,
         ignore: document.ignore,
         acronyms: document.acronyms,
+        lsp: document.lsp,
         rules: document.rules,
     };
 
@@ -126,6 +163,8 @@ impl Config {
     }
 
     pub fn compile(&self) -> Result<CompiledConfig> {
+        self.lsp.validate()?;
+
         if self.rules.is_empty() {
             return Err(Error::Config("at least one rule is required".into()));
         }
@@ -225,5 +264,72 @@ impl Config {
             acronyms,
             ignore,
         })
+    }
+}
+
+impl LspOptions {
+    fn validate(&self) -> Result<()> {
+        let mut extensions = HashSet::new();
+
+        for (index, server) in self.servers.iter().enumerate() {
+            let label = format!("LSP server {}", index + 1);
+            if server.command.as_os_str().is_empty()
+                || server.command.to_string_lossy().trim().is_empty()
+            {
+                return Err(Error::Config(format!("{label} has an empty command")));
+            }
+
+            if server.languages.is_empty() {
+                return Err(Error::Config(format!(
+                    "{label} must declare at least one file extension and language identifier"
+                )));
+            }
+
+            for (extension, language) in &server.languages {
+                if extension.is_empty()
+                    || extension.starts_with('.')
+                    || extension.contains('.')
+                    || extension.contains('/')
+                    || extension.contains('\\')
+                    || extension.trim() != extension
+                {
+                    return Err(Error::Config(format!(
+                        "{label} has invalid extension {extension:?}; use a suffix without a leading dot"
+                    )));
+                }
+
+                if !extensions.insert(extension.to_ascii_lowercase()) {
+                    return Err(Error::Config(format!(
+                        "LSP file extension {extension:?} is assigned more than once"
+                    )));
+                }
+
+                if language.trim().is_empty() || language.trim() != language.as_str() {
+                    return Err(Error::Config(format!(
+                        "{label} has an invalid language identifier for extension {extension:?}"
+                    )));
+                }
+            }
+
+            for marker in &server.root_markers {
+                let path = std::path::Path::new(marker);
+                if marker.trim().is_empty()
+                    || marker.contains('\\')
+                    || path.is_absolute()
+                    || path.components().any(|component| {
+                        matches!(
+                            component,
+                            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+                        )
+                    })
+                {
+                    return Err(Error::Config(format!(
+                        "{label} has invalid root marker {marker:?}; markers must be relative to the project"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
