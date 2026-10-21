@@ -76,13 +76,13 @@ tar -xJf target/distrib/dirule-x86_64-unknown-linux-gnu.tar.xz -C "$smoke_dir"
 "$smoke_dir/dirule-x86_64-unknown-linux-gnu/dirule" --version
 ```
 
-After the release commit is on the intended release branch and its CI checks pass, push a matching `vX.Y.Z` tag. The release workflow builds the configured archives, installers, and checksums, then creates a GitHub release. A version tag with a prerelease suffix is published as a prerelease.
+After a lockstep release version is merged to `main` and pushed, the `Publish crates` workflow runs automatically because the workspace manifests changed. It tests the workspace on Linux, macOS, and Windows, checks that every package has the same stable version, runs a crates.io dry run, then publishes all five packages with Trusted Publishing. It does not run for ordinary pushes that do not change Cargo version manifests.
 
-The `Publish crates` workflow runs `cargo publish --workspace --dry-run --locked` on relevant pull requests. This checks the crate archives without uploading them. For a stable release, it waits for the GitHub `Release` workflow to succeed, checks that the tag and all workspace package versions match, then publishes with crates.io Trusted Publishing. Prerelease tags and failed release runs do not publish. GitHub only starts `workflow_run` workflows that exist on the default branch.
+Once the crate publishing checks pass, push a matching `vX.Y.Z` tag. The `Release` workflow builds the configured archives, installers, and checksums, then creates a GitHub release. A version tag with a prerelease suffix is published as a prerelease. Relevant pull requests also run `cargo publish --workspace --dry-run --locked`; this checks package contents without uploading.
 
 The `dirule` CLI depends on the other workspace crates, so publish all five packages together in lockstep. Before the first upload, review the crate names, versions, metadata, and packaged files: crates.io does not let you delete a published version.
 
-The first upload is a one-time manual step because crates.io cannot configure trusted publishers for crates that do not exist yet. For that initial release, publish manually **before** merging `publish-crates.yml` into the default branch; otherwise the workflow may also try to publish the same tag. From the checkout containing the intended release version, inspect and validate the packages:
+For a crate's first-ever upload, crates.io requires one manual publish before a trusted publisher can be configured. From the checkout containing that initial version, inspect and validate the packages:
 
 ```sh
 cargo package --workspace --list --locked
@@ -95,7 +95,7 @@ After the dry run succeeds and the package contents are reviewed, authenticate C
 cargo publish --workspace --locked
 ```
 
-Then add a trusted publisher on crates.io for **each** package, using owner `Slyverr`, repository `dirule`, workflow `publish-crates.yml`, and GitHub Actions environment `crates-io`. Merge the workflow into the default branch after the initial upload and publisher setup, and before the next stable tag. Future stable tags can then publish automatically. Do not store the API token in the repository or GitHub secrets; the workflow exchanges GitHub's OIDC identity for a short-lived token.
+Dirule's five crates already have an initial published version. Before merging the next version bump to `main`, configure a trusted publisher on crates.io for **each** crate, using owner `Slyverr`, repository `dirule`, workflow `publish-crates.yml`, and GitHub Actions environment `crates-io`. The workflow exchanges GitHub's OIDC identity for a short-lived token. Do not store a crates.io API token in the repository or GitHub secrets.
 
 ## Commits
 

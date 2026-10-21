@@ -1,6 +1,12 @@
 name: Publish crates
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**/Cargo.toml
   pull_request:
     paths:
       - Cargo.toml
@@ -10,9 +16,6 @@ on:
       - .cargo/**
       - crates/**
       - .github/workflows/publish-crates.yml
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
 
 permissions:
   contents: read
@@ -30,12 +33,29 @@ jobs:
 
       - run: cargo publish --workspace --dry-run --locked
 
+  verify-release:
+    name: Verify release (${{ matrix.os }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo test --workspace --locked
+
   publish:
-    name: Publish stable release to crates.io
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
+    name: Publish workspace to crates.io
+    needs: verify-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: crates-io
     permissions:
@@ -45,28 +65,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify release tag and workspace versions
-        env:
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      - name: Verify lockstep stable workspace versions
         run: |
           set -euo pipefail
 
-          mapfile -t tags < <(git tag --points-at "$RELEASE_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
-          if [ "${#tags[@]}" -ne 1 ]; then
-            echo "Expected one stable vX.Y.Z tag at $RELEASE_SHA; found ${#tags[@]}." >&2
+          metadata="$(cargo metadata --no-deps --format-version 1)"
+          version="$(jq -er '.packages[] | select(.name == "dirule") | .version' <<< "$metadata")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a stable workspace version, found '$version'." >&2
             exit 1
           fi
-
-          version="${tags[0]#v}"
-          cargo metadata --no-deps --format-version 1 \
-            | jq -e --arg version "$version" '(.packages | length > 0) and all(.packages[]; .version == $version)' \
-            > /dev/null
+          jq -e --arg version "$version" \
+            '(.packages | length > 0) and all(.packages[]; .version == $version)' \
+            <<< "$metadata" > /dev/null
+          echo "Publishing lockstep workspace version $version."
 
       - run: cargo publish --workspace --dry-run --locked
 
