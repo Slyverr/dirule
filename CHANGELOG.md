@@ -4,6 +4,8 @@
 
 ### Added
 
+- Configure language servers to update source references when paths are renamed. Plans show returned edits, and apply journals them so undo can restore both paths and document text.
+
 - Reusable GitHub Actions workflow that installs a pinned Dirule release and checks project paths.
 - Copyable examples for project naming rules, check-only rules, and custom sorting categories.
 
