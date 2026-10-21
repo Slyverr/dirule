@@ -475,7 +475,10 @@ fn cli_plan_shows_language_server_reference_diffs() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Reference updates:"), "{stdout}");
-    assert!(stdout.contains("src/api.rs"), "{stdout}");
+    assert!(
+        stdout.contains(&Path::new("src/api.rs").display().to_string()),
+        "{stdout}"
+    );
     assert!(
         stdout.contains("- use crate::{HTTPClient::Client as ApiClient, model::Record};"),
         "{stdout}"
@@ -507,10 +510,13 @@ fn cli_plan_json_includes_language_server_reference_edits() {
     let files = plan["reference_updates"]["files"]
         .as_array()
         .expect("reference update files");
-    let lib_path = Path::new("src/lib.rs").to_string_lossy();
     let lib = files
         .iter()
-        .find(|file| file["path"] == lib_path.as_ref())
+        .find(|file| {
+            file["path"]
+                .as_str()
+                .is_some_and(|path| Path::new(path).ends_with(Path::new("src/lib.rs")))
+        })
         .expect("lib.rs reference edit");
     assert_eq!(
         lib["before"],
@@ -520,10 +526,13 @@ fn cli_plan_json_includes_language_server_reference_edits() {
         lib["after"],
         "pub mod http_client;\npub use http_client::Client as SharedClient;\n"
     );
-    let api_path = Path::new("src/api.rs").to_string_lossy();
     let api = files
         .iter()
-        .find(|file| file["path"] == api_path.as_ref())
+        .find(|file| {
+            file["path"]
+                .as_str()
+                .is_some_and(|path| Path::new(path).ends_with(Path::new("src/api.rs")))
+        })
         .expect("api.rs reference edit");
     assert_eq!(
         api["after"],

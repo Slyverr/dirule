@@ -86,7 +86,7 @@ impl MutationRecorder for BreakTextEditWrite {
         _before: &str,
         _after: &str,
     ) -> Result<Option<u64>, ApplyError> {
-        if path == self.path {
+        if path.ends_with(&self.path) {
             std::fs::remove_file(path).expect("remove the pending text document");
             std::fs::create_dir(path).expect("replace the pending text document with a directory");
         }
@@ -881,7 +881,7 @@ fn text_edit_write_failure_rolls_back_prior_edits_and_path_moves() {
         },
     ];
     let mut recorder = BreakTextEditWrite {
-        path: target.join("src/lib.rs"),
+        path: PathBuf::from("src/lib.rs"),
     };
 
     let error = apply_recorded(
