@@ -7,8 +7,9 @@ mod scan;
 mod windows_identity;
 
 pub use apply::{
-    ApplyError, ApplyReport, ConflictPolicy, JournaledApplyReport, apply, apply_journaled,
-    apply_with_conflict_policy, validate_destinations,
+    ApplyError, ApplyReport, ConflictPolicy, FileTextEdit, JournaledApplyReport, apply,
+    apply_journaled, apply_journaled_with_text_edits, apply_with_conflict_policy,
+    validate_destinations,
 };
 pub use journal::{
     CURRENT_JOURNAL_VERSION, JournalDetails, JournalError, JournalOperation, JournalRun,

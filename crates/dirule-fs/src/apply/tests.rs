@@ -1,7 +1,7 @@
 use super::{
-    ApplyError, ConflictPolicy, EntryKind, JournalRecorder, JournalStatus, JournalStore,
-    MutationRecorder, NoopRecorder, Plan, PlannedEntry, applied_run_result, failed_apply_result,
-    finish_failed_apply, rollback_after_failure,
+    ApplyError, ConflictPolicy, EntryKind, FileTextEdit, JournalRecorder, JournalStatus,
+    JournalStore, MutationRecorder, NoopRecorder, Plan, PlannedEntry, applied_run_result,
+    apply_recorded, failed_apply_result, finish_failed_apply, rollback_after_failure,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,6 +28,70 @@ impl Drop for TempDir {
 
 struct FailSecondStaging {
     intents: usize,
+}
+
+struct BreakTextEditWrite {
+    path: PathBuf,
+}
+
+impl MutationRecorder for BreakTextEditWrite {
+    fn move_intent(
+        &mut self,
+        _object: u64,
+        _source: &std::path::Path,
+        _destination: &std::path::Path,
+        _kind: EntryKind,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn move_completed(
+        &mut self,
+        _sequence: Option<u64>,
+        _destination: &std::path::Path,
+        _kind: EntryKind,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn directory_intent(
+        &mut self,
+        _directory: &std::path::Path,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn directory_created(
+        &mut self,
+        _sequence: Option<u64>,
+        _directory: &std::path::Path,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn directory_remove_intent(
+        &mut self,
+        _directory: &std::path::Path,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn directory_removed(&mut self, _sequence: Option<u64>) -> Result<(), ApplyError> {
+        Ok(())
+    }
+
+    fn text_edit_intent(
+        &mut self,
+        path: &std::path::Path,
+        _before: &str,
+        _after: &str,
+    ) -> Result<Option<u64>, ApplyError> {
+        if path == self.path {
+            std::fs::remove_file(path).expect("remove the pending text document");
+            std::fs::create_dir(path).expect("replace the pending text document with a directory");
+        }
+        Ok(None)
+    }
 }
 
 impl MutationRecorder for FailSecondStaging {
@@ -230,6 +294,7 @@ fn apply_rejects_a_symlinked_parent_installed_during_journal_intent() {
         &plan,
         &snapshot,
         ConflictPolicy::Abort,
+        &[],
         &mut recorder,
     )
     .expect_err("apply must reject the replaced source parent");
@@ -300,6 +365,7 @@ fn apply_does_not_follow_a_replaced_parent_during_journal_completion_rollback() 
         &plan,
         &snapshot,
         ConflictPolicy::Abort,
+        &[],
         &mut recorder,
     )
     .expect_err("journal completion failure must stop the apply");
@@ -370,6 +436,7 @@ fn apply_rejects_a_replaced_source_after_journal_intent() {
         &plan,
         &snapshot,
         ConflictPolicy::Abort,
+        &[],
         &mut recorder,
     )
     .expect_err("apply must reject a replaced source file");
@@ -443,6 +510,7 @@ fn partial_cycle_staging_rolls_back_before_apply_returns() {
         &plan,
         &snapshot,
         ConflictPolicy::Abort,
+        &[],
         &mut recorder,
     )
     .expect_err("second staging operation should fail");
@@ -613,6 +681,7 @@ fn apply_journal_records_a_real_rollback_failure_as_partially_recovered() {
         &plan,
         &snapshot,
         ConflictPolicy::Abort,
+        &[],
         &mut recorder,
     )
     .expect_err("simulated later operation failure should trigger rollback");
@@ -723,4 +792,114 @@ fn journal_finalization_errors_preserve_apply_outcomes() {
         other => panic!("expected completed apply to be distinguished, got {other}"),
     }
     assert!(display.contains("filesystem changes completed in run applied-run"));
+}
+
+#[test]
+fn apply_rejects_changed_text_before_mutating_the_path_plan() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir(&target).expect("create project target");
+    std::fs::write(target.join("HTTPClient.rs"), "pub struct Client;\n")
+        .expect("write renamed source");
+    std::fs::write(target.join("references.rs"), "mod HTTPClient;\n")
+        .expect("write reference document");
+
+    let snapshot = crate::scan(&target).expect("scan project before planning");
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("HTTPClient.rs"),
+            destination: PathBuf::from("http_client.rs"),
+            kind: EntryKind::File,
+            rule: Some("normalize Rust module names".into()),
+        }],
+        ..Plan::default()
+    };
+    let edit = FileTextEdit {
+        path: PathBuf::from("references.rs"),
+        before: "mod HTTPClient;\n".into(),
+        after: "mod http_client;\n".into(),
+    };
+    std::fs::write(target.join("references.rs"), "mod externally_changed;\n")
+        .expect("change reference document after planning");
+
+    let store = JournalStore::new(temp.0.join("state/runs"));
+    let error = super::apply_journaled_with_text_edits(
+        &target,
+        &plan,
+        &snapshot,
+        ConflictPolicy::Abort,
+        &[edit],
+        &store,
+    )
+    .expect_err("stale reference edits must fail before path mutations");
+
+    assert!(
+        matches!(&error, ApplyError::ChangedText(path) if path == std::path::Path::new("references.rs")),
+        "expected the stale text precondition error directly, got {error}"
+    );
+    assert!(target.join("HTTPClient.rs").is_file());
+    assert!(!target.join("http_client.rs").exists());
+    assert_eq!(
+        std::fs::read_to_string(target.join("references.rs")).unwrap(),
+        "mod externally_changed;\n"
+    );
+    assert!(store.list().unwrap().is_empty());
+}
+
+#[test]
+fn text_edit_write_failure_rolls_back_prior_edits_and_path_moves() {
+    let temp = TempDir::new();
+    let target = temp.0.join("project");
+    std::fs::create_dir_all(target.join("src")).expect("create source directory");
+    std::fs::write(target.join("src/HTTPClient.rs"), "pub struct Client;\n")
+        .expect("write renamed source");
+    std::fs::write(target.join("src/api.rs"), "use crate::HTTPClient;\n")
+        .expect("write first reference document");
+    std::fs::write(target.join("src/lib.rs"), "pub mod HTTPClient;\n")
+        .expect("write failing reference document");
+
+    let snapshot = crate::scan(&target).expect("scan project");
+    let plan = Plan {
+        entries: vec![PlannedEntry {
+            source: PathBuf::from("src/HTTPClient.rs"),
+            destination: PathBuf::from("src/http_client.rs"),
+            kind: EntryKind::File,
+            rule: Some("normalize Rust module names".into()),
+        }],
+        ..Plan::default()
+    };
+    let edits = [
+        FileTextEdit {
+            path: PathBuf::from("src/api.rs"),
+            before: "use crate::HTTPClient;\n".into(),
+            after: "use crate::http_client;\n".into(),
+        },
+        FileTextEdit {
+            path: PathBuf::from("src/lib.rs"),
+            before: "pub mod HTTPClient;\n".into(),
+            after: "pub mod http_client;\n".into(),
+        },
+    ];
+    let mut recorder = BreakTextEditWrite {
+        path: target.join("src/lib.rs"),
+    };
+
+    let error = apply_recorded(
+        &target,
+        &plan,
+        &snapshot,
+        ConflictPolicy::Abort,
+        &edits,
+        &mut recorder,
+    )
+    .expect_err("simulated text document write failure should abort apply");
+
+    assert!(matches!(error, ApplyError::Io { .. }));
+    assert!(target.join("src/HTTPClient.rs").is_file());
+    assert!(!target.join("src/http_client.rs").exists());
+    assert_eq!(
+        std::fs::read_to_string(target.join("src/api.rs")).unwrap(),
+        "use crate::HTTPClient;\n"
+    );
+    assert!(target.join("src/lib.rs").is_dir());
 }

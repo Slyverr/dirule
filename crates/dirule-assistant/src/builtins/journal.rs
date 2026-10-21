@@ -276,6 +276,10 @@ fn action_value(action: &UndoAction) -> Value {
             "kind": "remove_directory_if_empty",
             "path": path_text(path),
         }),
+        UndoAction::RestoreFileContents { path } => json!({
+            "kind": "restore_file_contents",
+            "path": path_text(path),
+        }),
     }
 }
 
@@ -293,6 +297,9 @@ fn tool_change(action: &UndoAction) -> ToolChange {
             path: path_text(path),
         },
         UndoAction::RemoveDirectoryIfEmpty { path } => ToolChange::RemoveDirectoryIfEmpty {
+            path: path_text(path),
+        },
+        UndoAction::RestoreFileContents { path } => ToolChange::RestoreFileContents {
             path: path_text(path),
         },
     }

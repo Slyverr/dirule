@@ -4,7 +4,7 @@ use super::{
     JournalStatusRecord,
 };
 use dirule_core::EntryKind;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +17,7 @@ enum IntentKind<'a> {
         path: &'a Path,
         identity: Option<&'a ObjectIdentity>,
     },
+    TextEdit,
 }
 
 struct Intent<'a> {
@@ -44,6 +45,12 @@ pub(super) enum UndoMutation {
         path: PathBuf,
         action: DirectoryAction,
         identity: ObjectIdentity,
+    },
+    TextEdit {
+        sequence: u64,
+        path: PathBuf,
+        before: String,
+        after: String,
     },
 }
 
@@ -115,6 +122,9 @@ impl JournalHistory {
         let mut moves = std::collections::BTreeMap::new();
         let mut directories = std::collections::BTreeMap::new();
         let mut directory_changes = std::collections::BTreeMap::new();
+        let mut text_edits = std::collections::BTreeMap::new();
+        let mut completed_text_edits = BTreeMap::<u64, Option<ObjectIdentity>>::new();
+        let mut undone_text_edits = BTreeMap::<u64, Option<ObjectIdentity>>::new();
         let mut retained_directories = std::collections::BTreeSet::new();
         let mut max_sequence = None;
         for record in &self.records[1..] {
@@ -177,6 +187,29 @@ impl JournalHistory {
                 JournalRecord::DirectoryRetained { path, .. } => {
                     retained_directories.insert(path.clone());
                 }
+                JournalRecord::TextEditIntent {
+                    sequence,
+                    path,
+                    before,
+                    after,
+                } => {
+                    max_sequence = Some(*sequence);
+                    text_edits.insert(
+                        *sequence,
+                        UndoMutation::TextEdit {
+                            sequence: *sequence,
+                            path: path.clone(),
+                            before: before.clone(),
+                            after: after.clone(),
+                        },
+                    );
+                }
+                JournalRecord::TextEditCompleted { sequence, identity } => {
+                    completed_text_edits.insert(*sequence, identity.clone());
+                }
+                JournalRecord::TextEditUndone { sequence, identity } => {
+                    undone_text_edits.insert(*sequence, identity.clone());
+                }
                 JournalRecord::Header { .. } | JournalRecord::Status { .. } => {}
             }
         }
@@ -185,10 +218,79 @@ impl JournalHistory {
         let mut sequences = intents
             .keys()
             .chain(directories.keys())
+            .chain(text_edits.keys())
             .copied()
             .collect::<Vec<_>>();
         sequences.sort_unstable();
+
+        let mut text_edit_identities = HashMap::<PathBuf, ObjectIdentity>::new();
+        for (sequence, mutation) in &text_edits {
+            let UndoMutation::TextEdit { path, .. } = mutation else {
+                unreachable!()
+            };
+            if let Some(Some(identity)) = undone_text_edits.get(sequence) {
+                text_edit_identities.insert(path.clone(), identity.clone());
+            } else if let Some(Some(identity)) = completed_text_edits.get(sequence) {
+                text_edit_identities.insert(path.clone(), identity.clone());
+            }
+        }
+
         for sequence in sequences {
+            if let Some(mutation) = text_edits.remove(&sequence) {
+                if undone_text_edits.contains_key(&sequence) {
+                    continue;
+                }
+                let UndoMutation::TextEdit {
+                    sequence,
+                    path,
+                    before,
+                    after,
+                } = mutation
+                else {
+                    unreachable!()
+                };
+                let absolute = checked_target_path(&self.target, &path)?;
+                match fs::read_to_string(&absolute) {
+                    Ok(contents) if contents == after => {
+                        if let Some(Some(identity)) = completed_text_edits.get(&sequence) {
+                            let metadata = fs::symlink_metadata(&absolute)
+                                .map_err(|source| JournalError::io(&absolute, source))?;
+                            if !identity.matches(&metadata, EntryKind::File, &absolute) {
+                                return Err(JournalError::ChangedObject {
+                                    run_id: self.id.clone(),
+                                    path: absolute,
+                                });
+                            }
+                        }
+                        mutations.push(UndoMutation::TextEdit {
+                            sequence,
+                            path,
+                            before,
+                            after,
+                        });
+                    }
+                    Ok(contents) if contents == before => {
+                        if completed_text_edits.contains_key(&sequence)
+                            && self.status == JournalStatus::Undoing
+                        {
+                            mutations.push(UndoMutation::TextEdit {
+                                sequence,
+                                path,
+                                before,
+                                after,
+                            });
+                        }
+                    }
+                    Ok(_) => {
+                        return Err(JournalError::ChangedObject {
+                            run_id: self.id.clone(),
+                            path: absolute,
+                        });
+                    }
+                    Err(source) => return Err(JournalError::io(absolute, source)),
+                }
+                continue;
+            }
             if let Some(mutation) = intents.remove(&sequence) {
                 let identity = moves.get(&sequence);
                 match (mutation, identity) {
@@ -207,11 +309,15 @@ impl JournalHistory {
                                 path: destination,
                             });
                         }
+                        let identity = text_edit_identities
+                            .get(&destination)
+                            .cloned()
+                            .unwrap_or(original);
                         mutations.push(UndoMutation::Move {
                             object,
                             source,
                             destination,
-                            identity: original,
+                            identity,
                         });
                     }
                     (
@@ -223,6 +329,10 @@ impl JournalHistory {
                         },
                         None,
                     ) => {
+                        let identity = text_edit_identities
+                            .get(&destination)
+                            .cloned()
+                            .unwrap_or(identity);
                         if max_sequence == Some(sequence)
                             && operation_reached_destination(
                                 &self.target,
@@ -393,6 +503,15 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
                     },
                 )?;
             }
+            JournalRecord::TextEditIntent { sequence, .. } => {
+                insert_intent(
+                    path,
+                    &mut intents,
+                    &mut last_sequence,
+                    *sequence,
+                    IntentKind::TextEdit,
+                )?;
+            }
             JournalRecord::MoveCompleted { sequence, identity } => {
                 match find_intent(path, &mut intents, *sequence)?.kind {
                     IntentKind::Move { identity: expected } if expected == identity => {}
@@ -403,7 +522,7 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
                         ));
                     }
                 }
-                complete_intent(path, &mut intents, *sequence, false)?;
+                complete_intent(path, &mut intents, *sequence, CompletionKind::Move)?;
             }
             JournalRecord::DirectoryChanged {
                 sequence,
@@ -429,7 +548,25 @@ fn validate_events(path: &Path, records: &[JournalRecord]) -> Result<(), Journal
                         ));
                     }
                 }
-                complete_intent(path, &mut intents, *sequence, true)?;
+                complete_intent(path, &mut intents, *sequence, CompletionKind::Directory)?;
+            }
+            JournalRecord::TextEditCompleted { sequence, .. } => {
+                complete_intent(path, &mut intents, *sequence, CompletionKind::TextEdit)?;
+            }
+            JournalRecord::TextEditUndone { sequence, .. } => {
+                if status != Some(JournalStatusRecord::Undoing) {
+                    return Err(invalid_events(
+                        path,
+                        format!("text-edit undo marker for sequence {sequence} is outside undo"),
+                    ));
+                }
+                let intent = find_intent(path, &mut intents, *sequence)?;
+                if !matches!(intent.kind, IntentKind::TextEdit) || !intent.completed {
+                    return Err(invalid_events(
+                        path,
+                        format!("sequence {sequence} has an invalid text-edit undo marker"),
+                    ));
+                }
             }
             JournalRecord::DirectoryRetained {
                 sequence,
@@ -548,10 +685,15 @@ fn complete_intent(
     path: &Path,
     intents: &mut BTreeMap<u64, Intent<'_>>,
     sequence: u64,
-    directory: bool,
+    completion: CompletionKind,
 ) -> Result<(), JournalError> {
     let intent = find_intent(path, intents, sequence)?;
-    let matches_kind = matches!(intent.kind, IntentKind::Directory { .. }) == directory;
+    let matches_kind = matches!(
+        (completion, &intent.kind),
+        (CompletionKind::Move, IntentKind::Move { .. })
+            | (CompletionKind::Directory, IntentKind::Directory { .. })
+            | (CompletionKind::TextEdit, IntentKind::TextEdit)
+    );
     if !matches_kind || intent.completed {
         return Err(invalid_events(
             path,
@@ -561,6 +703,13 @@ fn complete_intent(
     intent.completed = true;
 
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum CompletionKind {
+    Move,
+    Directory,
+    TextEdit,
 }
 
 fn invalid_events(path: &Path, message: String) -> JournalError {
@@ -744,6 +893,30 @@ pub(super) fn preflight_undo(
                     return Err(JournalError::ExistingDestination(absolute));
                 }
             }
+            UndoMutation::TextEdit {
+                path,
+                before,
+                after,
+                ..
+            } => {
+                let absolute = checked_target_path(target, path)?;
+                let metadata = fs::symlink_metadata(&absolute)
+                    .map_err(|source| JournalError::io(&absolute, source))?;
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    return Err(JournalError::ChangedObject {
+                        run_id: run_id.into(),
+                        path: absolute,
+                    });
+                }
+                let contents = fs::read_to_string(&absolute)
+                    .map_err(|source| JournalError::io(&absolute, source))?;
+                if contents != *before && contents != *after {
+                    return Err(JournalError::ChangedObject {
+                        run_id: run_id.into(),
+                        path: absolute,
+                    });
+                }
+            }
         }
     }
     Ok(())
@@ -842,12 +1015,17 @@ fn cancel_inverse_mutations(mutations: Vec<UndoMutation>) -> Vec<UndoMutation> {
     pending
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::path_exists;
-    use crate::journal::JournalError;
+    use crate::{
+        ConflictPolicy, FileTextEdit, JournalError, JournalStatus, JournalStore,
+        apply_journaled_with_text_edits, scan,
+    };
+    use dirule_core::Plan;
     use std::path::Path;
 
+    #[cfg(unix)]
     #[test]
     fn path_existence_propagates_metadata_errors() {
         use std::os::unix::ffi::OsStrExt;
@@ -856,5 +1034,48 @@ mod tests {
         let error = path_exists(Path::new(invalid_path)).expect_err("metadata path is invalid");
 
         assert!(matches!(error, JournalError::Io { .. }));
+    }
+
+    #[test]
+    fn undo_refuses_to_overwrite_a_text_document_changed_after_apply() {
+        let temp = tempfile::tempdir().expect("create temporary directory");
+        let target = temp.path().join("project");
+        std::fs::create_dir(&target).expect("create project target");
+        let document = target.join("references.rs");
+        std::fs::write(&document, "mod HTTPClient;\n").expect("write reference document");
+        let snapshot = scan(&target).expect("scan project");
+        let journal = JournalStore::new(temp.path().join("state/runs"));
+        let edit = FileTextEdit {
+            path: Path::new("references.rs").to_path_buf(),
+            before: "mod HTTPClient;\n".into(),
+            after: "mod http_client;\n".into(),
+        };
+
+        let applied = apply_journaled_with_text_edits(
+            &target,
+            &Plan::default(),
+            &snapshot,
+            ConflictPolicy::Abort,
+            &[edit],
+            &journal,
+        )
+        .expect("apply reference edit");
+        let run_id = applied.run_id.expect("text edit creates a journal run");
+        assert_eq!(
+            std::fs::read_to_string(&document).unwrap(),
+            "mod http_client;\n"
+        );
+
+        std::fs::write(&document, "mod user_changed_this;\n").expect("edit document after apply");
+        let error = journal
+            .undo(&run_id)
+            .expect_err("undo must not overwrite the user's later edit");
+
+        assert!(matches!(error, JournalError::ChangedObject { .. }));
+        assert_eq!(
+            std::fs::read_to_string(&document).unwrap(),
+            "mod user_changed_this;\n"
+        );
+        assert_eq!(journal.list().unwrap()[0].status, JournalStatus::Applied);
     }
 }

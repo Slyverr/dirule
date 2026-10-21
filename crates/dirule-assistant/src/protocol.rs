@@ -32,6 +32,7 @@ pub enum ToolChange {
     CreateDirectory { path: String },
     RemoveDirectoryIfEmpty { path: String },
     WriteFile { path: String, contents: String },
+    RestoreFileContents { path: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -3,6 +3,8 @@ use crate::journal::{JournalRecorder, JournalStatus, JournalStore};
 use crate::scan::SourceIdentity;
 use dirule_core::{Conflict, ConflictKind, EntryKind, Plan, PlannedEntry};
 use std::collections::HashSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
@@ -17,6 +19,14 @@ mod path;
 use entry::apply_entry;
 
 static NEXT_TEMPORARY_RENAME: AtomicU64 = AtomicU64::new(0);
+static NEXT_TEXT_EDIT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileTextEdit {
+    pub path: PathBuf,
+    pub before: String,
+    pub after: String,
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ApplyReport {
@@ -53,6 +63,10 @@ pub enum ApplyError {
     AtomicRenameUnsupported(PathBuf),
     #[error("source type changed since planning: {0}")]
     ChangedSource(PathBuf),
+    #[error("source contents changed since planning: {0}")]
+    ChangedText(PathBuf),
+    #[error("conflict skipping cannot be combined with language-server reference edits")]
+    ReferenceEditsRequireAbort,
     #[error("target directory changed since planning: {0}")]
     ChangedTarget(PathBuf),
     #[error("journal operation failed: {0}")]
@@ -173,7 +187,7 @@ pub fn apply_with_conflict_policy(
     policy: ConflictPolicy,
 ) -> Result<ApplyReport, ApplyError> {
     let mut recorder = NoopRecorder;
-    apply_recorded(target, plan, snapshot, policy, &mut recorder)
+    apply_recorded(target, plan, snapshot, policy, &[], &mut recorder)
 }
 
 pub fn apply_journaled(
@@ -183,8 +197,20 @@ pub fn apply_journaled(
     policy: ConflictPolicy,
     journal_store: &JournalStore,
 ) -> Result<JournaledApplyReport, ApplyError> {
+    apply_journaled_with_text_edits(target, plan, snapshot, policy, &[], journal_store)
+}
+
+pub fn apply_journaled_with_text_edits(
+    target: &Path,
+    plan: &Plan,
+    snapshot: &ScanResult,
+    policy: ConflictPolicy,
+    text_edits: &[FileTextEdit],
+    journal_store: &JournalStore,
+) -> Result<JournaledApplyReport, ApplyError> {
+    preflight_text_edits(target, plan, snapshot, text_edits)?;
     let mut recorder = JournalRecorder::new(journal_store, target, plan);
-    let result = apply_recorded(target, plan, snapshot, policy, &mut recorder);
+    let result = apply_recorded(target, plan, snapshot, policy, text_edits, &mut recorder);
     let Some(run_id) = recorder.id().map(str::to_owned) else {
         return result.map(|report| JournaledApplyReport {
             report,
@@ -202,6 +228,79 @@ pub fn apply_journaled(
         }
         Err(source) => Err(finish_failed_apply(&mut recorder, run_id, source)),
     }
+}
+
+fn preflight_text_edits(
+    target: &Path,
+    plan: &Plan,
+    snapshot: &ScanResult,
+    text_edits: &[FileTextEdit],
+) -> Result<(), ApplyError> {
+    if text_edits.is_empty() {
+        return Ok(());
+    }
+
+    let canonical_target = target.canonicalize().map_err(|source| ApplyError::Io {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    let target_identity = snapshot
+        .target_identity
+        .as_ref()
+        .ok_or_else(|| ApplyError::ChangedTarget(canonical_target.clone()))?;
+    let target_guard = path::TargetGuard::new(&canonical_target, target_identity);
+
+    for edit in text_edits {
+        path::ensure_relative(&edit.path)?;
+        let current_path = current_text_edit_path(plan, &edit.path);
+        let absolute = canonical_target.join(&current_path);
+        target_guard.ensure_safe(absolute.parent().unwrap_or(&canonical_target))?;
+        let metadata = fs::symlink_metadata(&absolute).map_err(|source| ApplyError::Io {
+            path: absolute.clone(),
+            source,
+        })?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(ApplyError::UnsafePath(current_path));
+        }
+        let mut current = String::new();
+        File::open(&absolute)
+            .and_then(|mut file| file.read_to_string(&mut current))
+            .map_err(|source| ApplyError::Io {
+                path: absolute,
+                source,
+            })?;
+        if current != edit.before {
+            return Err(ApplyError::ChangedText(edit.path.clone()));
+        }
+    }
+    Ok(())
+}
+
+fn current_text_edit_path(plan: &Plan, destination: &Path) -> PathBuf {
+    if let Some(entry) = plan
+        .entries
+        .iter()
+        .find(|entry| entry.destination == destination && entry.source != entry.destination)
+    {
+        return entry.source.clone();
+    }
+
+    plan.entries
+        .iter()
+        .filter(|entry| {
+            entry.kind == EntryKind::Directory
+                && entry.source != entry.destination
+                && destination.starts_with(&entry.destination)
+        })
+        .max_by_key(|entry| entry.destination.components().count())
+        .map(|entry| {
+            entry.source.join(
+                destination
+                    .strip_prefix(&entry.destination)
+                    .unwrap_or(destination),
+            )
+        })
+        .unwrap_or_else(|| destination.to_path_buf())
 }
 
 fn finish_failed_apply(
@@ -281,6 +380,23 @@ pub(crate) trait MutationRecorder {
     fn directory_remove_intent(&mut self, directory: &Path) -> Result<Option<u64>, ApplyError>;
 
     fn directory_removed(&mut self, sequence: Option<u64>) -> Result<(), ApplyError>;
+
+    fn text_edit_intent(
+        &mut self,
+        _path: &Path,
+        _before: &str,
+        _after: &str,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn text_edit_completed(
+        &mut self,
+        _sequence: Option<u64>,
+        _path: &Path,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
 }
 
 struct NoopRecorder;
@@ -324,6 +440,23 @@ impl MutationRecorder for NoopRecorder {
     fn directory_removed(&mut self, _sequence: Option<u64>) -> Result<(), ApplyError> {
         Ok(())
     }
+
+    fn text_edit_intent(
+        &mut self,
+        _path: &Path,
+        _before: &str,
+        _after: &str,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(None)
+    }
+
+    fn text_edit_completed(
+        &mut self,
+        _sequence: Option<u64>,
+        _path: &Path,
+    ) -> Result<(), ApplyError> {
+        Ok(())
+    }
 }
 
 fn apply_recorded(
@@ -331,6 +464,7 @@ fn apply_recorded(
     plan: &Plan,
     snapshot: &ScanResult,
     policy: ConflictPolicy,
+    text_edits: &[FileTextEdit],
     recorder: &mut dyn MutationRecorder,
 ) -> Result<ApplyReport, ApplyError> {
     let target = target.canonicalize().map_err(|source| ApplyError::Io {
@@ -478,7 +612,168 @@ fn apply_recorded(
         }
     }
 
+    let mut applied_edits: Vec<(PathBuf, String)> = Vec::new();
+    for edit in text_edits {
+        if let Err(operation) = apply_text_edit(&target_guard, edit, recorder) {
+            let mut failures = Vec::new();
+            let unresolved_current = matches!(&operation, ApplyError::RollbackFailed { .. });
+            for (relative, before) in applied_edits.iter().rev() {
+                let absolute = target.join(relative);
+                if let Err(error) = replace_file_contents(&absolute, before) {
+                    failures.push(format!("{}: {error}", relative.display()));
+                }
+            }
+            if unresolved_current || !failures.is_empty() {
+                return Err(ApplyError::RollbackFailed {
+                    operation: Box::new(operation),
+                    failures: if failures.is_empty() {
+                        "a reference document could not be restored".into()
+                    } else {
+                        failures.join("; ")
+                    },
+                });
+            }
+            return Err(rollback_after_failure(
+                operation,
+                &target_guard,
+                &progress.moved_operations,
+                &progress.created_directories,
+                recorder,
+            ));
+        }
+        if edit.before != edit.after {
+            applied_edits.push((edit.path.clone(), edit.before.clone()));
+        }
+    }
+
     Ok(progress.report)
+}
+
+fn apply_text_edit(
+    target_guard: &path::TargetGuard<'_>,
+    edit: &FileTextEdit,
+    recorder: &mut dyn MutationRecorder,
+) -> Result<(), ApplyError> {
+    path::ensure_relative(&edit.path)?;
+    let target = target_guard.root();
+    let absolute = target.join(&edit.path);
+    target_guard.ensure_safe(absolute.parent().unwrap_or(target))?;
+    let metadata = fs::symlink_metadata(&absolute).map_err(|source| ApplyError::Io {
+        path: absolute.clone(),
+        source,
+    })?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(ApplyError::UnsafePath(edit.path.clone()));
+    }
+    let mut current = String::new();
+    File::open(&absolute)
+        .and_then(|mut file| file.read_to_string(&mut current))
+        .map_err(|source| ApplyError::Io {
+            path: absolute.clone(),
+            source,
+        })?;
+    if current != edit.before {
+        return Err(ApplyError::ChangedText(edit.path.clone()));
+    }
+    if edit.before == edit.after {
+        return Ok(());
+    }
+    let sequence = recorder.text_edit_intent(&absolute, &edit.before, &edit.after)?;
+    replace_file_contents(&absolute, &edit.after).map_err(|source| ApplyError::Io {
+        path: absolute.clone(),
+        source,
+    })?;
+    if let Err(operation) = recorder.text_edit_completed(sequence, &absolute) {
+        return match replace_file_contents(&absolute, &edit.before) {
+            Ok(()) => Err(operation),
+            Err(error) => Err(ApplyError::RollbackFailed {
+                operation: Box::new(operation),
+                failures: format!("{}: {error}", absolute.display()),
+            }),
+        };
+    }
+    Ok(())
+}
+
+pub(crate) fn replace_file_contents(path: &Path, contents: &str) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "text updates require a regular, non-symlink file",
+        ));
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = loop {
+        let id = NEXT_TEXT_EDIT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(".dirule-edit-{}-{id}", std::process::id()));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&temporary) {
+            Ok(mut file) => {
+                if let Err(error) = file
+                    .write_all(contents.as_bytes())
+                    .and_then(|()| file.sync_all())
+                {
+                    drop(file);
+                    let _ = fs::remove_file(&temporary);
+                    return Err(error);
+                }
+                if let Err(error) = fs::set_permissions(&temporary, metadata.permissions()) {
+                    drop(file);
+                    let _ = fs::remove_file(&temporary);
+                    return Err(error);
+                }
+                drop(file);
+                break temporary;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    };
+    replace_path(&temporary, path)
+}
+
+fn replace_path(source: &Path, destination: &Path) -> std::io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        fs::rename(source, destination)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        let source = source
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let destination = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        // SAFETY: both paths are NUL-terminated UTF-16 buffers valid for this call.
+        let moved = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Default)]

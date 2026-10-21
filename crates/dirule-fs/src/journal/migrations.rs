@@ -10,7 +10,19 @@ struct Migration {
     apply: fn(Vec<Value>) -> Result<Vec<Value>, String>,
 }
 
-const MIGRATIONS: &[Migration] = &[];
+const MIGRATIONS: &[Migration] = &[Migration {
+    from: JournalVersion::new(1, 0),
+    to: JournalVersion::new(1, 1),
+    apply: advance_to_1_1,
+}];
+
+fn advance_to_1_1(mut records: Vec<Value>) -> Result<Vec<Value>, String> {
+    let Some(header) = records.first_mut() else {
+        return Err("journal has no header record".into());
+    };
+    header["version"] = Value::String("1.1".into());
+    Ok(records)
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct JournalVersion {
@@ -19,7 +31,6 @@ struct JournalVersion {
 }
 
 impl JournalVersion {
-    #[cfg(test)]
     const fn new(major: u32, minor: u32) -> Self {
         Self { major, minor }
     }

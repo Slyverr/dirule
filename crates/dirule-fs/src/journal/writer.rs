@@ -173,6 +173,29 @@ impl MutationRecorder for JournalRecorder<'_> {
         }
         Ok(())
     }
+
+    fn text_edit_intent(
+        &mut self,
+        path: &Path,
+        before: &str,
+        after: &str,
+    ) -> Result<Option<u64>, ApplyError> {
+        Ok(Some(self.writer()?.text_edit_intent(path, before, after)?))
+    }
+
+    fn text_edit_completed(
+        &mut self,
+        sequence: Option<u64>,
+        path: &Path,
+    ) -> Result<(), ApplyError> {
+        if let Some(writer) = &mut self.writer {
+            writer.text_edit_completed(
+                sequence.expect("text-edit intent returns a sequence"),
+                path,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 impl JournalWriter {
@@ -207,7 +230,8 @@ impl JournalWriter {
             .iter()
             .filter_map(|record| match record {
                 JournalRecord::MoveIntent { sequence, .. }
-                | JournalRecord::DirectoryIntent { sequence, .. } => Some(*sequence),
+                | JournalRecord::DirectoryIntent { sequence, .. }
+                | JournalRecord::TextEditIntent { sequence, .. } => Some(*sequence),
                 _ => None,
             })
             .max()
@@ -288,6 +312,63 @@ impl JournalWriter {
             &JournalRecord::MoveCompleted {
                 sequence,
                 identity: ObjectIdentity::from_metadata(&metadata, kind, destination),
+            },
+            &self.path,
+        )
+    }
+
+    pub(crate) fn text_edit_intent(
+        &mut self,
+        path: &Path,
+        before: &str,
+        after: &str,
+    ) -> Result<u64, JournalError> {
+        let relative = path
+            .strip_prefix(&self.target)
+            .map_err(|_| JournalError::TargetPath(path.to_path_buf()))?;
+        let sequence = self.sequence();
+        write_record(
+            &mut self.file,
+            &JournalRecord::TextEditIntent {
+                sequence,
+                path: relative.to_path_buf(),
+                before: before.to_owned(),
+                after: after.to_owned(),
+            },
+            &self.path,
+        )?;
+        Ok(sequence)
+    }
+
+    pub(crate) fn text_edit_completed(
+        &mut self,
+        sequence: u64,
+        path: &Path,
+    ) -> Result<(), JournalError> {
+        let metadata = fs::symlink_metadata(path).map_err(|error| JournalError::io(path, error))?;
+        let identity = ObjectIdentity::from_metadata(&metadata, EntryKind::File, path);
+        write_record(
+            &mut self.file,
+            &JournalRecord::TextEditCompleted {
+                sequence,
+                identity: Some(identity),
+            },
+            &self.path,
+        )
+    }
+
+    pub(crate) fn text_edit_undone(
+        &mut self,
+        sequence: u64,
+        path: &Path,
+    ) -> Result<(), JournalError> {
+        let metadata = fs::symlink_metadata(path).map_err(|error| JournalError::io(path, error))?;
+        let identity = ObjectIdentity::from_metadata(&metadata, EntryKind::File, path);
+        write_record(
+            &mut self.file,
+            &JournalRecord::TextEditUndone {
+                sequence,
+                identity: Some(identity),
             },
             &self.path,
         )

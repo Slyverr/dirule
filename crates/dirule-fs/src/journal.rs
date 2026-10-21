@@ -1,6 +1,7 @@
 use crate::apply::ApplyError;
 use dirule_core::{EntryKind, Plan};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ use identity::{EncodedPath, ObjectIdentity};
 pub(crate) use writer::JournalRecorder;
 use writer::{JournalWriter, LockMode, RunLock};
 
-pub const CURRENT_JOURNAL_VERSION: &str = "1.0";
+pub const CURRENT_JOURNAL_VERSION: &str = "1.1";
 
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(0);
 static NEXT_UNDO_RENAME: AtomicU64 = AtomicU64::new(0);
@@ -121,6 +122,9 @@ pub enum UndoAction {
     RemoveDirectoryIfEmpty {
         path: PathBuf,
     },
+    RestoreFileContents {
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -177,6 +181,22 @@ enum JournalRecord {
         sequence: u64,
         path: PathBuf,
         identity: ObjectIdentity,
+    },
+    TextEditIntent {
+        sequence: u64,
+        path: PathBuf,
+        before: String,
+        after: String,
+    },
+    TextEditCompleted {
+        sequence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ObjectIdentity>,
+    },
+    TextEditUndone {
+        sequence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ObjectIdentity>,
     },
     Status {
         status: JournalStatusRecord,
@@ -342,6 +362,7 @@ impl JournalStore {
                     action: DirectoryAction::Remove,
                     ..
                 } => UndoAction::CreateDirectory { path },
+                UndoMutation::TextEdit { path, .. } => UndoAction::RestoreFileContents { path },
             })
             .collect();
 
@@ -382,6 +403,7 @@ impl JournalStore {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let mut text_edit_undo_identities = HashMap::new();
         for mutation in mutations {
             validate_target_identity(run_id, &target, &history.target_identity)?;
             match mutation {
@@ -391,6 +413,10 @@ impl JournalStore {
                     destination,
                     identity,
                 } => {
+                    let identity = text_edit_undo_identities
+                        .get(&destination)
+                        .cloned()
+                        .unwrap_or(identity);
                     let source_path = checked_target_path(&target, &destination)?;
                     let destination_path = checked_target_path(&target, &source)?;
                     let metadata = fs::symlink_metadata(&source_path)
@@ -476,6 +502,40 @@ impl JournalStore {
                         writer.directory_created(sequence, &directory)?;
                     }
                 },
+                UndoMutation::TextEdit {
+                    sequence,
+                    path: relative,
+                    before,
+                    after,
+                } => {
+                    let file = checked_target_path(&target, &relative)?;
+                    let metadata = fs::symlink_metadata(&file)
+                        .map_err(|source| JournalError::io(&file, source))?;
+                    if !metadata.is_file() || metadata.file_type().is_symlink() {
+                        return Err(JournalError::ChangedObject {
+                            run_id: run_id.to_owned(),
+                            path: file,
+                        });
+                    }
+                    let current = fs::read_to_string(&file)
+                        .map_err(|source| JournalError::io(&file, source))?;
+                    if current == after {
+                        crate::apply::replace_file_contents(&file, &before)
+                            .map_err(|source| JournalError::io(&file, source))?;
+                    } else if current != before {
+                        return Err(JournalError::ChangedObject {
+                            run_id: run_id.to_owned(),
+                            path: file,
+                        });
+                    }
+                    let metadata = fs::symlink_metadata(&file)
+                        .map_err(|source| JournalError::io(&file, source))?;
+                    text_edit_undo_identities.insert(
+                        relative.clone(),
+                        ObjectIdentity::from_metadata(&metadata, EntryKind::File, &file),
+                    );
+                    writer.text_edit_undone(sequence, &file)?;
+                }
             }
         }
         writer.status(JournalStatus::Undone)?;
