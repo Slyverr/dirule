@@ -1017,6 +1017,7 @@ fn cancel_inverse_mutations(mutations: Vec<UndoMutation>) -> Vec<UndoMutation> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::path_exists;
     use crate::{
         ConflictPolicy, FileTextEdit, JournalError, JournalStatus, JournalStore,
