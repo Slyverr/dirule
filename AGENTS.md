@@ -34,7 +34,7 @@ When implementing file changes, calculate and validate a complete plan before mu
 
 - Before changing paths in this repository, inspect the proposed moves with `cargo run -p dirule -- plan --format json`.
 - Verify the result with `cargo run -p dirule -- check --format json`; `check` never changes files. Status `0` means the names comply, `1` means the plan contains changes or conflicts, and `2` means Dirule could not evaluate the check. Treat status `2` as an error, not as a pass.
-- Dirule changes paths only. Update code references separately and run the relevant project checks afterward.
+- Configured project rules can use matching language servers to propose code-reference edits with a rename. Review those edits in the plan and run the relevant project checks after applying. Quick sorting and renaming operations remain path-only.
 
 ## Work and validation
 

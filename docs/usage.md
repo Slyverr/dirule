@@ -48,7 +48,7 @@ See the [custom download categories example](../examples/download-categories/REA
 
 Category names and destinations are validated before scanning. Defining a built-in name replaces that category's extensions and destination. See the [quick operations specification](specs/quick-operations.md) for exact matching, recursive behavior, and category rules.
 
-Dirule changes paths only; it does not rewrite file contents or update references in source code.
+Quick sorting and renaming operations change paths only. Project-configured rules can also request source-reference edits from matching configured language servers. Dirule shows those edits in the plan and records them with the rename so undo can restore the previous document text. See the [configuration guide](configuration.md#language-server-reference-updates) for setup and limits.
 
 ## Presets
 

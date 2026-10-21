@@ -2,7 +2,7 @@
 
 Dirule is a local-first CLI for bringing order to file and directory names. Define naming rules once, preview how they affect a project or folder, then apply the changes after review.
 
-It is meant for the cleanup people keep repeating: organizing personal files, keeping project paths consistent, or checking naming conventions in CI. Dirule changes paths, not file contents, so it does not update references inside source code after a rename. Updating code references is a separate problem the project may address later.
+It is meant for the cleanup people keep repeating: organizing personal files, keeping project paths consistent, or checking naming conventions in CI. For configured project rules, matching language servers can update source references when paths are renamed. Dirule shows those edits in the plan and records them so undo can restore the original paths and document text. Quick sorting and renaming operations remain path-only.
 
 ## What it does
 
@@ -10,13 +10,15 @@ It is meant for the cleanup people keep repeating: organizing personal files, ke
 - Build destination paths with templates and built-in case transformations.
 - Sort files by extension or category, with support for user-defined categories.
 - Check naming conventions without changing files.
+- Use configured language servers to preview and apply source-reference updates alongside project-rule renames.
+- Run naming checks in other repositories with the reusable GitHub Actions workflow.
 - Preview changes, detect conflicts, and refuse to overwrite existing paths.
 - Record applied changes so runs can be inspected and safely undone.
 - Save and reuse global presets across projects.
 
 ## Development status
 
-Dirule is under active development. The current release is `v0.4.1`; configuration and command behavior may change before a stable `1.0` release. See the [changelog](https://github.com/Slyverr/dirule/blob/main/CHANGELOG.md) for release contents.
+Dirule is under active development. The current release is `v0.5.0`; configuration and command behavior may change before a stable `1.0` release. See the [changelog](https://github.com/Slyverr/dirule/blob/main/CHANGELOG.md) for release contents.
 
 ## Install
 
@@ -29,7 +31,7 @@ cargo install --locked dirule
 Or install a specific GitHub release:
 
 ```sh
-cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.4.1 dirule
+cargo install --locked --git https://github.com/Slyverr/dirule --tag v0.5.0 dirule
 ```
 
 For local development, run `cargo install --path crates/dirule --locked` from a checkout. NixOS users can install from the flake. Release installers, checksums, platform details, and shell completions are in the [installation guide](https://github.com/Slyverr/dirule/blob/main/docs/installation.md).

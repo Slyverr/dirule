@@ -29,7 +29,7 @@ Use this skill when managing files through Dirule in a user's project or persona
 - For configured rules, run `dirule plan` against the exact target and selected config or preset. For one-off sorting or renaming, run the operation without `--apply` first; quick operations preview by default.
 - Review every proposed source and destination. Stop and report conflicts or unexpected moves; do not bypass them to force an apply.
 - Apply only when the user has asked for the filesystem changes. `dirule apply` previews again and normally asks for confirmation. Do not use `--yes` unless the user explicitly requested non-interactive application after the plan has been reviewed.
-- After applying configured rules, run `dirule check`; after a quick operation, rerun that operation as a preview and confirm no moves remain. Report the result and any run ID. Dirule changes paths, not file contents or code references; warn the user when a rename may require reference updates. Do not run `dirule undo` unless requested or needed to recover from a failed operation the user authorized.
+- After applying configured rules, run `dirule check`; after a quick operation, rerun that operation as a preview and confirm no moves remain. Report the result and any run ID. For configured project-rule renames, review language-server edits in the plan; coverage depends on the configured server and its support. Quick sorting and renaming operations remain path-only. Do not run `dirule undo` unless requested or needed to recover from a failed operation the user authorized.
 
 ## Use model-assisted tasks
 
