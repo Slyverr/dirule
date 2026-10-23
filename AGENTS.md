@@ -16,6 +16,11 @@ Dirule is a Rust workspace for a local-first filesystem rules CLI. Use the [READ
 - Keep the skill aligned with implemented CLI behavior. Source and tests are authoritative; user documentation explains supported syntax and workflows. Link to those docs instead of maintaining a second full configuration reference in the skill.
 - When a change affects public commands, configuration or category formats, preset selection, ignore behavior, or filesystem safety, review the skill and update any workflow that changed. Verify command examples against the current CLI and docs.
 
+## Documentation maintenance
+
+- For user-visible behavior, command, configuration, or release-workflow changes, identify the affected canonical docs in `README.md`, `docs/`, and `examples/` and update them with the change. Review relevant specs when the documented contract changes. Keep examples accurate and avoid duplicating full references across files.
+- Keep each fact in its canonical document and link to it from the README or agent skill where useful. Code and tests remain authoritative for implemented behavior; specs describe intended contracts.
+
 ## Workspace boundaries
 
 - `crates/dirule`: CLI parsing, output, and command orchestration.
