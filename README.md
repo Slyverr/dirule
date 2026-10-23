@@ -4,6 +4,12 @@ Dirule is a local-first CLI for bringing order to file and directory names. Defi
 
 It is meant for the cleanup people keep repeating: organizing personal files, keeping project paths consistent, or checking naming conventions in CI. For configured project rules, matching language servers can update source references when paths are renamed. Dirule shows those edits in the plan and records them so undo can restore the original paths and document text. Quick sorting and renaming operations remain path-only.
 
+## See Dirule in action
+
+![Dirule previews a Rust module rename and rust-analyzer reference edits](docs/assets/showcase/dirule-lsp-preview.png)
+
+The [short showcase video](docs/assets/showcase/dirule-showcase.mp4) and [screenshots](docs/assets/showcase/) cover LSP reference updates, naming checks, and category sorting.
+
 ## What it does
 
 - Match paths with ordered glob rules and named captures.
