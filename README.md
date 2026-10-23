@@ -6,9 +6,9 @@ It is meant for the cleanup people keep repeating: organizing personal files, ke
 
 ## See Dirule in action
 
-![Dirule previews a Rust module rename and rust-analyzer reference edits](docs/assets/showcase/dirule-lsp-preview.png)
+![Animated Dirule showcase: previewing LSP reference updates, checking naming rules, and sorting files](docs/assets/showcase/dirule-showcase.gif)
 
-The [short showcase video](docs/assets/showcase/dirule-showcase.mp4) and [screenshots](docs/assets/showcase/) cover LSP reference updates, naming checks, and category sorting.
+The animation plays directly in the README. Watch the [full-quality MP4](docs/assets/showcase/dirule-showcase.mp4) or browse the [screenshots](docs/assets/showcase/) for individual examples.
 
 ## What it does
 
