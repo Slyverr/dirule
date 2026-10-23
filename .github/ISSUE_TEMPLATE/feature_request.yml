@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement to Dirule
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the task or situation where this would help.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Dirule to do?
+      description: Describe the behavior you have in mind. Alternatives are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Examples, constraints, or related tools can go here.
+    validations:
+      required: false

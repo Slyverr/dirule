@@ -1,0 +1,47 @@
+name: Bug report
+description: Report unexpected Dirule behavior
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Please remove credentials, private paths, and sensitive file names from
+        any configuration or output before sharing it.
+  - type: input
+    id: version
+    attributes:
+      label: Dirule version
+      description: Get it with `dirule --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the command you ran and the output, if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: A small example or sanitized config can help reproduce the issue.
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: false
